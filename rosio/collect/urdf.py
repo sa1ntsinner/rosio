@@ -1259,6 +1259,22 @@ def _file_entity(ctx: CollectContext, path: str, found: UrdfModel) -> str:
     )
     if missing:
         attrs["missing_meshes"] = missing
+    # A package mesh looked for and not found, split by whether the package source holds it.
+    absent: dict[str, list[str]] = {"meshes_not_installed": [], "meshes_absent": []}
+    for mesh in found.meshes:
+        if not mesh.path or mesh.exists:
+            continue
+        spelled = _spelled(ws, mesh.filename)[0]
+        if not spelled.startswith("package://"):
+            continue
+        if ws.src_twin(mesh.path):
+            absent["meshes_not_installed"].append(spelled)
+            owner = ws.packages.get(spelled[len("package://") :].split("/", 1)[0])
+            if owner is not None:
+                builder.node(ids.build_pkg(owner.name), attrs={"build_type": owner.build_type})
+        else:
+            absent["meshes_absent"].append(spelled)
+    attrs.update({key: sorted(rows) for key, rows in absent.items() if rows})
     builder.node(file_id, attrs=attrs)
     package = ws.package_of(path)
     if package:

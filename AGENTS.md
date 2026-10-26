@@ -666,7 +666,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.14`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.15`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -744,6 +744,10 @@ What was added, in the order it arrived:
   read is named in `unreadable`. The evidence row of a declared link now carries the line of
   its `<link>` element, which is advisory and outside compared data.
 
+* the `model.mesh_missing` finding id and the model file attributes `meshes_not_installed`
+  and `meshes_absent`, added in `1.15`: the `package://` meshes the urdf collector looked for
+  and did not find, split by whether the package source holds the same package relative path.
+
 One key went in `1.6` without a major bump, and it is named here rather than left for a reader
 to find. The declared `node` fact carried `conditions`, the conditions of the launch site that
 started the node. A node started from two sites with different conditions (nav2's
@@ -765,7 +769,7 @@ discriminator, so a failure inside one node is one finding per node rather than 
 message, which had folded two nodes failing on one missing package into a single finding
 that named neither. A row without `kept` keeps the id it had.
 
-A reader pinned to `1.0` still loads a `1.14` file: `Atlas.from_json` compares the major
+A reader pinned to `1.0` still loads a `1.15` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -810,7 +814,7 @@ time.backward               time.epoch_offset             time.topic_skew
 time.frozen                 time.zero                     time.gap
 time.drift
 rmw.mixed                   zenoh.router_unreachable      qos.incompatible
-param.sim_time_mixed        launch.file_not_installed
+param.sim_time_mixed        launch.file_not_installed     model.mesh_missing
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -821,6 +825,16 @@ evidence, and `extract.input_refused` leaves that reason to this rule. The fix n
 `install(DIRECTORY ...)` line of `CMakeLists.txt` or the `data_files` entry of `setup.py`, by
 the package's build type. A path absent from the source as well is a wrong path and stays a
 refusal, and a package with no install tree is not built, so neither fires it.
+
+`model.mesh_missing` fires once per robot model and mesh, never once per link, for a
+`package://` mesh the model names and the workspace does not hold, and only for a model some
+profile loads, which is a launch entity `file_reads` row with role `robot_model` at a live
+site. rviz and gazebo draw nothing for those links and say so only in a log. It is `error`
+when the package source holds the mesh at the same package relative path and the install tree
+does not, read the way `launch.file_not_installed` reads it, and the fix names the same
+install line by build type. It is `warn` when no tree holds the mesh, a wrong path or a file
+never committed, and the fix names the filename in the model. A model no profile loads is not
+reported, and a mesh that is not a package name stays the blind spot the urdf collector left.
 
 `param.sim_time_mixed` is `warn`. It fires once per profile whose nodes state both values of
 `use_sim_time` in their winning candidates, names the minority side and the line that sets

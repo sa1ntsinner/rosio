@@ -773,3 +773,41 @@ def test_the_run_id_does_not_follow_where_the_roots_sort(tmp_path: Path) -> None
         )
         runs.append(sorted(key for key in builder.build().entities if key.startswith("run:")))
     assert runs[0] == runs[1]
+
+
+def test_a_missing_package_mesh_says_whether_the_source_holds_it(tmp_path: Path) -> None:
+    """The source holding a mesh the install tree lacks is a missing install line, and no tree
+    holding it is a wrong name, so `model.mesh_missing` grades the two apart."""
+    install = tmp_path / "ws" / "install"
+    share = install / "share" / "bot"
+    (share / "urdf").mkdir(parents=True)
+    (share / "package.xml").write_text(
+        "<package format='3'><name>bot</name></package>", encoding="utf-8"
+    )
+    (share / "urdf" / "bot.urdf").write_text(
+        '<robot name="bot"><link name="base">'
+        '<visual><geometry><mesh filename="package://bot/meshes/body.stl"/></geometry></visual>'
+        '<visual><geometry><mesh filename="package://bot/meshes/gone.stl"/></geometry></visual>'
+        "</link></robot>",
+        encoding="utf-8",
+    )
+    src = tmp_path / "ws" / "src" / "bot"
+    (src / "meshes").mkdir(parents=True)
+    (src / "package.xml").write_text(
+        "<package format='3'><name>bot</name><export><build_type>ament_python</build_type>"
+        "</export></package>",
+        encoding="utf-8",
+    )
+    (src / "meshes" / "body.stl").write_text("solid body\nendsolid body\n", encoding="utf-8")
+    roots = (RootSpec("src", str(src.parent)), RootSpec("install", str(install)))
+    builder = model.AtlasBuilder()
+    urdf_collect.UrdfCollector().collect(
+        CollectContext(
+            ws=Workspace.discover(roots), cfg=Config(roots=roots, profiles=()), builder=builder
+        )
+    )
+    atlas = builder.build()
+    attrs = atlas.entities[ids.build_file("bot", "urdf/bot.urdf")].attrs
+    assert attrs["meshes_not_installed"] == ["package://bot/meshes/body.stl"]
+    assert attrs["meshes_absent"] == ["package://bot/meshes/gone.stl"]
+    assert atlas.entities[ids.build_pkg("bot")].attrs["build_type"] == "ament_python"

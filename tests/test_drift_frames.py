@@ -1536,6 +1536,7 @@ def test_every_rule_id_is_committed_and_implemented_once():
         "extract.pass_incomplete",
         "extract.input_refused",
         "launch.file_not_installed",
+        "model.mesh_missing",
     }
     assert set(frame_rules.RULES) | set(build_rules.RULES) == committed
     assert not set(frame_rules.RULES) & set(build_rules.RULES)
@@ -1925,3 +1926,79 @@ def test_launch_file_not_installed_keeps_its_id_across_two_runs():
     first = _ids(build_rules.launch_file_not_installed(_not_installed_atlas()))
     second = _ids(build_rules.launch_file_not_installed(_not_installed_atlas()))
     assert first == second and len(first) == 1
+
+
+# ---------------------------------------------------------------------------
+# model.mesh_missing
+
+BODY = "package://nx_description/meshes/body.stl"
+WHEEL = "package://nx_description/meshes/wheel.stl"
+
+
+def _mesh_atlas(*, loaded: bool = True, installed: bool = False, build_type: str = "ament_cmake"):
+    builder = _builder()
+    builder.node(ids.build_pkg("nx_description"), attrs={"build_type": build_type})
+    robot = ids.build_file("nx_description", "urdf/robot.urdf")
+    attrs = {"missing_meshes": [WHEEL] if installed else sorted([BODY, WHEEL])}
+    attrs["meshes_absent"] = [WHEEL]
+    if not installed:
+        attrs["meshes_not_installed"] = [BODY]
+    builder.node(robot, attrs=attrs)
+    for frame, name in (("base_link", BODY), ("left_wheel", WHEEL), ("right_wheel", WHEEL)):
+        rows = {"visuals": [{"geometry": {"type": "mesh", "filename": name}}], "collisions": []}
+        builder.node(ids.build_frame(frame), attrs={"urdf_geometry": {robot: rows}})
+    launch = ids.build_file("nx_bringup", "launch/robot.launch.py")
+    builder.node(launch)
+    site = ids.build_launchent(
+        "nx_bringup", "launch/robot.launch.py", [ids.LaunchStep("Node", "robot_state_publisher")]
+    )
+    reads = [{"file": robot if loaded else launch, "role": "robot_model"}]
+    for profile in (NAV, SIM):
+        builder.fact(
+            site,
+            DECLARED,
+            profile=profile,
+            values={"file_reads": reads, "gates": []},
+            confidence=CERTAIN,
+            evidence=[Source(file=launch, locator="Node(robot_state_publisher)", line_hint=9)],
+        )
+    return builder.build()
+
+
+def test_model_mesh_missing_reports_an_uninstalled_mesh_as_an_error_and_a_wrong_path_as_a_warning():
+    found = build_rules.model_mesh_missing(_mesh_atlas())
+    by_mesh = {next(m for m in (BODY, WHEEL) if m in item.say): item for item in found}
+    assert len(found) == 2 and set(by_mesh) == {BODY, WHEEL}
+    body, wheel = by_mesh[BODY], by_mesh[WHEEL]
+    assert {item.subject for item in found} == {"file:nx_description|urdf/robot.urdf"}
+    assert body.severity == "error"
+    assert "install(DIRECTORY meshes DESTINATION share/${PROJECT_NAME})" in body.fix
+    assert "nx_description/CMakeLists.txt" in body.say
+    assert "nx_description/urdf/robot.urdf" in body.say and "link base_link" in body.say
+    assert wheel.severity == "warn"
+    assert "links left_wheel, right_wheel" in wheel.say
+    assert "correct the mesh filename" in wheel.fix
+    assert body.profiles == [NAV, SIM] and "profiles nx_navigation, nx_sim" in body.say
+    assert [row.file for row in body.where] == [
+        "file:nx_bringup|launch/robot.launch.py",
+        "file:nx_description|urdf/robot.urdf",
+    ]
+    assert all(":~" not in item.say for item in found)
+
+
+def test_model_mesh_missing_tells_a_python_package_to_edit_setup_py():
+    found = build_rules.model_mesh_missing(_mesh_atlas(build_type="ament_python"))
+    error = next(item for item in found if item.severity == "error")
+    assert "data_files in nx_description/setup.py" in error.fix
+
+
+def test_model_mesh_missing_is_silent_on_an_installed_mesh_and_on_a_model_nobody_loads():
+    found = build_rules.model_mesh_missing(_mesh_atlas(installed=True))
+    assert [item.severity for item in found] == ["warn"]
+    assert build_rules.model_mesh_missing(_mesh_atlas(loaded=False)) == []
+
+
+def test_model_mesh_missing_keeps_its_ids_across_two_runs():
+    first = _ids(build_rules.model_mesh_missing(_mesh_atlas()))
+    second = _ids(build_rules.model_mesh_missing(_mesh_atlas()))
+    assert first == second and len(first) == 2

@@ -1,4 +1,4 @@
-"""Build, launch, budget and extraction completeness rules.
+"""Build, launch, robot model mesh, budget and extraction completeness rules.
 
 Every function here is a pure function of the joined atlas. Nothing reads a file, nothing
 re extracts and nothing mutates an entity. Each rule binds to its committed id through
@@ -262,6 +262,25 @@ def _where(row: _Row) -> Source:
 RULE_NOT_INSTALLED = "launch.file_not_installed"
 
 
+def _install_fix(atlas: Atlas, package: str, relpath: str) -> str:
+    """The install line a package's build file lacks for one package relative path."""
+    pkg = atlas.entities.get(ids.build_pkg(package))
+    top, _, rest = relpath.partition("/")
+    if pkg is not None and pkg.attrs.get("build_type") == "ament_python":
+        line = (
+            f"(os.path.join('share', package_name, '{top}'), glob('{top}/*'))"
+            if rest
+            else f"('share/' + package_name, ['{top}'])"
+        )
+        return f"add {line} to data_files in {package}/setup.py, then build again"
+    line = (
+        f"install(DIRECTORY {top} DESTINATION share/${{PROJECT_NAME}})"
+        if rest
+        else f"install(FILES {top} DESTINATION share/${{PROJECT_NAME}})"
+    )
+    return f"add {line} to {package}/CMakeLists.txt, then build again"
+
+
 @rules.register(RULE_NOT_INSTALLED)
 def launch_file_not_installed(atlas: Atlas) -> list[Finding]:
     """A file a launch file reads from the package share that the build never installed.
@@ -276,25 +295,7 @@ def launch_file_not_installed(atlas: Atlas) -> list[Finding]:
             continue
         parsed = ids.parse_file(node.id)
         label = rules.path_of(node.id)
-        package = atlas.entities.get(ids.build_pkg(parsed.package))
-        python = package is not None and package.attrs.get("build_type") == "ament_python"
-        top, _, rest = parsed.relpath.partition("/")
-        if python:
-            build_file = f"{parsed.package}/setup.py"
-            line = (
-                f"(os.path.join('share', package_name, '{top}'), glob('{top}/*'))"
-                if rest
-                else f"('share/' + package_name, ['{top}'])"
-            )
-            fix = f"add {line} to data_files in {build_file}, then build again"
-        else:
-            build_file = f"{parsed.package}/CMakeLists.txt"
-            line = (
-                f"install(DIRECTORY {top} DESTINATION share/${{PROJECT_NAME}})"
-                if rest
-                else f"install(FILES {top} DESTINATION share/${{PROJECT_NAME}})"
-            )
-            fix = f"add {line} to {build_file}, then build again"
+        fix = _install_fix(atlas, parsed.package, parsed.relpath)
         readers = sorted(
             {
                 row
@@ -338,6 +339,136 @@ def launch_file_not_installed(atlas: Atlas) -> list[Finding]:
                 where=[Source(file=node.id, root=model.Root.SRC.value), *readers],
             )
         )
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# model.mesh_missing
+
+
+RULE_MESH_MISSING = "model.mesh_missing"
+
+_PACKAGE_URI = "package://"
+
+
+def _loaded_models(atlas: Atlas) -> dict[str, dict[str, list[Source]]]:
+    """Model file id to profile to the launch sites that read it as the robot model."""
+    out: dict[str, dict[str, list[Source]]] = {}
+    for site in atlas.by_kind(model.NodeKind.LAUNCHENT.value):
+        for fact in site.facts:
+            if fact.layer != model.Layer.DECLARED.value or not rules.usable(fact):
+                continue
+            if not rules.site_live(site, fact.profile):
+                continue
+            for read in fact.values.get("file_reads") or ():
+                if read.get("role") == "robot_model":
+                    rows = out.setdefault(read["file"], {}).setdefault(fact.profile, [])
+                    rows.extend(fact.evidence[:1])
+    return out
+
+
+def _mesh_links(atlas: Atlas, model_id: str) -> dict[str, list[str]]:
+    """Mesh name as written to the links of one model whose geometry names it."""
+    out: dict[str, set[str]] = {}
+    for frame in atlas.by_kind(model.NodeKind.FRAME.value):
+        shapes = (frame.attrs.get("urdf_geometry") or {}).get(model_id) or {}
+        for rows in shapes.values():
+            for row in rows:
+                name = (row.get("geometry") or {}).get("filename")
+                if name:
+                    out.setdefault(name, set()).add(ids.parse_frame(frame.id))
+    return {key: sorted(value) for key, value in out.items()}
+
+
+@rules.register(RULE_MESH_MISSING)
+def model_mesh_missing(atlas: Atlas) -> list[Finding]:
+    """A robot model some profile loads names a package mesh that is not there.
+
+    rviz and gazebo draw nothing for the links that use it and say so only in a log line.
+    When the package source holds the mesh the build file is missing one install line and
+    the finding is an error, read the way `launch.file_not_installed` reads it. When no tree
+    holds it the path is wrong or the file was never committed, and rosio cannot tell which,
+    so it is a warning. One finding per model and
+    mesh, never per link. A mesh that is not a package name stays the blind spot the urdf
+    collector left.
+    """
+    loaded = _loaded_models(atlas)
+    findings: list[Finding] = []
+    for model_id in sorted(loaded):
+        node = atlas.entities.get(model_id)
+        if node is None or node.kind != model.NodeKind.FILE.value:
+            continue
+        cases = [
+            (name, uninstalled)
+            for key, uninstalled in (("meshes_not_installed", True), ("meshes_absent", False))
+            for name in node.attrs.get(key) or ()
+            if name.startswith(_PACKAGE_URI)
+        ]
+        if not cases:
+            continue
+        label = rules.path_of(model_id)
+        profiles = sorted(loaded[model_id])
+        readers = sorted(
+            {row for rows in loaded[model_id].values() for row in rows},
+            key=lambda row: (row.file, row.locator, row.line_hint or 0, row.root),
+        )
+        named = ("profiles " if len(profiles) > 1 else "profile ") + ", ".join(
+            rules.slug_of(item) for item in profiles
+        )
+        links = _mesh_links(atlas, model_id)
+        for name, uninstalled in sorted(cases):
+            package, _, relpath = name[len(_PACKAGE_URI) :].partition("/")
+            used_by = links.get(name) or []
+            drawn = (
+                f"links {', '.join(used_by)} draw"
+                if len(used_by) > 1
+                else f"link {used_by[0]} draws"
+                if used_by
+                else "the links that use it draw"
+            )
+            if uninstalled:
+                fix = _install_fix(atlas, package, relpath)
+                title = f"{label} names {name}, which the source holds and the build never installs"
+                why = (
+                    f"the package source of {package} holds {relpath} and its install tree "
+                    "does not, so the build file never installs it"
+                )
+                say = (
+                    f"{label} names the mesh {name}, which {package} never installs, so the "
+                    f"{drawn} nothing in {named}; {fix}."
+                )
+                variant = ""
+            else:
+                fix = (
+                    f"correct the mesh filename {name} in {label} to a file {package} holds, "
+                    f"or commit the mesh at {package}/{relpath}"
+                )
+                title = f"{label} names {name}, which no tree holds"
+                why = f"neither the source nor the install tree of {package} holds {relpath}"
+                say = (
+                    f"{label} names the mesh {name}, which no tree holds, so the {drawn} "
+                    f"nothing in {named}; correct the filename in {label} or commit "
+                    "the mesh."
+                )
+                variant = "absent"
+            findings.append(
+                Finding(
+                    rule=RULE_MESH_MISSING,
+                    severity=rules.severity_of(RULE_MESH_MISSING, variant),
+                    subject=model_id,
+                    title=title,
+                    detail=(
+                        f"{named} loads {label} as the robot model, and {why}. rviz and "
+                        f"gazebo then show nothing for the {drawn.rsplit(' ', 1)[0]}."
+                    ),
+                    fix=fix,
+                    say=say,
+                    discriminator=_disc(name),
+                    layers=[model.Layer.DECLARED.value],
+                    profiles=profiles,
+                    where=[Source(file=model_id, root=model.Root.SRC.value), *readers],
+                )
+            )
     return findings
 
 
@@ -748,6 +879,7 @@ RULES: dict[str, Callable[[Atlas], list[Finding]]] = {
     "launch.file_not_installed": launch_file_not_installed,
     "launch.raised": launch_raised,
     "launch.unloadable": launch_unloadable,
+    "model.mesh_missing": model_mesh_missing,
     "resolution.below_budget": resolution_below_budget,
 }
 
@@ -771,6 +903,7 @@ __all__ = [
     "RULES",
     "RULE_IDS",
     "RULE_INCOMPLETE",
+    "RULE_MESH_MISSING",
     "RULE_NOT_INSTALLED",
     "RULE_REFUSED",
     "UNKNOWN_COST",
@@ -781,5 +914,6 @@ __all__ = [
     "launch_file_not_installed",
     "launch_raised",
     "launch_unloadable",
+    "model_mesh_missing",
     "resolution_below_budget",
 ]

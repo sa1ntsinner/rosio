@@ -69,6 +69,7 @@ COMMITTED = (
     "zenoh.router_unreachable",
     "param.sim_time_mixed",
     "launch.file_not_installed",
+    "model.mesh_missing",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -126,6 +127,7 @@ SEVERITY: dict[str, str] = {
     "zenoh.router_unreachable": ERROR,
     "param.sim_time_mixed": WARN,
     "launch.file_not_installed": ERROR,
+    "model.mesh_missing": ERROR,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {
@@ -135,6 +137,7 @@ VARIANT_SEVERITY: dict[str, dict[str, str]] = {
     "strong": {"time.topic_skew": ERROR, "time.drift": ERROR},
     "looked_up": {"frame.not_in_urdf": WARN},
     "shared": {"param.orphan_block": INFO},
+    "absent": {"model.mesh_missing": WARN},
 }
 """`self_contradiction`: one file that sets one parameter twice with two values is a
 stronger claim than one file losing to another file. `unproven`: a profile that holds a
@@ -148,7 +151,9 @@ epoch offset to warn, and `strong` raises measured topic skew or clock drift to 
 `looked_up` raises a frame the code looks up by name to warn: a lookup of a frame nothing
 states fails on every call. `shared` lowers an orphan block to info when another profile
 launches a node that reads it from the same file, which is how nav2 shares one parameters
-file between its launch files."""
+file between its launch files. `absent` lowers a missing mesh to warn when no tree holds it,
+because then the path is wrong or the file was never committed and rosio cannot say which,
+while a mesh only the source holds is a missing install line."""
 
 FAMILIES = (
     "rosio.drift.build",
