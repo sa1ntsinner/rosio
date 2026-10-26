@@ -161,7 +161,8 @@ function draw(svg: SVGSVGElement, robot: RobotModel, poses: Map<string, Pose>): 
   for (const solid of solids) {
     if (!solid.lines.length) continue;
     const group = s("g", { class: `shape${solid.link === selected ? " near" : ""}` });
-    if (solid.rgba) group.setAttribute("style", `--tint: ${rgb(solid.rgba)}`);
+    // the panel CSP refuses style attributes, a property set from script is allowed
+    if (solid.rgba) group.style.setProperty("--tint", rgb(solid.rgba));
     let depth = 0;
     let count = 0;
     for (const line of solid.lines) {
@@ -412,7 +413,7 @@ function inspector(robot: RobotModel, poses: Map<string, Pose>): HTMLElement {
   }
   const pose = poses.get(link.id);
   if (pose && parent) {
-    panel.append(h("p", { class: "muted small" }, `From ${plain(robot.roots[0] ?? "")}: ${numbers(pose.t)} m`));
+    panel.append(h("p", { class: "muted small" }, `From ${plain(rootOf(robot, link.id))}: ${numbers(pose.t)} m`));
   }
 
   for (const [title, list] of [["Visual", link.visuals], ["Collision", link.collisions]] as const) {
@@ -474,6 +475,16 @@ function describe(shape: UrdfShape): string {
   const material = shape.material?.name ? `, ${shape.material.name}` : "";
   const unread = shape.unreadable?.length ? `, unreadable ${shape.unreadable.join(", ")}` : "";
   return `${shape.name ? `${shape.name}: ` : ""}${what}${at}${material}${unread}`;
+}
+
+function rootOf(robot: RobotModel, frame: string): string {
+  const seen = new Set<string>();
+  let at = frame;
+  for (let joint = robot.joints.find((item) => item.child === at); joint && !seen.has(at); joint = robot.joints.find((item) => item.child === at)) {
+    seen.add(at);
+    at = joint.parent;
+  }
+  return at;
 }
 
 function jointBlock(joint: Joint, parentLabel: string, parentId: string): HTMLElement {

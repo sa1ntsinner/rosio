@@ -47,7 +47,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
       params.refresh(),
       panel.update(),
       graph.update(),
-      robot.update(),
+      robot.update(true),
     ]);
     const summary = await server.summary();
     if (!summary?.loaded) {

@@ -1,5 +1,6 @@
 // The robot model: one webview that draws the links of a URDF model where its joints put them.
 import * as vscode from "vscode";
+import type { MeshData } from "./protocol";
 import type { ToRobot, ToRobotHost } from "./robotMessages";
 import type { Server } from "./server";
 
@@ -8,6 +9,8 @@ export class RobotPanel implements vscode.Disposable {
   private ready = false;
   private profile: string | undefined;
   private model: string | undefined;
+  /** Mesh answers by file id, kept until the atlas is reloaded. */
+  private meshes = new Map<string, MeshData>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -19,7 +22,9 @@ export class RobotPanel implements vscode.Disposable {
     await this.update();
   }
 
-  async update(): Promise<void> {
+  /** `reloaded` is true when the atlas changed, which is when a mesh on disk may have changed too. */
+  async update(reloaded = false): Promise<void> {
+    if (reloaded) this.meshes.clear();
     if (!this.panel || !this.ready) return;
     const profiles = (await this.server.summary())?.profiles ?? [];
     if (this.profile && !profiles.includes(this.profile)) this.profile = undefined;
@@ -43,7 +48,10 @@ export class RobotPanel implements vscode.Disposable {
         if (shape.geometry?.file) files.add(shape.geometry.file);
       }
     }
-    const meshes = Object.fromEntries(await Promise.all([...files].sort().map(async (file) => [file, await this.server.mesh(file)] as const)));
+    for (const file of [...files].sort()) {
+      if (!this.meshes.has(file)) this.meshes.set(file, await this.server.mesh(file));
+    }
+    const meshes = Object.fromEntries([...files].sort().map((file) => [file, this.meshes.get(file)!]));
     const message: ToRobot = { type: "robot", robot, profiles, meshes };
     await this.panel.webview.postMessage(message);
   }
