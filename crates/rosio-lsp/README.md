@@ -56,6 +56,7 @@ refresh hints when the client supports `workspace/inlayHint/refresh`.
 | `rosio/paramTree` | `{profile?}` | Parameters by owning node, with the winning value and the candidate chain |
 | `rosio/graph` | `{profile?, focus?, depth?}` | Nodes, topics, services and actions with the endpoint edges between them |
 | `rosio/robotModel` | `{model?, profile?}` | One urdf or xacro model: links, joints, roots and the TF broadcasts into it |
+| `rosio/unresolved` | `{}` | `[{id, want, expr, reason, owner, resolvableBy, locations: [{uri, line}]}]` in atlas order, `owner` as the owning entity's label, or its id when no such entity exists |
 | `rosio/mesh` | `{file}` | `{file, format, triangles, truncated, triangleCount, bounds}` or `{file, format, refused}` |
 
 `minSeverity` is `error`, `warn` or `info` (default `info`), and includes all more severe

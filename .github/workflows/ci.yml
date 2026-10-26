@@ -129,6 +129,7 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
+      - run: npm test
       - run: npm run build
       - uses: dtolnay/rust-toolchain@stable
       - name: language server for the end to end test

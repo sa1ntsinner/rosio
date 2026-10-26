@@ -23,9 +23,13 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           node_version=$(node -p 'require("./editors/vscode/package.json").version')
           python_version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-          echo "tag $tag, extension $node_version, python $python_version"
+          server_version=$(python3 -c 'import tomllib; print(tomllib.load(open("crates/rosio-lsp/Cargo.toml", "rb"))["package"]["version"])')
+          zed_version=$(python3 -c 'import tomllib; print(tomllib.load(open("editors/zed/extension.toml", "rb"))["version"])')
+          echo "tag $tag, extension $node_version, python $python_version, server $server_version, zed $zed_version"
           test "$tag" = "$node_version"
           test "$tag" = "$python_version"
+          test "$tag" = "$server_version"
+          test "$tag" = "$zed_version"
 
   server:
     name: rosio-lsp ${{ matrix.target }}

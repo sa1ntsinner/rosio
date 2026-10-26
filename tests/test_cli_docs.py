@@ -144,3 +144,45 @@ def test_the_published_schema_version_matches_the_model():
     text = doc("AGENTS.md")
     published = re.search(r"The current version is \*\*`([\d.]+)`\*\*", text).group(1)
     assert published == model.SCHEMA_VERSION
+
+
+def _options(parser: argparse.ArgumentParser) -> set[str]:
+    found = set()
+    for action in parser._actions:
+        found |= set(action.option_strings)
+        if isinstance(action, argparse._SubParsersAction):
+            for child in action.choices.values():
+                found |= _options(child)
+    return found
+
+
+def test_every_flag_the_readme_names_exists_on_its_verb():
+    parser = cli.build_parser()
+    verbs = next(
+        action.choices
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    shared = _options(parser) - {o for verb in verbs.values() for o in _options(verb)}
+    unknown = []
+    for match in re.finditer(r"rosio ([a-z]+)\b([^\n`]*)", doc("README.md")):
+        verb, rest = match.group(1), match.group(2).split("#", 1)[0]
+        if verb not in verbs:
+            continue
+        named = set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", rest))
+        unknown += [f"{verb} {flag}" for flag in named - _options(verbs[verb]) - shared]
+    assert unknown == []
+
+
+# ---------------------------------------------------------------------------
+# the language server
+
+
+def test_the_server_readme_documents_every_custom_method():
+    source = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (ROOT / "crates" / "rosio-lsp" / "src").rglob("*.rs")
+    )
+    methods = set(re.findall(r'"(rosio/[A-Za-z]+|rosio-lsp\.[A-Za-z]+)"', source))
+    readme = doc("crates/rosio-lsp/README.md")
+    assert sorted(m for m in methods if f"`{m}`" not in readme) == []

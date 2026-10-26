@@ -1,7 +1,7 @@
 <h1>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="site/assets/logo-dark.png">
-    <img alt="rosio" src="site/assets/logo-light.png" width="200">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sa1ntsinner/rosio/main/site/assets/logo-dark.png">
+    <img alt="rosio" src="https://raw.githubusercontent.com/sa1ntsinner/rosio/main/site/assets/logo-light.png" width="200">
   </picture>
 </h1>
 
@@ -104,6 +104,14 @@ The `--system-site-packages` flag is not optional. Walking a launch tree imports
 package, and part of its dependency chain is installed as operating system packages that a plain
 virtual environment hides. Without it rosio refuses to walk anything and says so.
 
+`init` also takes an install tree, such as `/opt/ros/jazzy` or a built workspace's `install/`.
+An installed distribution holds a great many launch files, so name the packages you want:
+
+```bash
+rosio init /opt/ros/jazzy --package nav2_bringup
+rosio extract ~/ros2_ws --install-tree ~/builds/ros2_ws/install   # a build kept apart from the sources
+```
+
 `extract` writes the model, `render` writes the three things you read:
 
 ```
@@ -123,17 +131,21 @@ line they cite. Hover over a parameter, a topic or a frame to see every layer th
 Go to definition jumps from a topic name in C++ to the remap that renames it. The atlas panel
 answers what the system is and what to look at first.
 
-![The atlas panel on nav2_bringup](docs/media/atlas-panel.jpg)
+![The atlas panel on nav2_bringup](https://raw.githubusercontent.com/sa1ntsinner/rosio/main/docs/media/atlas-panel.jpg)
 
 Every node gets a card with its parameters and the value each one ends up with. Every parameter
 gets the chain that decided it, winner first, each value one click from the line that set it.
 
-![A node card](docs/media/node-card.jpg)
+![A node card](https://raw.githubusercontent.com/sa1ntsinner/rosio/main/docs/media/node-card.jpg)
 
 Above every publisher and subscription in C++ and Python, a code lens names the nodes on the
 other side and says when their QoS keeps them apart. The Unresolved view lists what the atlas
 could not work out, each with the line that asked for it, so a quiet Problems view is never
 mistaken for a clean system. With `rosio.extractOnSave` on, findings follow a save.
+
+Show the robot model draws a urdf or xacro model where its joints put each link, with the visual
+or collision shapes and the STL and OBJ meshes it names. Clicking a link shows its joint as the
+file states it and the line to edit.
 
 The editor side is `rosio-lsp`, a language server written in Rust that indexes the atlas once
 when it loads, so a hover or a graph does not walk the file again. Any editor that speaks LSP can use it. The VS Code extension carries it,
@@ -237,7 +249,7 @@ Python only, rosio records that rather than pretending otherwise, and the atlas 
 
 ```
 rosio init [PATH] [--package PKG] [--config FILE] [--force] [--print]  # write rosio.yaml: roots, setup files, profiles to edit
-rosio extract <src> [--config rosio.yaml] [--out DIR] [--bag DIR]
+rosio extract <src> [--config rosio.yaml] [--out DIR] [--bag DIR] [--install-tree DIR]
 rosio stamps <bag> [--topics T] [--limit N] [--json-verdict] [--stats]
 rosio probe --domain-id 42 [--rmw NAME ...]
 rosio drift [--min-severity warn] [--fail-on error] [--only RULE] [--waivers FILE] [--limit N]
