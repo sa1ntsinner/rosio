@@ -1,0 +1,262 @@
+{
+  "note": "The rclpy TF case, and the node whose name is not in the source. The name is a constructor argument filled from an argument parser in main, so name_source is argv and no fqn is formed. The dynamic broadcaster is behind publish_tf, which is why the /tf publisher carries a condition instead of being stated unconditionally. line_hint is advisory and never compared.",
+  "package": "px_nodes",
+  "path": "src/px_nodes/px_nodes/tf_node.py",
+  "package_relative_path": "px_nodes/tf_node.py",
+  "language": "python",
+  "file_id": "file:px_nodes|px_nodes/tf_node.py",
+  "executables": ["px_tf"],
+  "nodes": [
+    {
+      "name": null,
+      "name_source": "argv",
+      "node_id": null,
+      "node_id_reason": "super().__init__ is handed a constructor argument, so the code states no name",
+      "form": "node",
+      "base": "rclpy.node.Node",
+      "class": "px_nodes.tf_node.TfNode",
+      "symbol": "px_nodes.tf_node.TfNode.__init__",
+      "symbol_id": "sym:px_nodes|px_nodes/tf_node.py|px_nodes.tf_node.TfNode.__init__",
+      "unresolved_ref": "node_name:node_name",
+      "line_hint": 16
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "TransformBroadcaster(self)",
+      "name": "/tf",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "tf2_msgs/msg/TFMessage",
+      "type_id": "type:tf2_msgs|msg|TFMessage",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside tf2_ros, not in this source",
+      "via_known_wrapper": "tf2_ros.TransformBroadcaster",
+      "condition": "publish_tf",
+      "guard_parameters": [{"name": "publish_tf", "value": true}],
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "line_hint": 23
+    },
+    {
+      "kind": "publisher",
+      "raw": "StaticTransformBroadcaster(self)",
+      "name": "/tf_static",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "tf2_msgs/msg/TFMessage",
+      "type_id": "type:tf2_msgs|msg|TFMessage",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside tf2_ros, not in this source",
+      "via_known_wrapper": "tf2_ros.StaticTransformBroadcaster",
+      "condition": null,
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "line_hint": 24
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/px/points\"",
+      "name": "/px/points",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "line_hint": 29
+    },
+    {
+      "kind": "subscriber",
+      "raw": "TransformListener(self._buffer, self)",
+      "name": "/tf",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "tf2_msgs/msg/TFMessage",
+      "type_id": "type:tf2_msgs|msg|TFMessage",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside tf2_ros, not in this source",
+      "via_known_wrapper": "tf2_ros.TransformListener",
+      "condition": null,
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "line_hint": 27
+    },
+    {
+      "kind": "subscriber",
+      "raw": "TransformListener(self._buffer, self)",
+      "name": "/tf_static",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "tf2_msgs/msg/TFMessage",
+      "type_id": "type:tf2_msgs|msg|TFMessage",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside tf2_ros, not in this source",
+      "via_known_wrapper": "tf2_ros.TransformListener",
+      "condition": null,
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "line_hint": 27
+    }
+  ],
+  "parameters": [
+    {
+      "name": "base_frame",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "base_footprint",
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "reads": [],
+      "line_hint": 19
+    },
+    {
+      "name": "odom_frame",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "odom",
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "reads": [],
+      "line_hint": 18
+    },
+    {
+      "name": "publish_tf",
+      "name_state": "literal",
+      "type": "bool",
+      "has_default": true,
+      "default": true,
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "reads": [],
+      "line_hint": 21
+    },
+    {
+      "name": "sensor_frame",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "px_lidar",
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "reads": [],
+      "line_hint": 20
+    }
+  ],
+  "parameter_callbacks": [],
+  "plugin_parameters": [],
+  "tf": {
+    "broadcasts": [
+      {
+        "kind": "static",
+        "parent": "base_link",
+        "child": "px_lidar",
+        "parent_state": "literal",
+        "child_state": "literal",
+        "broadcaster": "tf2_ros.StaticTransformBroadcaster",
+        "condition": null,
+        "owner_symbol": "px_nodes.tf_node.TfNode._send_mount",
+        "frame_ids": ["frame:base_link", "frame:px_lidar"],
+        "line_hint": 44
+      },
+      {
+        "kind": "dynamic",
+        "parent": "odom",
+        "child": "base_footprint",
+        "parent_state": "resolved_from_parameter",
+        "child_state": "resolved_from_parameter",
+        "parent_from_parameter": "odom_frame",
+        "child_from_parameter": "base_frame",
+        "broadcaster": "tf2_ros.TransformBroadcaster",
+        "condition": "publish_tf",
+        "guard_parameters": [{"name": "publish_tf", "value": true}],
+        "owner_symbol": "px_nodes.tf_node.TfNode._send_odom",
+        "frame_ids": ["frame:odom", "frame:base_footprint"],
+        "line_hint": 38
+      }
+    ],
+    "lookups": [
+      {
+        "api": "can_transform",
+        "target": "map",
+        "source": "odom",
+        "target_state": "literal",
+        "source_state": "resolved_from_parameter",
+        "source_from_parameter": "odom_frame",
+        "owner_symbol": "px_nodes.tf_node.TfNode._on_cloud",
+        "line_hint": 50
+      },
+      {
+        "api": "lookup_transform",
+        "target": "base_footprint",
+        "source": "px_lidar",
+        "target_state": "resolved_from_parameter",
+        "source_state": "resolved_from_parameter",
+        "target_from_parameter": "base_frame",
+        "source_from_parameter": "sensor_frame",
+        "owner_symbol": "px_nodes.tf_node.TfNode._on_cloud",
+        "line_hint": 48
+      },
+      {
+        "api": "lookup_transform",
+        "target": "base_footprint",
+        "source": null,
+        "target_state": "resolved_from_parameter",
+        "source_state": "unresolved",
+        "target_from_parameter": "base_frame",
+        "unresolved_ref": "frame_id:msg.header.frame_id",
+        "owner_symbol": "px_nodes.tf_node.TfNode._on_cloud",
+        "line_hint": 49
+      },
+      {
+        "api": "lookup_transform",
+        "target": "map",
+        "source": "base_footprint",
+        "target_state": "literal",
+        "source_state": "literal",
+        "owner_symbol": "px_nodes.tf_node.TfNode._on_cloud",
+        "line_hint": 47
+      }
+    ]
+  },
+  "unresolved": [
+    {
+      "want": "frame_id",
+      "expr": "msg.header.frame_id",
+      "reason": "message_field",
+      "detail": "the source frame is whatever arrived on the topic, so the code states no frame. Only a live system or the publisher of that topic can name it",
+      "resolvable_by": ["observed", "recorded"],
+      "owner_symbol": "px_nodes.tf_node.TfNode._on_cloud",
+      "line_hint": 49
+    },
+    {
+      "want": "node_name",
+      "expr": "node_name",
+      "reason": "argv_value",
+      "detail": "the name is a constructor argument filled from --node-name in main, so it is not a property of the source. name_source is argv and the identity has to come from the declared or observed layer",
+      "resolvable_by": ["declared", "observed"],
+      "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
+      "line_hint": 16
+    }
+  ],
+  "counts": {
+    "endpoints": 5,
+    "publishers": 2,
+    "subscribers": 3,
+    "service_servers": 0,
+    "service_clients": 0,
+    "timers": 0,
+    "parameters": 4,
+    "tf_broadcasts": 2,
+    "tf_lookups": 4,
+    "unresolved": 2,
+    "via_known_wrapper": 4
+  }
+}

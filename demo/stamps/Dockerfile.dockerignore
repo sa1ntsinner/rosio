@@ -1,0 +1,10 @@
+*
+!stamplint
+!stampdoctor
+!demo/publishers.py
+!demo/entrypoint.sh
+**/__pycache__
+**/*.egg-info
+**/.pytest_cache
+**/build
+**/dist

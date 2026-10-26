@@ -1,0 +1,1058 @@
+{
+  "note": "Frame tree per urdf variant, read straight from the fixture files. Parent is null for a root frame. A joint whose parent link is never declared leaves its child as a second root, which is the orphan case.",
+  "variants": {
+    "broken": {
+      "frames": {
+        "base_footprint": {
+          "declared": true,
+          "joint": null,
+          "parent": null
+        },
+        "base_link": {
+          "declared": true,
+          "joint": "base_joint",
+          "parent": "base_footprint"
+        },
+        "ghost_link": {
+          "declared": false,
+          "joint": null,
+          "parent": null
+        },
+        "probe_link": {
+          "declared": true,
+          "joint": "probe_joint",
+          "parent": "ghost_link"
+        }
+      },
+      "gazebo_plugins": [],
+      "joint_count": 2,
+      "joints": {
+        "base_joint": {
+          "child": "base_link",
+          "parent": "base_footprint",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.0,
+            0.0,
+            0.12
+          ]
+        },
+        "probe_joint": {
+          "child": "probe_link",
+          "parent": "ghost_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.1,
+            0.2,
+            0.3
+          ]
+        }
+      },
+      "link_count": 3,
+      "links": [
+        "base_footprint",
+        "base_link",
+        "probe_link"
+      ],
+      "meshes": [
+        {
+          "exists": false,
+          "filename": "package://fx_desc/meshes/fx_absent_body.stl",
+          "package": "fx_desc"
+        }
+      ],
+      "orphan_children": [
+        "probe_link"
+      ],
+      "path": "src/fx_desc/urdf/fx_broken.urdf",
+      "robot_name": "fx_broken",
+      "roots": [
+        "base_footprint",
+        "ghost_link"
+      ],
+      "undeclared_parent_links": [
+        "ghost_link"
+      ]
+    },
+    "real": {
+      "frames": {
+        "base_footprint": {
+          "declared": true,
+          "joint": null,
+          "parent": null
+        },
+        "base_link": {
+          "declared": true,
+          "joint": "base_joint",
+          "parent": "base_footprint"
+        },
+        "caster_swivel_link": {
+          "declared": true,
+          "joint": "caster_swivel_joint",
+          "parent": "base_link"
+        },
+        "caster_wheel": {
+          "declared": true,
+          "joint": "caster_wheel_joint",
+          "parent": "caster_swivel_link"
+        },
+        "drive_left_wheel": {
+          "declared": true,
+          "joint": "drive_left_joint",
+          "parent": "base_link"
+        },
+        "drive_right_wheel": {
+          "declared": true,
+          "joint": "drive_right_joint",
+          "parent": "base_link"
+        },
+        "imu_mount": {
+          "declared": true,
+          "joint": "imu_mount_joint",
+          "parent": "base_link"
+        },
+        "sensor_link": {
+          "declared": true,
+          "joint": "sensor_joint",
+          "parent": "base_link"
+        },
+        "steer_indicator": {
+          "declared": true,
+          "joint": "steer_indicator_joint",
+          "parent": "caster_swivel_link"
+        },
+        "tow_link": {
+          "declared": true,
+          "joint": "tow_joint",
+          "parent": "base_link"
+        }
+      },
+      "gazebo_plugins": [],
+      "joint_count": 9,
+      "joints": {
+        "base_joint": {
+          "child": "base_link",
+          "parent": "base_footprint",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.0,
+            0.0,
+            0.12
+          ]
+        },
+        "caster_swivel_joint": {
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "child": "caster_swivel_link",
+          "limit": {
+            "effort": 40.0,
+            "lower": -0.7854,
+            "upper": 0.7854,
+            "velocity": 2.0
+          },
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "revolute",
+          "xyz": [
+            0.45,
+            0.0,
+            0.0
+          ]
+        },
+        "caster_wheel_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "caster_wheel",
+          "parent": "caster_swivel_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            0.0,
+            0.0,
+            -0.04
+          ]
+        },
+        "drive_left_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "drive_left_wheel",
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            0.05,
+            0.21,
+            -0.02
+          ]
+        },
+        "drive_right_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "drive_right_wheel",
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            0.05,
+            -0.21,
+            -0.02
+          ]
+        },
+        "imu_mount_joint": {
+          "child": "imu_mount",
+          "parent": "base_link",
+          "rpy": [
+            3.14159,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.4,
+            0.0,
+            0.18
+          ]
+        },
+        "sensor_joint": {
+          "child": "sensor_link",
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.4,
+            0.0,
+            0.25
+          ]
+        },
+        "steer_indicator_joint": {
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "child": "steer_indicator",
+          "limit": {
+            "effort": 1.0,
+            "lower": -0.7854,
+            "upper": 0.7854,
+            "velocity": 1.0
+          },
+          "mimic": {
+            "joint": "caster_swivel_joint",
+            "multiplier": 1.0,
+            "offset": 0.0
+          },
+          "parent": "caster_swivel_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "revolute",
+          "xyz": [
+            0.0,
+            0.0,
+            0.1
+          ]
+        },
+        "tow_joint": {
+          "child": "tow_link",
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.05,
+            0.0,
+            -0.06
+          ]
+        }
+      },
+      "link_count": 10,
+      "links": [
+        "base_footprint",
+        "base_link",
+        "caster_swivel_link",
+        "caster_wheel",
+        "drive_left_wheel",
+        "drive_right_wheel",
+        "imu_mount",
+        "sensor_link",
+        "steer_indicator",
+        "tow_link"
+      ],
+      "meshes": [
+        {
+          "exists": true,
+          "filename": "package://fx_desc/meshes/fx_body.stl",
+          "package": "fx_desc"
+        }
+      ],
+      "orphan_children": [],
+      "path": "src/fx_desc/urdf/fx_robot.urdf",
+      "robot_name": "fx_robot",
+      "roots": [
+        "base_footprint"
+      ],
+      "undeclared_parent_links": []
+    },
+    "sim": {
+      "frames": {
+        "base_footprint": {
+          "declared": true,
+          "joint": null,
+          "parent": null
+        },
+        "base_link": {
+          "declared": true,
+          "joint": "base_joint",
+          "parent": "base_footprint"
+        },
+        "caster_swivel_link": {
+          "declared": true,
+          "joint": "caster_swivel_joint",
+          "parent": "base_link"
+        },
+        "caster_wheel": {
+          "declared": true,
+          "joint": "caster_wheel_joint",
+          "parent": "caster_swivel_link"
+        },
+        "drive_left_wheel": {
+          "declared": true,
+          "joint": "drive_left_joint",
+          "parent": "base_link"
+        },
+        "drive_right_wheel": {
+          "declared": true,
+          "joint": "drive_right_joint",
+          "parent": "base_link"
+        },
+        "gps_mount": {
+          "declared": true,
+          "joint": "gps_mount_joint",
+          "parent": "base_link"
+        },
+        "imu_link": {
+          "declared": true,
+          "joint": "imu_joint",
+          "parent": "base_link"
+        },
+        "lidar_link": {
+          "declared": true,
+          "joint": "lidar_joint",
+          "parent": "sensor_link"
+        },
+        "sensor_link": {
+          "declared": true,
+          "joint": "sensor_joint",
+          "parent": "base_link"
+        },
+        "steer_indicator": {
+          "declared": true,
+          "joint": "steer_indicator_joint",
+          "parent": "caster_swivel_link"
+        }
+      },
+      "gazebo_plugins": [
+        {
+          "filename": "libgazebo_ros_ray_sensor.so",
+          "frame_name": "sensor_link",
+          "name": "fx_lidar_plugin",
+          "namespace": "/fx",
+          "reference": "sensor_link",
+          "remappings": [
+            "~/out:=/fx/points"
+          ],
+          "sensor": "fx_lidar"
+        },
+        {
+          "filename": "libfx_tricycle_drive.so",
+          "frame_name": null,
+          "name": "fx_tricycle_drive",
+          "namespace": "/fx",
+          "reference": null,
+          "remappings": [
+            "cmd_vel:=/fx/cmd_vel_sim",
+            "odom:=/fx/odom_sim"
+          ]
+        }
+      ],
+      "joint_count": 10,
+      "joints": {
+        "base_joint": {
+          "child": "base_link",
+          "parent": "base_footprint",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.0,
+            0.0,
+            0.12
+          ]
+        },
+        "caster_swivel_joint": {
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "child": "caster_swivel_link",
+          "limit": {
+            "effort": 60.0,
+            "lower": -0.785,
+            "upper": 0.785,
+            "velocity": 2.5
+          },
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "revolute",
+          "xyz": [
+            0.45,
+            0.0,
+            0.0
+          ]
+        },
+        "caster_wheel_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "caster_wheel",
+          "limit": {
+            "effort": 60.0,
+            "velocity": 2.5
+          },
+          "parent": "caster_swivel_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            0.0,
+            0.0,
+            -0.04
+          ]
+        },
+        "drive_left_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "drive_left_wheel",
+          "limit": {
+            "effort": 60.0,
+            "velocity": 2.5
+          },
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            0.05,
+            0.21,
+            -0.02
+          ]
+        },
+        "drive_right_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "drive_right_wheel",
+          "limit": {
+            "effort": 60.0,
+            "velocity": 2.5
+          },
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            0.05,
+            -0.21,
+            -0.02
+          ]
+        },
+        "gps_mount_joint": {
+          "child": "gps_mount",
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.3,
+            0.0,
+            0.35
+          ]
+        },
+        "imu_joint": {
+          "child": "imu_link",
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.15,
+            0.0,
+            0.14
+          ]
+        },
+        "lidar_joint": {
+          "child": "lidar_link",
+          "parent": "sensor_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "sensor_joint": {
+          "child": "sensor_link",
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.42,
+            0.0,
+            0.27
+          ]
+        },
+        "steer_indicator_joint": {
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "child": "steer_indicator",
+          "limit": {
+            "effort": 1.0,
+            "lower": -0.785,
+            "upper": 0.785,
+            "velocity": 1.0
+          },
+          "mimic": {
+            "joint": "caster_swivel_joint",
+            "multiplier": 1.0,
+            "offset": 0.0
+          },
+          "parent": "caster_swivel_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "revolute",
+          "xyz": [
+            0.0,
+            0.0,
+            0.1
+          ]
+        }
+      },
+      "link_count": 11,
+      "links": [
+        "base_footprint",
+        "base_link",
+        "caster_swivel_link",
+        "caster_wheel",
+        "drive_left_wheel",
+        "drive_right_wheel",
+        "gps_mount",
+        "imu_link",
+        "lidar_link",
+        "sensor_link",
+        "steer_indicator"
+      ],
+      "meshes": [],
+      "orphan_children": [],
+      "path": "src/fx_desc/urdf/fx_robot_sim.urdf",
+      "robot_name": "fx_robot",
+      "roots": [
+        "base_footprint"
+      ],
+      "undeclared_parent_links": []
+    },
+    "sim_trailer": {
+      "frames": {
+        "base_footprint": {
+          "declared": true,
+          "joint": null,
+          "parent": null
+        },
+        "base_link": {
+          "declared": true,
+          "joint": "base_joint",
+          "parent": "base_footprint"
+        },
+        "caster_swivel_link": {
+          "declared": true,
+          "joint": "caster_swivel_joint",
+          "parent": "base_link"
+        },
+        "caster_wheel": {
+          "declared": true,
+          "joint": "caster_wheel_joint",
+          "parent": "caster_swivel_link"
+        },
+        "drive_left_wheel": {
+          "declared": true,
+          "joint": "drive_left_joint",
+          "parent": "base_link"
+        },
+        "drive_right_wheel": {
+          "declared": true,
+          "joint": "drive_right_joint",
+          "parent": "base_link"
+        },
+        "imu_link": {
+          "declared": true,
+          "joint": "imu_joint",
+          "parent": "sensor_link"
+        },
+        "lidar_link": {
+          "declared": true,
+          "joint": "lidar_joint",
+          "parent": "sensor_link"
+        },
+        "sensor_link": {
+          "declared": true,
+          "joint": "sensor_joint",
+          "parent": "base_link"
+        },
+        "sensor_ray": {
+          "declared": true,
+          "joint": "sensor_ray_joint",
+          "parent": "sensor_link"
+        },
+        "steer_indicator": {
+          "declared": true,
+          "joint": "steer_indicator_joint",
+          "parent": "caster_swivel_link"
+        },
+        "trailer_left_wheel": {
+          "declared": true,
+          "joint": "trailer_left_joint",
+          "parent": "trailer_link"
+        },
+        "trailer_link": {
+          "declared": true,
+          "joint": "trailer_tow_joint",
+          "parent": "base_link"
+        },
+        "trailer_right_wheel": {
+          "declared": true,
+          "joint": "trailer_right_joint",
+          "parent": "trailer_link"
+        }
+      },
+      "gazebo_plugins": [
+        {
+          "filename": "libgazebo_ros_ray_sensor.so",
+          "frame_name": "sensor_ray",
+          "name": "fx_lidar_plugin",
+          "namespace": "/fx",
+          "reference": "sensor_link",
+          "remappings": [
+            "~/out:=/fx/points"
+          ],
+          "sensor": "fx_lidar"
+        },
+        {
+          "filename": "libfx_tricycle_drive.so",
+          "frame_name": null,
+          "name": "fx_tricycle_drive",
+          "namespace": "/fx",
+          "reference": null,
+          "remappings": [
+            "cmd_vel:=/fx/cmd_vel_sim",
+            "odom:=/fx/odom_trailer"
+          ]
+        }
+      ],
+      "joint_count": 13,
+      "joints": {
+        "base_joint": {
+          "child": "base_link",
+          "parent": "base_footprint",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.0,
+            0.0,
+            0.12
+          ]
+        },
+        "caster_swivel_joint": {
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "child": "caster_swivel_link",
+          "limit": {
+            "effort": 60.0,
+            "lower": -0.785,
+            "upper": 0.785,
+            "velocity": 2.5
+          },
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "revolute",
+          "xyz": [
+            0.45,
+            0.0,
+            0.0
+          ]
+        },
+        "caster_wheel_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "caster_wheel",
+          "limit": {
+            "effort": 60.0,
+            "velocity": 2.5
+          },
+          "parent": "caster_swivel_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            0.0,
+            0.0,
+            -0.04
+          ]
+        },
+        "drive_left_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "drive_left_wheel",
+          "limit": {
+            "effort": 60.0,
+            "velocity": 2.5
+          },
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            0.05,
+            0.21,
+            -0.02
+          ]
+        },
+        "drive_right_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "drive_right_wheel",
+          "limit": {
+            "effort": 60.0,
+            "velocity": 2.5
+          },
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            0.05,
+            -0.21,
+            -0.02
+          ]
+        },
+        "imu_joint": {
+          "child": "imu_link",
+          "parent": "sensor_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "lidar_joint": {
+          "child": "lidar_link",
+          "parent": "sensor_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "sensor_joint": {
+          "child": "sensor_link",
+          "parent": "base_link",
+          "rpy": [
+            1.57,
+            0.0,
+            1.57
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.38,
+            0.0,
+            0.31
+          ]
+        },
+        "sensor_ray_joint": {
+          "child": "sensor_ray",
+          "parent": "sensor_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "fixed",
+          "xyz": [
+            0.0,
+            0.0,
+            0.02
+          ]
+        },
+        "steer_indicator_joint": {
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "child": "steer_indicator",
+          "limit": {
+            "effort": 1.0,
+            "lower": -0.785,
+            "upper": 0.785,
+            "velocity": 1.0
+          },
+          "mimic": {
+            "joint": "caster_swivel_joint",
+            "multiplier": 0.5,
+            "offset": 0.02
+          },
+          "parent": "caster_swivel_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "revolute",
+          "xyz": [
+            0.0,
+            0.0,
+            0.1
+          ]
+        },
+        "trailer_left_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "trailer_left_wheel",
+          "parent": "trailer_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            -0.6,
+            0.18,
+            -0.02
+          ]
+        },
+        "trailer_right_joint": {
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "child": "trailer_right_wheel",
+          "parent": "trailer_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "continuous",
+          "xyz": [
+            -0.6,
+            -0.18,
+            -0.02
+          ]
+        },
+        "trailer_tow_joint": {
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "child": "trailer_link",
+          "limit": {
+            "effort": 100.0,
+            "lower": -1.5708,
+            "upper": 1.5708,
+            "velocity": 1.0
+          },
+          "parent": "base_link",
+          "rpy": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "revolute",
+          "xyz": [
+            0.05,
+            0.0,
+            -0.06
+          ]
+        }
+      },
+      "link_count": 14,
+      "links": [
+        "base_footprint",
+        "base_link",
+        "caster_swivel_link",
+        "caster_wheel",
+        "drive_left_wheel",
+        "drive_right_wheel",
+        "imu_link",
+        "lidar_link",
+        "sensor_link",
+        "sensor_ray",
+        "steer_indicator",
+        "trailer_left_wheel",
+        "trailer_link",
+        "trailer_right_wheel"
+      ],
+      "meshes": [],
+      "orphan_children": [],
+      "path": "src/fx_desc/urdf/fx_robot_sim_trailer.urdf",
+      "robot_name": "fx_robot",
+      "roots": [
+        "base_footprint"
+      ],
+      "undeclared_parent_links": []
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "arg_declarations": [
+    {
+      "default": null,
+      "description": "Absolute path to the merged parameters file.",
+      "name": "params_file"
+    }
+  ],
+  "args": [
+    [
+      "params_file",
+      "src/lx_bringup/config/order_base.yaml"
+    ]
+  ],
+  "case": "supplied",
+  "entry": "src/lx_bringup/launch/no_default_arg.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lx_controller",
+      "form": "node",
+      "fqn": "/controller_server",
+      "gates": [],
+      "name": "controller_server",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/order_base.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_bringup",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 14 with the argument supplied by the profile, which is how a profile fixes it.",
+  "predicates": {},
+  "strategy": "executed"
+}

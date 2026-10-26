@@ -1,0 +1,6 @@
+$ rosio param /controller_server use_sim_time
+use_sim_time on /controller_server   state effective
+  profile nav2_bringup_composed
+    effective False (bool)   edit nav2_bringup/launch/navigation_launch.py:253 [install]
+    rank 0 wins launch_inline_dict   False (bool)
+        nav2_bringup/launch/navigation_launch.py:253 [install] SetParameter

@@ -1,0 +1,9 @@
+# SHAPE 2: bare wildcard root. It applies to any node this file is handed to, at any
+# namespace. The literal key `diagnostics` under ros__parameters is a nested dict, so the
+# parameter name is diagnostics.window_sec.
+/**:
+  ros__parameters:
+    use_sim_time: false
+    diagnostics:
+      window_sec: 5.0
+      publish_period: 1.0

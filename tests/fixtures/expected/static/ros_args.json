@@ -1,0 +1,97 @@
+{
+  "note": "Expected records.RosArgs per case in tests/fixtures/ws_static/argv/argv_cases.json. Absent keys mean the dataclass default: null for node_name, namespace, log_level and enclave, and an empty tuple for params_files, assignments, remaps and leftover.",
+  "conventions": [
+    "Tokens outside any --ros-args block: a bare __node:=X or __name:=X sets node_name, __ns:=X sets namespace, any other a:=b becomes a remap, everything else appends to leftover in encounter order.",
+    "Inside a block: -p and --param take NAME:=VALUE, -r and --remap take FROM:=TO, --params-file takes a path, --log-level and --enclave take a value, and a bare -- closes the block.",
+    "A recognised flag whose value is missing, or whose value lacks the := an assignment needs, contributes the flag token and any value token it consumed to leftover, in encounter order. It never raises.",
+    "An assignment or a remap with an empty left hand side is malformed and goes to leftover the same way. An empty right hand side is legal and yields an empty string value.",
+    "Any token inside a block that is not a recognised flag goes to leftover.",
+    "Values keep their raw spelling: no typing, no case folding, no path normalising.",
+    "Order is preserved in every tuple and duplicates are kept. Last wins is a consumer decision, not a parser one."
+  ],
+  "cases": {
+    "empty": {},
+    "plain_only": {
+      "leftover": ["--config", "sim.yaml", "-v"]
+    },
+    "node_name_remap": {
+      "node_name": "fx_alpha"
+    },
+    "node_name_long_form": {
+      "node_name": "fx_alpha"
+    },
+    "namespace_remap": {
+      "namespace": "/fx/left"
+    },
+    "legacy_assignments": {
+      "node_name": "fx_alpha",
+      "namespace": "/fx",
+      "remaps": [["input", "/fx/points"]]
+    },
+    "params_file_repeated": {
+      "params_files": ["/fx/base.yaml", "/fx/overrides.yaml", "/fx/base.yaml"]
+    },
+    "typed_params": {
+      "assignments": [
+        ["use_sim_time", "true"],
+        ["queue_depth", "20"],
+        ["gain", "0.5"],
+        ["state_frame", "odom"],
+        ["limits", "[1.0, 2.0, 3.0]"],
+        ["empty_topic", ""],
+        ["nested.sub.key", "7"]
+      ]
+    },
+    "param_long_form": {
+      "assignments": [["gain", "0.5"], ["gain", "0.9"]]
+    },
+    "topic_remaps": {
+      "remaps": [
+        ["input", "/fx/points"],
+        ["/tf", "/fx/tf"],
+        ["fx_alpha:output", "/fx/points_filtered"]
+      ]
+    },
+    "log_level_and_enclave": {
+      "log_level": "WARN",
+      "enclave": "/fx/enclave"
+    },
+    "mixed_short_forms": {
+      "params_files": ["/fx/tail.yaml"],
+      "assignments": [["a", "1"], ["d", "2"]],
+      "remaps": [["b", "/fx/c"]],
+      "log_level": "info"
+    },
+    "double_dash_tail": {
+      "node_name": "fx_alpha",
+      "assignments": [["gain", "0.25"]],
+      "leftover": ["fx_alpha_node", "--config", "x.yaml", "--not-ros", "tail"]
+    },
+    "two_ros_args_blocks": {
+      "namespace": "/two",
+      "params_files": ["/fx/second.yaml"],
+      "assignments": [["a", "1"]],
+      "leftover": ["plain"]
+    },
+    "everything_at_once": {
+      "node_name": "fx_alpha",
+      "namespace": "/fx",
+      "params_files": ["/fx/base.yaml", "/fx/overrides.yaml"],
+      "assignments": [["use_sim_time", "false"]],
+      "remaps": [["input", "/fx/points"]],
+      "log_level": "warn",
+      "enclave": "/fx/enclave",
+      "leftover": ["fx_alpha_node", "trailing"]
+    },
+    "malformed_missing_value": {
+      "leftover": ["-p"]
+    },
+    "malformed_no_separator": {
+      "leftover": ["-p", "novalue", "-r", "alsobad", "--params-file"]
+    },
+    "malformed_empty_and_unknown": {
+      "leftover": ["", "-p", ":=1", "--unknown-flag", "x", "-r", ":=/fx/c"]
+    },
+    "malformed_ros_args_only": {}
+  }
+}

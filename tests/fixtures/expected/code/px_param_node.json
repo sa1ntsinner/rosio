@@ -1,0 +1,429 @@
+{
+  "note": "The rclpy half of the non literal case. Four spellings resolve (a local from a parameter read, a member from a parameter read, an f string over a parameter default, a module level constant) and the count of the footprint publishers is the length of a parameter default, so it is recorded as parameter dependent rather than as a fact. The one name that comes from the environment is an unresolved entry. line_hint is advisory and never compared.",
+  "package": "px_nodes",
+  "path": "src/px_nodes/px_nodes/param_node.py",
+  "package_relative_path": "px_nodes/param_node.py",
+  "language": "python",
+  "file_id": "file:px_nodes|px_nodes/param_node.py",
+  "executables": ["px_param"],
+  "nodes": [
+    {
+      "name": "px_param",
+      "name_source": "literal",
+      "node_id": null,
+      "node_id_reason": "the code states the name, the namespace comes from the declared layer, so no fqn is formed here",
+      "form": "node",
+      "base": "rclpy.node.Node",
+      "class": "px_nodes.param_node.ParamNode",
+      "symbol": "px_nodes.param_node.ParamNode.__init__",
+      "symbol_id": "sym:px_nodes|px_nodes/param_node.py|px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 20
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "self._cmd_topic",
+      "name": "/px/cmd_vel_safe",
+      "name_state": "resolved_from_parameter",
+      "absolute": true,
+      "from_parameter": "cmd_topic",
+      "binding": "member",
+      "type": "geometry_msgs/msg/Twist",
+      "type_id": "type:geometry_msgs|msg|Twist",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 29
+    },
+    {
+      "kind": "publisher",
+      "raw": "topic",
+      "name": "/px/footprint",
+      "name_state": "resolved_from_parameter",
+      "absolute": true,
+      "from_parameter": "footprint_topics",
+      "binding": "comprehension",
+      "count_state": "parameter_dependent",
+      "count_detail": "one publisher per element of the footprint_topics parameter. Three is the length of the code side default, not a fact about the running system",
+      "type": "geometry_msgs/msg/Polygon",
+      "type_id": "type:geometry_msgs|msg|Polygon",
+      "qos": {
+        "raw": "1",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 66
+    },
+    {
+      "kind": "publisher",
+      "raw": "f\"{prefix}/health\"",
+      "name": "/px/health",
+      "name_state": "resolved_from_fstring",
+      "absolute": true,
+      "from_parameter": "topic_prefix",
+      "binding": "local",
+      "type": "std_msgs/msg/Float32",
+      "type_id": "type:std_msgs|msg|Float32",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 32
+    },
+    {
+      "kind": "publisher",
+      "raw": "STATUS_TOPIC",
+      "name": "/px/status",
+      "name_state": "resolved_from_constant",
+      "absolute": true,
+      "from_constant": "px_nodes.param_node.STATUS_TOPIC",
+      "type": "std_msgs/msg/Bool",
+      "type_id": "type:std_msgs|msg|Bool",
+      "qos": {
+        "raw": "1",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 34
+    },
+    {
+      "kind": "publisher",
+      "raw": "topic",
+      "name": "global_costmap/footprint",
+      "name_state": "resolved_from_parameter",
+      "absolute": false,
+      "topic_id": null,
+      "topic_id_reason": "a relative name mints no topic id, it stays raw until a remap or a namespace binds it",
+      "from_parameter": "footprint_topics",
+      "binding": "comprehension",
+      "count_state": "parameter_dependent",
+      "type": "geometry_msgs/msg/Polygon",
+      "type_id": "type:geometry_msgs|msg|Polygon",
+      "qos": {
+        "raw": "1",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 66
+    },
+    {
+      "kind": "publisher",
+      "raw": "topic",
+      "name": "local_costmap/footprint",
+      "name_state": "resolved_from_parameter",
+      "absolute": false,
+      "topic_id": null,
+      "topic_id_reason": "a relative name mints no topic id, it stays raw until a remap or a namespace binds it",
+      "from_parameter": "footprint_topics",
+      "binding": "comprehension",
+      "count_state": "parameter_dependent",
+      "type": "geometry_msgs/msg/Polygon",
+      "type_id": "type:geometry_msgs|msg|Polygon",
+      "qos": {
+        "raw": "1",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 66
+    },
+    {
+      "kind": "subscriber",
+      "raw": "input_topic",
+      "name": "/px/points_raw",
+      "name_state": "resolved_from_parameter",
+      "absolute": true,
+      "from_parameter": "input_topic",
+      "binding": "local",
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 24
+    },
+    {
+      "kind": "subscriber",
+      "raw": "env_topic",
+      "name": null,
+      "name_state": "unresolved",
+      "absolute": null,
+      "unresolved_ref": "topic_name:env_topic",
+      "condition": "PX_EXTRA_TOPIC is set and not empty",
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 71
+    },
+    {
+      "kind": "timer",
+      "raw": "1.0 / rate",
+      "name": null,
+      "name_state": "not_applicable",
+      "period_s": 0.05,
+      "period_state": "resolved_from_parameter",
+      "from_parameter": "publish_rate_hz",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 75
+    }
+  ],
+  "parameters": [
+    {
+      "name": "cmd_topic",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "/px/cmd_vel_safe",
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 28
+    },
+    {
+      "name": "diagnostics.hardware_id",
+      "name_state": "literal_dotted",
+      "type": "string",
+      "has_default": true,
+      "default": "px-fixture",
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 52
+    },
+    {
+      "name": "footprint_topics",
+      "name_state": "literal",
+      "type": "string_array",
+      "has_default": true,
+      "default": ["local_costmap/footprint", "global_costmap/footprint", "/px/footprint"],
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 60
+    },
+    {
+      "name": "gain",
+      "name_state": "literal",
+      "type": null,
+      "type_state": "unresolved",
+      "has_default": true,
+      "default": null,
+      "default_state": "unresolved",
+      "default_expr": "self._tuning.gain",
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 40
+    },
+    {
+      "name": "input_topic",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "/px/points_raw",
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 23
+    },
+    {
+      "name": "limits.max_accel",
+      "name_state": "map_key",
+      "type": "double",
+      "has_default": true,
+      "default": 1.0,
+      "default_state": "resolved_from_module_literal",
+      "default_expr": "DEFAULT_LIMITS[\"max_accel\"]",
+      "api": "declare_parameters",
+      "map_namespace": "limits",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 46
+    },
+    {
+      "name": "limits.max_speed",
+      "name_state": "map_key",
+      "type": "double",
+      "has_default": true,
+      "default": 3.0,
+      "default_state": "resolved_from_module_literal",
+      "default_expr": "DEFAULT_LIMITS[\"max_speed\"]",
+      "api": "declare_parameters",
+      "map_namespace": "limits",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 45
+    },
+    {
+      "name": "publish_diagnostics",
+      "name_state": "literal",
+      "type": "bool",
+      "has_default": true,
+      "default": true,
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 38
+    },
+    {
+      "name": "publish_rate_hz",
+      "name_state": "literal",
+      "type": "double",
+      "has_default": true,
+      "default": 20.0,
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [
+        {"api": "get_parameter_value", "target": "rate", "line_hint": 54}
+      ],
+      "line_hint": 36
+    },
+    {
+      "name": "queue_depth",
+      "name_state": "literal",
+      "type": "int",
+      "has_default": true,
+      "default": 5,
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [
+        {"api": "get_parameter_value", "target": "self._queue_depth", "line_hint": 55}
+      ],
+      "line_hint": 37
+    },
+    {
+      "name": "sensors.front.frame_id",
+      "name_state": "resolved_from_fstring",
+      "name_expr": "f\"{sensor_ns}.frame_id\"",
+      "type": "string",
+      "has_default": true,
+      "default": "px_front",
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 51
+    },
+    {
+      "name": "topic_prefix",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "/px",
+      "api": "declare_parameter",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 31
+    },
+    {
+      "name": "watchdog_timeout_s",
+      "name_state": "literal",
+      "type": "double",
+      "type_state": "declared_type_only",
+      "has_default": false,
+      "default": null,
+      "default_state": "absent",
+      "api": "declare_parameter",
+      "declared_as": "Parameter.Type.DOUBLE",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "reads": [],
+      "line_hint": 39
+    }
+  ],
+  "parameter_callbacks": [
+    {
+      "api": "add_on_set_parameters_callback",
+      "form": "bound_method",
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "handler": "px_nodes.param_node.ParamNode._validate",
+      "line_hint": 57
+    }
+  ],
+  "plugin_parameters": [],
+  "tf": {
+    "broadcasts": [],
+    "lookups": []
+  },
+  "unresolved": [
+    {
+      "want": "param_value",
+      "expr": "self._tuning.gain",
+      "reason": "runtime_attribute_default",
+      "detail": "the default is an attribute of an object built by load_tuning from a file named in the environment, so neither the value nor the parameter type is stated. The name is still resolved",
+      "resolvable_by": [
+        "observed"
+      ],
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 40
+    },
+    {
+      "want": "topic_name",
+      "expr": "env_topic",
+      "reason": "environment_variable",
+      "detail": "the name comes from PX_EXTRA_TOPIC in the process environment, and the endpoint exists only when that variable is set and not empty. Neither the name nor the existence is a property of the source",
+      "resolvable_by": [
+        "observed"
+      ],
+      "owner_symbol": "px_nodes.param_node.ParamNode.__init__",
+      "line_hint": 71
+    }
+  ],
+  "counts": {
+    "endpoints": 9,
+    "publishers": 6,
+    "subscribers": 2,
+    "service_servers": 0,
+    "service_clients": 0,
+    "timers": 1,
+    "parameters": 13,
+    "unresolved": 2
+  }
+}

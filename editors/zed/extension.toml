@@ -1,0 +1,13 @@
+id = "rosio"
+name = "rosio"
+version = "0.1.0"
+schema_version = 1
+authors = ["Elmir Mirzayev"]
+description = "ROS 2 atlas diagnostics and navigation through the rosio language server and MCP server."
+repository = "https://github.com/sa1ntsinner/rosio"
+
+[language_servers.rosio]
+name = "rosio"
+languages = ["C++", "C", "Python", "YAML"]
+
+[context_servers.rosio]

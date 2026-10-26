@@ -1,0 +1,9 @@
+$ rosio explain find:qos.incompatible|topic:/scan_filtered|a53e8bc7
+error qos.incompatible: /safety_stop never receives /scan_filtered
+  about /scan_filtered
+  in rover the coded layer has /scan_filter offering best effort on /scan_filtered and /safety_stop requesting reliable; a subscription that asks for more than a publisher offers is never matched
+  fix: make /safety_stop request best effort, or make /scan_filter offer reliable, on both ends of the topic
+  say: /safety_stop subscribes to /scan_filtered requesting reliable while /scan_filter publishes it best effort, so the two never connect and no message arrives.
+      rover_control/rover_control/safety_stop.py:18 rover_control.safety_stop.SafetyStop.__init__
+      rover_perception/src/scan_filter.cpp:24 ScanFilter::ScanFilter
+  profiles rover

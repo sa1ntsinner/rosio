@@ -1,0 +1,9 @@
+# Read by param_order.launch.py from both nodes, in the two possible list orders.
+inline_wins:
+  ros__parameters:
+    width: 20
+    height: 20
+file_wins:
+  ros__parameters:
+    width: 20
+    height: 20

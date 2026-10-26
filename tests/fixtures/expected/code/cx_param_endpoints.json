@@ -1,0 +1,365 @@
+{
+  "note": "Topic names that are not literals, plus the whole parameter API. Four of the five non literal names resolve inside this one function (a local from declare_parameter, a member from declare_parameter, a concatenation of a parameter default with a literal, a file scope constant and a preprocessor macro). The fifth cannot resolve and is an unresolved entry, not a guess. line_hint is advisory and never compared.",
+  "package": "cx_nodes",
+  "path": "src/cx_nodes/src/cx_param_endpoints.cpp",
+  "package_relative_path": "src/cx_param_endpoints.cpp",
+  "language": "cpp",
+  "file_id": "file:cx_nodes|src/cx_param_endpoints.cpp",
+  "nodes": [
+    {
+      "name": "cx_param",
+      "name_source": "literal",
+      "node_id": null,
+      "node_id_reason": "the code states the name, the namespace comes from the declared layer, so no fqn is formed here",
+      "form": "node",
+      "base": "rclcpp::Node",
+      "class": "cx_nodes::ParamEndpoints",
+      "symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "symbol_id": "sym:cx_nodes|src/cx_param_endpoints.cpp|cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 30
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "cmd_topic_",
+      "name": "/cx/cmd_vel_safe",
+      "name_state": "resolved_from_parameter",
+      "absolute": true,
+      "from_parameter": "cmd_topic",
+      "binding": "member",
+      "type": "geometry_msgs/msg/Twist",
+      "type_id": "type:geometry_msgs|msg|Twist",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 38
+    },
+    {
+      "kind": "publisher",
+      "raw": "kGroundTopic",
+      "name": "/cx/ground",
+      "name_state": "resolved_from_constant",
+      "absolute": true,
+      "from_constant": "cx_nodes::(anonymous)::kGroundTopic",
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "rclcpp::QoS(rclcpp::KeepLast(1))",
+        "form": "qos_object",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 45
+    },
+    {
+      "kind": "publisher",
+      "raw": "prefix + \"/health\"",
+      "name": "/cx/health",
+      "name_state": "resolved_from_parameter",
+      "absolute": true,
+      "from_parameter": "topic_prefix",
+      "parameter_suffix": "/health",
+      "binding": "local",
+      "type": "std_msgs/msg/Float32",
+      "type_id": "type:std_msgs|msg|Float32",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 41
+    },
+    {
+      "kind": "publisher",
+      "raw": "CX_STATUS_TOPIC",
+      "name": "/cx/status",
+      "name_state": "resolved_from_macro",
+      "absolute": true,
+      "from_macro": "CX_STATUS_TOPIC",
+      "type": "std_msgs/msg/Bool",
+      "type_id": "type:std_msgs|msg|Bool",
+      "qos": {
+        "raw": "1",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 43
+    },
+    {
+      "kind": "subscriber",
+      "raw": "input_topic",
+      "name": "/cx/points_raw",
+      "name_state": "resolved_from_parameter",
+      "absolute": true,
+      "from_parameter": "input_topic",
+      "binding": "local",
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "rclcpp::SensorDataQoS()",
+        "form": "preset",
+        "preset": "sensor_data",
+        "history": null,
+        "depth": null,
+        "reliability": null,
+        "durability": null
+      },
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 33
+    },
+    {
+      "kind": "subscriber",
+      "raw": "name",
+      "name": null,
+      "name_state": "unresolved",
+      "absolute": null,
+      "unresolved_ref": "topic_name:name",
+      "count_state": "unknown",
+      "count_reason": "one subscription per line of a descriptor file, so the number of endpoints is not a property of the source",
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "rclcpp::SensorDataQoS()",
+        "form": "preset",
+        "preset": "sensor_data",
+        "history": null,
+        "depth": null,
+        "reliability": null,
+        "durability": null
+      },
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 71
+    },
+    {
+      "kind": "timer",
+      "raw": "std::chrono::duration<double>(1.0 / publish_rate_hz_)",
+      "name": null,
+      "name_state": "not_applicable",
+      "period_s": 0.05,
+      "period_state": "resolved_from_parameter",
+      "from_parameter": "publish_rate_hz",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 66
+    }
+  ],
+  "parameters": [
+    {
+      "name": "cmd_topic",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "/cx/cmd_vel_safe",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [],
+      "line_hint": 37
+    },
+    {
+      "name": "descriptor_file",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::loadDescriptorTopics",
+      "reads": [],
+      "line_hint": 107
+    },
+    {
+      "name": "gain",
+      "name_state": "literal",
+      "type": "double",
+      "has_default": true,
+      "default": null,
+      "default_state": "unresolved",
+      "default_expr": "tuning_.gain",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [],
+      "line_hint": 52
+    },
+    {
+      "name": "input_topic",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "/cx/points_raw",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [],
+      "line_hint": 32
+    },
+    {
+      "name": "limits.max_accel",
+      "name_state": "map_key",
+      "type": "double",
+      "has_default": true,
+      "default": 1.0,
+      "api": "declare_parameters",
+      "map_namespace": "limits",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [],
+      "line_hint": 54
+    },
+    {
+      "name": "limits.max_speed",
+      "name_state": "map_key",
+      "type": "double",
+      "has_default": true,
+      "default": 3.0,
+      "api": "declare_parameters",
+      "map_namespace": "limits",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [],
+      "line_hint": 54
+    },
+    {
+      "name": "publish_diagnostics",
+      "name_state": "literal",
+      "type": "bool",
+      "has_default": true,
+      "default": true,
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [],
+      "line_hint": 50
+    },
+    {
+      "name": "publish_rate_hz",
+      "name_state": "literal",
+      "type": "double",
+      "has_default": true,
+      "default": 20.0,
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [
+        {"api": "get_parameter_out", "target": "publish_rate_hz_", "line_hint": 60}
+      ],
+      "line_hint": 48
+    },
+    {
+      "name": "queue_depth",
+      "name_state": "literal",
+      "type": "int",
+      "has_default": true,
+      "default": 5,
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [
+        {"api": "get_parameter_accessor", "accessor": "as_int", "line_hint": 61}
+      ],
+      "line_hint": 49
+    },
+    {
+      "name": "sensors.front.frame_id",
+      "name_state": "resolved_from_concat",
+      "name_expr": "sensor_ns + \".frame_id\"",
+      "type": "string",
+      "has_default": true,
+      "default": "cx_front",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [],
+      "line_hint": 58
+    },
+    {
+      "name": "topic_prefix",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "/cx",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [],
+      "line_hint": 40
+    },
+    {
+      "name": "watchdog_timeout_s",
+      "name_state": "literal",
+      "type": "double",
+      "has_default": false,
+      "default": null,
+      "default_state": "absent",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "reads": [],
+      "line_hint": 51
+    }
+  ],
+  "parameter_callbacks": [
+    {
+      "api": "add_on_set_parameters_callback",
+      "form": "lambda",
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "handler": "cx_nodes::ParamEndpoints::onSetParameters",
+      "line_hint": 63
+    }
+  ],
+  "plugin_parameters": [],
+  "tf": {
+    "broadcasts": [],
+    "lookups": []
+  },
+  "unresolved": [
+    {
+      "want": "param_value",
+      "expr": "tuning_.gain",
+      "reason": "runtime_attribute_default",
+      "detail": "the default is an attribute of a member whose type is defined in another package, so the value is not in this translation unit. The parameter name and type are still resolved",
+      "resolvable_by": [
+        "observed"
+      ],
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 52
+    },
+    {
+      "want": "topic_name",
+      "expr": "name",
+      "reason": "external_descriptor_file",
+      "detail": "the loop variable comes from loadDescriptorTopics, which reads a file named by the descriptor_file parameter, so neither the names nor the number of subscriptions is stated in any source file",
+      "resolvable_by": [
+        "observed"
+      ],
+      "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
+      "line_hint": 71
+    }
+  ],
+  "counts": {
+    "endpoints": 7,
+    "publishers": 4,
+    "subscribers": 2,
+    "service_servers": 0,
+    "service_clients": 0,
+    "timers": 1,
+    "parameters": 12,
+    "unresolved": 2
+  },
+  "constructions": [
+    {
+      "class": "cx_nodes::ParamEndpoints",
+      "owner_symbol": "main"
+    }
+  ]
+}

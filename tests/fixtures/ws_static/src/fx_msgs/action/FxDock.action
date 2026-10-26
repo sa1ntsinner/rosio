@@ -1,0 +1,12 @@
+uint8 MODE_FRONT=0
+uint8 MODE_REAR=1
+
+FxPoint target
+uint8 mode
+float64 tolerance 0.05
+---
+bool docked
+float64 residual
+---
+float32 progress
+string stage

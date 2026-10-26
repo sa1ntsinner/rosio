@@ -1,0 +1,198 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  versions:
+    name: tag matches the versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: compare
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          node_version=$(node -p 'require("./editors/vscode/package.json").version')
+          python_version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          echo "tag $tag, extension $node_version, python $python_version"
+          test "$tag" = "$node_version"
+          test "$tag" = "$python_version"
+
+  server:
+    name: rosio-lsp ${{ matrix.target }}
+    needs: versions
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # built on 22.04 so the glibc it links against is the oldest one supported
+          - { target: linux-x64, os: ubuntu-22.04, rust: x86_64-unknown-linux-gnu }
+          - { target: linux-arm64, os: ubuntu-22.04-arm, rust: aarch64-unknown-linux-gnu }
+          - { target: win32-x64, os: windows-latest, rust: x86_64-pc-windows-msvc }
+          - { target: darwin-x64, os: macos-14, rust: x86_64-apple-darwin }
+          - { target: darwin-arm64, os: macos-14, rust: aarch64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust }}
+      - run: cargo build --release --locked -p rosio-lsp --target ${{ matrix.rust }}
+      - name: name the binary
+        shell: bash
+        run: |
+          ext=""
+          if [ "${{ matrix.target }}" = win32-x64 ]; then ext=".exe"; fi
+          mkdir -p dist
+          cp "target/${{ matrix.rust }}/release/rosio-lsp$ext" "dist/rosio-lsp-${{ matrix.target }}$ext"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  vsix:
+    name: vs code packages
+    needs: server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc -p . --noEmit
+      - run: node scripts/build.mjs --minify
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: server-*
+          path: editors/vscode/servers
+          merge-multiple: true
+      - name: one package per target
+        run: |
+          set -e
+          for target in linux-x64 linux-arm64 win32-x64 darwin-x64 darwin-arm64; do
+            rm -rf server && mkdir server
+            if [ "$target" = win32-x64 ]; then
+              cp "servers/rosio-lsp-$target.exe" server/rosio-lsp.exe
+            else
+              cp "servers/rosio-lsp-$target" server/rosio-lsp
+              # artifacts lose the executable bit, and the package keeps the mode it is given
+              chmod 755 server/rosio-lsp
+            fi
+            npx vsce package --no-dependencies --target "$target" -o "rosio-$target.vsix"
+          done
+          rm -rf server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: editors/vscode/*.vsix
+          if-no-files-found: error
+
+  marketplace:
+    name: publish the extension
+    needs: vsix
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: editors/vscode/packages
+      - name: visual studio marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -e
+          if [ -z "$VSCE_PAT" ]; then
+            echo "VSCE_PAT is not set, skipping the Visual Studio Marketplace"
+            exit 0
+          fi
+          for package in packages/*.vsix; do
+            npx vsce publish --packagePath "$package" --pat "$VSCE_PAT"
+          done
+      - name: open vsx
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          set -e
+          if [ -z "$OVSX_PAT" ]; then
+            echo "OVSX_PAT is not set, skipping Open VSX"
+            exit 0
+          fi
+          for package in packages/*.vsix; do
+            npx --yes ovsx@1.2.0 publish "$package" --pat "$OVSX_PAT"
+          done
+
+  python:
+    name: python sdist and wheel
+    needs: versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - run: python -m build --sdist --wheel --outdir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python
+          path: dist/*
+          if-no-files-found: error
+
+  pypi:
+    name: publish to pypi
+    # a version on pypi can never be uploaded again, so it waits for the extension to package
+    needs: [python, vsix]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/rosio/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github:
+    name: github release
+    needs: [server, vsix, python]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l assets
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

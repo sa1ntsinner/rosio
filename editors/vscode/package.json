@@ -1,0 +1,365 @@
+{
+  "name": "rosio",
+  "displayName": "rosio: ROS 2 system atlas",
+  "description": "What your ROS 2 system really is, written, coded, running and recorded, where those disagree and which line to edit.",
+  "version": "0.1.0",
+  "publisher": "sa1ntsinner",
+  "license": "Apache-2.0",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0d1017",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sa1ntsinner/rosio"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ros",
+    "ros2",
+    "robotics",
+    "launch",
+    "urdf",
+    "zenoh",
+    "rosbag"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "workspaceContains:rosio.yaml",
+    "workspaceContains:rosio-out/atlas.json",
+    "workspaceContains:**/package.xml",
+    "onView:rosio.system"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In restricted mode the commands from workspace settings are ignored.",
+      "restrictedConfigurations": [
+        "rosio.command",
+        "rosio.server.path"
+      ]
+    }
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "rosio",
+          "title": "rosio",
+          "icon": "media/rosio.svg"
+        }
+      ]
+    },
+    "views": {
+      "rosio": [
+        {
+          "id": "rosio.findings",
+          "name": "Findings"
+        },
+        {
+          "id": "rosio.migration",
+          "name": "Migration"
+        },
+        {
+          "id": "rosio.launch",
+          "name": "Launch"
+        },
+        {
+          "id": "rosio.frames",
+          "name": "Frames"
+        },
+        {
+          "id": "rosio.params",
+          "name": "Parameters"
+        },
+        {
+          "id": "rosio.system",
+          "name": "System",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "rosio.unresolved",
+          "name": "Unresolved",
+          "visibility": "collapsed"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "rosio.findings",
+        "contents": "No atlas in this workspace yet.\n[Extract the atlas](command:rosio.extract)\nrosio reads launch files, parameter yaml, urdf, interfaces and the C++ and Python sources, and writes rosio-out/atlas.json."
+      },
+      {
+        "view": "rosio.unresolved",
+        "contents": "Every value in the atlas was resolved.\nA value rosio cannot work out statically, a topic name built at run time or a parameter read from a variable, is listed here with the line that asked for it."
+      },
+      {
+        "view": "rosio.launch",
+        "contents": "Nothing to show yet.\nOnce the atlas is extracted, the launch files each profile in rosio.yaml starts are listed here with the files they include and every node they start, each one click from its line."
+      },
+      {
+        "view": "rosio.frames",
+        "contents": "Nothing to show yet.\nOnce the atlas is extracted, the links and joints of each urdf and xacro model and the frames the code broadcasts or looks up are listed here, parent above child."
+      },
+      {
+        "view": "rosio.system",
+        "contents": "The nodes, topics, parameters and frames of the system, once the atlas is extracted."
+      },
+      {
+        "view": "rosio.migration",
+        "contents": "List what moving this workspace to another ROS 2 release changes: dependencies the release does not ship, removed headers, CMake functions and APIs, each with its line and source.\n[Plan migration](command:rosio.planMigration)\nExact rewrites are applied in one step; the rest stay listed here, one sentence each."
+      },
+      {
+        "view": "rosio.params",
+        "contents": "No parameters yet.\nOnce the atlas is extracted, every parameter a profile sets is listed here by node, with the value that wins and every line it overrides."
+      }
+    ],
+    "commands": [
+      {
+        "command": "rosio.showGraph",
+        "title": "Show the system graph",
+        "category": "rosio",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "rosio.showRobot",
+        "title": "Show the robot model",
+        "category": "rosio",
+        "icon": "$(symbol-structure)"
+      },
+      {
+        "command": "rosio.openAtlas",
+        "title": "Open the atlas",
+        "category": "rosio",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "rosio.extract",
+        "title": "Extract the atlas",
+        "category": "rosio",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "rosio.find",
+        "title": "Find a node, topic, parameter or frame",
+        "category": "rosio",
+        "icon": "$(search)"
+      },
+      {
+        "command": "rosio.showEntity",
+        "title": "Show in the atlas",
+        "category": "rosio"
+      },
+      {
+        "command": "rosio.checkStamps",
+        "title": "Check the header stamps of a recording",
+        "category": "rosio"
+      },
+      {
+        "command": "rosio.restartServer",
+        "title": "Restart the language server",
+        "category": "rosio"
+      },
+      {
+        "command": "rosio.planMigration",
+        "title": "Plan migration to another ROS 2 release",
+        "shortTitle": "Plan migration",
+        "category": "rosio",
+        "icon": "$(versions)"
+      },
+      {
+        "command": "rosio.applyMigration",
+        "title": "Apply the exact rewrites",
+        "category": "rosio",
+        "icon": "$(replace-all)"
+      },
+      {
+        "command": "rosio.verifyMigration",
+        "title": "Build the workspace in the target release",
+        "shortTitle": "Verify build",
+        "category": "rosio",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "rosio.clearMigration",
+        "title": "Clear the migration plan",
+        "category": "rosio",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "rosio.findParameter",
+        "title": "Find parameter",
+        "category": "rosio",
+        "icon": "$(search)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "rosio.find",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r"
+      },
+      {
+        "command": "rosio.openAtlas",
+        "key": "ctrl+alt+shift+r",
+        "mac": "cmd+alt+shift+r"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "rosio.showRobot",
+          "when": "view == rosio.frames",
+          "group": "navigation@0"
+        },
+        {
+          "command": "rosio.showGraph",
+          "when": "view == rosio.launch || view == rosio.system",
+          "group": "navigation@0"
+        },
+        {
+          "command": "rosio.findParameter",
+          "when": "view == rosio.params",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rosio.find",
+          "when": "view == rosio.system",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rosio.extract",
+          "when": "view == rosio.findings",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rosio.openAtlas",
+          "when": "view == rosio.findings",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rosio.planMigration",
+          "when": "view == rosio.migration",
+          "group": "navigation"
+        },
+        {
+          "command": "rosio.applyMigration",
+          "when": "view == rosio.migration && rosio.migrationRewrites",
+          "group": "navigation"
+        },
+        {
+          "command": "rosio.verifyMigration",
+          "when": "view == rosio.migration && rosio.migrationPlanned",
+          "group": "navigation@5"
+        },
+        {
+          "command": "rosio.clearMigration",
+          "when": "view == rosio.migration && rosio.migrationPlanned",
+          "group": "navigation@9"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "rosio.showGraph",
+          "when": "viewItem == rosio.graphable",
+          "group": "navigation"
+        },
+        {
+          "command": "rosio.applyMigration",
+          "when": "view == rosio.migration && viewItem == migration.automatic",
+          "group": "inline"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "rosio.checkStamps",
+          "when": "resourceFilename == metadata.yaml || resourceExtname == .mcap || resourceExtname == .db3 || resourceExtname == .bag",
+          "group": "rosio"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "rosio.showEntity",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "rosio",
+      "properties": {
+        "rosio.command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "rosio"
+          ],
+          "markdownDescription": "The `rosio` command, as an argument list, for example `[\"python3\", \"-m\", \"rosio\"]`. It needs the ROS environment of the workspace, so start the editor from a shell that sourced it, or point this at a wrapper script."
+        },
+        "rosio.extractArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "extract",
+            "."
+          ],
+          "markdownDescription": "Arguments for extraction. With a `rosio.yaml` in the workspace use `[\"extract\", \"--config\", \"rosio.yaml\"]`."
+        },
+        "rosio.extractOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Extract again when a file the atlas cites is saved."
+        },
+        "rosio.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show endpoint peers and QoS incompatibilities above source lines. Restart the language server after changing this setting."
+        },
+        "rosio.atlasPath": {
+          "type": "string",
+          "default": "rosio-out/atlas.json",
+          "description": "Where the atlas is, relative to the workspace folder."
+        },
+        "rosio.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "The rosio language server executable."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p . --noEmit",
+    "build": "tsc -p . --noEmit && node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "package": "tsc -p . --noEmit && node scripts/build.mjs --minify && vsce package --no-dependencies -o rosio.vsix",
+    "test:e2e": "node scripts/build.mjs && node test-e2e/run.mjs",
+    "test": "node --test test-unit/*.test.cjs"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.12",
+    "mocha": "^11.8.0",
+    "typescript": "~5.9.2"
+  }
+}

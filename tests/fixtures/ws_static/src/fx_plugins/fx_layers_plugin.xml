@@ -1,0 +1,17 @@
+<!-- library path deliberately differs from the package name. -->
+<library path="fx_plugin_layers">
+  <class name="fx_plugins/DecayLayer"
+         type="fx_plugins::DecayLayer"
+         base_class_type="fx_core::Layer">
+    <description>
+      Rasterizes tracked objects as lethal footprints with a decaying sweep.
+    </description>
+  </class>
+  <!-- No name attribute, so the lookup name falls back to the type. -->
+  <class type="fx_plugins::StaticLayer"
+         base_class_type="fx_core::Layer">
+    <description>
+      Stamps a static occupancy grid into the costmap.
+    </description>
+  </class>
+</library>

@@ -1,0 +1,55 @@
+{
+  "arg_declarations": [
+    {
+      "default": "relay_default",
+      "name": "child_name"
+    },
+    {
+      "default": "10.0",
+      "name": "child_rate"
+    }
+  ],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/include_child.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "scan_relay",
+      "form": "node",
+      "fqn": "/relay_default",
+      "gates": [],
+      "name": "relay_default",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "inline_dict",
+          "note": "",
+          "order": 0,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "rate_hz",
+              10.0
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 10, the child walked on its own, so both defaults apply.",
+  "predicates": {},
+  "strategy": "executed"
+}

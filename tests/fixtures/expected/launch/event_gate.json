@@ -1,0 +1,91 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/event_gate.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "health_monitor",
+      "form": "node",
+      "fqn": "/lifecycle_manager_sensors",
+      "gates": [
+        {
+          "mechanism": "OnProcessExit",
+          "period": null,
+          "target": "ready_gate"
+        }
+      ],
+      "name": "lifecycle_manager_sensors",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "inline_dict",
+          "note": "",
+          "order": 0,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "autostart",
+              true
+            ],
+            [
+              "node_names",
+              [
+                "ouster/os_driver"
+              ]
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lidar_driver",
+      "form": "node",
+      "fqn": "/ouster/os_driver",
+      "gates": [
+        {
+          "mechanism": "OnProcessExit",
+          "period": null,
+          "target": "ready_gate"
+        }
+      ],
+      "name": "os_driver",
+      "name_source": "literal",
+      "namespace": "/ouster",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/zoo_node_wildcard.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 4. Both nodes are reachable only as the on_exit payload of the ready_gate process. The gate itself carries no --ros-args tail, so it is not a node.",
+  "predicates": {},
+  "strategy": "executed"
+}

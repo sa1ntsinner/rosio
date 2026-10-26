@@ -1,0 +1,10 @@
+<!-- fx_missing_library is built by nothing in this workspace. -->
+<library path="fx_missing_library">
+  <class name="fx_plugins/GoalTool"
+         type="fx_plugins::GoalTool"
+         base_class_type="fx_tools::Tool">
+    <description>
+      Click to place a goal pose.
+    </description>
+  </class>
+</library>

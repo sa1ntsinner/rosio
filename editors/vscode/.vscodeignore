@@ -1,0 +1,11 @@
+node_modules/**
+src/**
+webview/**
+test-e2e/**
+test-unit/**
+scripts/**
+.vscode-test/**
+tsconfig.json
+**/*.map
+.gitignore
+DEVELOPMENT.md

@@ -1,0 +1,126 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/group_scope.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "imu_driver",
+      "form": "node",
+      "fqn": "/outside_node",
+      "gates": [],
+      "name": "outside_node",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lx_controller",
+      "form": "node",
+      "fqn": "/yard/controller",
+      "gates": [],
+      "name": "controller",
+      "name_source": "literal",
+      "namespace": "/yard",
+      "params": [
+        {
+          "kind": "inline_dict",
+          "note": "SetParameter, group scoped",
+          "order": 0,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "use_sim_time",
+              true
+            ]
+          ]
+        },
+        {
+          "kind": "inline_dict",
+          "note": "",
+          "order": 1,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "controller_frequency",
+              20.0
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_bringup",
+      "plugin_class": null,
+      "remaps": [
+        {
+          "from": "scan",
+          "scope": "global",
+          "to": "/yard/scan_filtered"
+        }
+      ]
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "scan_relay",
+      "form": "node",
+      "fqn": "/yard/scan_relay",
+      "gates": [],
+      "name": "scan_relay",
+      "name_source": "literal",
+      "namespace": "/yard",
+      "params": [
+        {
+          "kind": "inline_dict",
+          "note": "SetParameter, group scoped",
+          "order": 0,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "use_sim_time",
+              true
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": [
+        {
+          "from": "scan",
+          "scope": "global",
+          "to": "/yard/scan_filtered"
+        },
+        {
+          "from": "input",
+          "scope": "node",
+          "to": "/yard/points"
+        }
+      ]
+    }
+  ],
+  "note": "Case 7. The group remap is applied before the node's own remap and the group parameter before the node's own parameters, so both lists carry the group entry first. Nothing outside the group is touched.",
+  "predicates": {},
+  "strategy": "executed"
+}

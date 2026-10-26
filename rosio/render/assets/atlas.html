@@ -1,0 +1,69 @@
+<header id="top">
+  <div class="brand"><svg viewBox="3 4 26 24" aria-hidden="true"><rect x="3.5" y="4.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="10.5" width="19" height="5" rx="1.3"/><rect class="slid" x="9.5" y="16.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="22.5" width="19" height="5" rx="1.3"/></svg>rosio<span>atlas</span></div>
+  <div id="counts" class="counts"></div>
+  <nav class="tabs">
+    <button type="button" data-view="graph" class="on">Graph</button>
+    <button type="button" data-view="params">Parameters</button>
+    <button type="button" data-view="findings">Findings<span id="findcount"></span></button>
+  </nav>
+</header>
+<main>
+  <aside id="side">
+    <label class="field">
+      <span>search by name</span>
+      <input id="search" type="search" autocomplete="off" spellcheck="false" placeholder="cost_penalty, collision_monitor, os_sensor">
+    </label>
+    <div id="matches" class="matches"></div>
+    <div class="group"><h2>profile</h2><div id="f-profiles"></div></div>
+    <div class="group"><h2>layer</h2><div id="f-layers"></div></div>
+    <div class="group"><h2>finding</h2><div id="f-finding"></div></div>
+    <div class="group"><h2>kind</h2><div id="f-kinds" class="kinds"></div></div>
+    <div class="group"><h2>legend</h2>
+      <ul class="legend">
+        <li><i class="sw agree"></i>layers agree</li>
+        <li><i class="sw differ"></i>layers differ, or a conflict</li>
+        <li><i class="sw declared"></i>declared only</li>
+        <li><i class="sw coded"></i>coded only</li>
+        <li><i class="sw observed"></i>observed only</li>
+        <li><i class="sw recorded"></i>recorded only</li>
+        <li><i class="sw ring"></i>carries a finding</li>
+      </ul>
+    </div>
+  </aside>
+  <section id="stage">
+    <div id="view-graph" class="view on">
+      <canvas id="graph"></canvas>
+      <div id="tip" class="tip" hidden></div>
+      <div class="graphbar">
+        <button type="button" id="fit">fit</button>
+        <span id="shown"></span>
+      </div>
+    </div>
+    <div id="view-params" class="view">
+      <div class="paramlist">
+        <label class="field">
+          <span>parameter</span>
+          <input id="psearch" type="search" autocomplete="off" spellcheck="false" placeholder="filter by name or node">
+        </label>
+        <div class="chips" id="pchips">
+          <button type="button" data-chip="all" class="on">all</button>
+          <button type="button" data-chip="shadowed">shadowed</button>
+          <button type="button" data-chip="finding">with finding</button>
+          <button type="button" data-chip="inert">not effective</button>
+        </div>
+        <div id="prows" class="rows"></div>
+      </div>
+      <div id="chain" class="chain"><p class="empty">Pick a parameter. The chain shows every candidate in rank order, the winner first, and why each of the others lost.</p></div>
+    </div>
+    <div id="view-findings" class="view">
+      <div class="chips" id="fchips">
+        <button type="button" data-sev="all" class="on">all</button>
+        <button type="button" data-sev="error">error</button>
+        <button type="button" data-sev="warn">warn</button>
+        <button type="button" data-sev="info">info</button>
+      </div>
+      <div id="frows" class="rows wide"></div>
+    </div>
+  </section>
+  <aside id="panel"><div id="panelbody"><p class="empty">Click a node in the graph, a parameter, or a finding.</p></div></aside>
+</main>

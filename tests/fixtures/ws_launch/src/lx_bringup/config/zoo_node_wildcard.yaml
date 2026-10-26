@@ -1,0 +1,10 @@
+# SHAPE 3: wildcard prefixed node name. It matches os_driver whatever namespace the node
+# is launched into, including the root namespace.
+/**/os_driver:
+  ros__parameters:
+    lidar_mode: "1024x10"
+    lidar_frame: os_lidar
+    imu_frame: os_imu
+    # Explicit empty value.
+    metadata: ''
+    azimuth_window: [0, 360000]

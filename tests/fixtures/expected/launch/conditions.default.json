@@ -1,0 +1,43 @@
+{
+  "arg_declarations": [
+    {
+      "default": "false",
+      "name": "enable_extra"
+    }
+  ],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/conditions.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [
+        "UnlessCondition(LaunchConfiguration('enable_extra'))"
+      ],
+      "container": null,
+      "executable": "imu_driver",
+      "form": "node",
+      "fqn": "/unless_node",
+      "gates": [
+        {
+          "mechanism": "UnlessCondition",
+          "period": null,
+          "target": ""
+        }
+      ],
+      "name": "unless_node",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 6 with the default argument. if_node is kept by the resolver with a gate whose outcome is false and attrs.unreachable set, which is what the drift engine needs to answer whether a node is ever started in any profile, and the test projection leaves it out of this reachable set. unless_node appears with the condition recorded as its gate. Launch states no namespace for either node, which is the root namespace and not an unknown one.",
+  "predicates": {},
+  "strategy": "executed"
+}

@@ -1,0 +1,12 @@
+rosio atlas, schema 1.13, 1865 entities and 2196 edges
+layers present: declared   capabilities: drift.findings, layer.declared, param.candidates, profile.entrypoints
+profiles (1): nav2_bringup_composed
+entities: file 586, type 530, param 354, pparam 97, plugin 90, pkg 85, frame 48, launchent 20, pinst 19, node 17, and 4 more kinds
+coverage: 10 values unresolved of 1012 wanted, rate 0.990
+  weakest: node_name 0.89, other 0.92, frame_id 1.00
+drift: 27 findings, 24 info, 3 warn
+  warn  extract.input_refused  nav2_theta_star_planner/global_planner_plugin.xml was refused: plugin_manifest_missing   nav2_theta_star_planner/global_planner_plugin.xml [install]
+  warn  param.orphan_block  block loopback_simulator owns nothing in nav2_bringup_composed   nav2_bringup/params/nav2_params.yaml:458 [install]
+  warn  param.orphan_block  block map_saver owns nothing in nav2_bringup_composed   nav2_bringup/params/nav2_params.yaml:271 [install]
+  info  plugin.unused  dwb_core::DWBLocalPlanner is built and never selected   dwb_core/local_planner_plugin.xml [install]
+next: param_chain for one parameter value, drift for the findings, explain for one entity, query for plain words

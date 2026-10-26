@@ -1,0 +1,10 @@
+roots:
+  - kind: src
+    path: src
+  - kind: install
+    path: install
+
+profiles:
+  - slug: demo
+    entrypoints:
+      - launch: uninstalled_config demo.launch.py

@@ -1,0 +1,7 @@
+<library path="cx_nodes_layers">
+  <class name="cx_nodes/DecayLayer"
+         type="cx_nodes::DecayLayer"
+         base_class_type="cx_core::Layer">
+    <description>Costmap layer whose topic parameter is prefixed with the instance name.</description>
+  </class>
+</library>

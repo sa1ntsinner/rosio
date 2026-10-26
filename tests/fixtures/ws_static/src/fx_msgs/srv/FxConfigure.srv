@@ -1,0 +1,6 @@
+string profile
+float64[<=4] limits
+bool dry_run false
+---
+bool accepted
+string reason

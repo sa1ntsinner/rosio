@@ -1,0 +1,268 @@
+{
+  "counts": {
+    "real": {
+      "joints": 9,
+      "links": 10
+    },
+    "sim": {
+      "joints": 10,
+      "links": 11
+    },
+    "sim_trailer": {
+      "joints": 13,
+      "links": 14
+    }
+  },
+  "frame_parent_differs": {
+    "imu_link": {
+      "sim": "base_link",
+      "sim_trailer": "sensor_link"
+    }
+  },
+  "gazebo_plugins": {
+    "real": [],
+    "sim": [
+      {
+        "filename": "libgazebo_ros_ray_sensor.so",
+        "frame_name": "sensor_link",
+        "name": "fx_lidar_plugin",
+        "namespace": "/fx",
+        "reference": "sensor_link",
+        "remappings": [
+          "~/out:=/fx/points"
+        ],
+        "sensor": "fx_lidar"
+      },
+      {
+        "filename": "libfx_tricycle_drive.so",
+        "frame_name": null,
+        "name": "fx_tricycle_drive",
+        "namespace": "/fx",
+        "reference": null,
+        "remappings": [
+          "cmd_vel:=/fx/cmd_vel_sim",
+          "odom:=/fx/odom_sim"
+        ]
+      }
+    ],
+    "sim_trailer": [
+      {
+        "filename": "libgazebo_ros_ray_sensor.so",
+        "frame_name": "sensor_ray",
+        "name": "fx_lidar_plugin",
+        "namespace": "/fx",
+        "reference": "sensor_link",
+        "remappings": [
+          "~/out:=/fx/points"
+        ],
+        "sensor": "fx_lidar"
+      },
+      {
+        "filename": "libfx_tricycle_drive.so",
+        "frame_name": null,
+        "name": "fx_tricycle_drive",
+        "namespace": "/fx",
+        "reference": null,
+        "remappings": [
+          "cmd_vel:=/fx/cmd_vel_sim",
+          "odom:=/fx/odom_trailer"
+        ]
+      }
+    ]
+  },
+  "joint_limit_differs": {
+    "caster_swivel_joint": {
+      "real": {
+        "effort": 40.0,
+        "lower": -0.7854,
+        "upper": 0.7854,
+        "velocity": 2.0
+      },
+      "sim": {
+        "effort": 60.0,
+        "lower": -0.785,
+        "upper": 0.785,
+        "velocity": 2.5
+      },
+      "sim_trailer": {
+        "effort": 60.0,
+        "lower": -0.785,
+        "upper": 0.785,
+        "velocity": 2.5
+      }
+    },
+    "caster_wheel_joint": {
+      "real": null,
+      "sim": {
+        "effort": 60.0,
+        "velocity": 2.5
+      },
+      "sim_trailer": {
+        "effort": 60.0,
+        "velocity": 2.5
+      }
+    },
+    "drive_left_joint": {
+      "real": null,
+      "sim": {
+        "effort": 60.0,
+        "velocity": 2.5
+      },
+      "sim_trailer": {
+        "effort": 60.0,
+        "velocity": 2.5
+      }
+    },
+    "drive_right_joint": {
+      "real": null,
+      "sim": {
+        "effort": 60.0,
+        "velocity": 2.5
+      },
+      "sim_trailer": {
+        "effort": 60.0,
+        "velocity": 2.5
+      }
+    },
+    "steer_indicator_joint": {
+      "real": {
+        "effort": 1.0,
+        "lower": -0.7854,
+        "upper": 0.7854,
+        "velocity": 1.0
+      },
+      "sim": {
+        "effort": 1.0,
+        "lower": -0.785,
+        "upper": 0.785,
+        "velocity": 1.0
+      },
+      "sim_trailer": {
+        "effort": 1.0,
+        "lower": -0.785,
+        "upper": 0.785,
+        "velocity": 1.0
+      }
+    }
+  },
+  "joint_mimic_differs": {
+    "steer_indicator_joint": {
+      "real": {
+        "joint": "caster_swivel_joint",
+        "multiplier": 1.0,
+        "offset": 0.0
+      },
+      "sim": {
+        "joint": "caster_swivel_joint",
+        "multiplier": 1.0,
+        "offset": 0.0
+      },
+      "sim_trailer": {
+        "joint": "caster_swivel_joint",
+        "multiplier": 0.5,
+        "offset": 0.02
+      }
+    }
+  },
+  "joint_origin_differs": {
+    "sensor_joint": {
+      "real": {
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "xyz": [
+          0.4,
+          0.0,
+          0.25
+        ]
+      },
+      "sim": {
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "xyz": [
+          0.42,
+          0.0,
+          0.27
+        ]
+      },
+      "sim_trailer": {
+        "rpy": [
+          1.57,
+          0.0,
+          1.57
+        ],
+        "xyz": [
+          0.38,
+          0.0,
+          0.31
+        ]
+      }
+    }
+  },
+  "joint_type_differs": {},
+  "joints_in_all": [
+    "base_joint",
+    "caster_swivel_joint",
+    "caster_wheel_joint",
+    "drive_left_joint",
+    "drive_right_joint",
+    "sensor_joint",
+    "steer_indicator_joint"
+  ],
+  "joints_only_in": {
+    "real": [
+      "imu_mount_joint",
+      "tow_joint"
+    ],
+    "sim": [
+      "gps_mount_joint"
+    ],
+    "sim_trailer": [
+      "sensor_ray_joint",
+      "trailer_left_joint",
+      "trailer_right_joint",
+      "trailer_tow_joint"
+    ]
+  },
+  "links_in_all": [
+    "base_footprint",
+    "base_link",
+    "caster_swivel_link",
+    "caster_wheel",
+    "drive_left_wheel",
+    "drive_right_wheel",
+    "sensor_link",
+    "steer_indicator"
+  ],
+  "links_only_in": {
+    "real": [
+      "imu_mount",
+      "tow_link"
+    ],
+    "sim": [
+      "gps_mount"
+    ],
+    "sim_trailer": [
+      "sensor_ray",
+      "trailer_left_wheel",
+      "trailer_link",
+      "trailer_right_wheel"
+    ]
+  },
+  "note": "Exact differences between the three fx_robot urdf variants. All three declare robot name fx_robot, so keying a model by its robot name merges three different robots.",
+  "robot_name": {
+    "real": "fx_robot",
+    "sim": "fx_robot",
+    "sim_trailer": "fx_robot"
+  },
+  "variants": [
+    "real",
+    "sim",
+    "sim_trailer"
+  ]
+}

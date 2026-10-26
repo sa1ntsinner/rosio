@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>split_nodes</name>
+  <version>0.0.1</version>
+  <description>Node classes declared in a header and defined in a sibling source.</description>
+  <maintainer email="maintainer@example.com">Maintainer</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+</package>

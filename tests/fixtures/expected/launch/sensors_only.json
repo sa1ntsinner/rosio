@@ -1,0 +1,52 @@
+{
+  "arg_declarations": [
+    {
+      "default": "",
+      "name": "namespace"
+    }
+  ],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_sensors/launch/sensors_only.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lidar_driver",
+      "form": "node",
+      "fqn": "/lidar_driver",
+      "gates": [],
+      "name": "lidar_driver",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_sensors/config/lidar_driver.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": [
+        {
+          "from": "points",
+          "scope": "node",
+          "to": "/points"
+        }
+      ]
+    }
+  ],
+  "note": "A launch file in the second package. It resolves its config next to itself in the source tree, and the same file exists in the install share, so which root answered has to be recorded per evidence row. The namespace argument defaults to the empty string, which is a stated namespace and therefore resolves to root.",
+  "predicates": {},
+  "strategy": "executed"
+}

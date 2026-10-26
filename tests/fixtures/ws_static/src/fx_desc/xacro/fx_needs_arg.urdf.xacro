@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!--
+  sensor_height is used but never declared with a default, so processing this
+  file without an argument raises. A resolver must report the missing argument,
+  not skip the file. xacro:arg itself requires a default attribute, which is
+  why the argument is simply undeclared here.
+-->
+<robot name="fx_robot_arg" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <link name="base_link"/>
+
+  <joint name="sensor_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="sensor_link"/>
+    <origin xyz="0.4 0 $(arg sensor_height)" rpy="0 0 0"/>
+  </joint>
+
+  <link name="sensor_link"/>
+
+</robot>

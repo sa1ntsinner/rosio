@@ -1,0 +1,48 @@
+{
+  "arg_declarations": [
+    {
+      "default": "false",
+      "name": "enable_extra"
+    }
+  ],
+  "args": [
+    [
+      "enable_extra",
+      "true"
+    ]
+  ],
+  "case": "enabled",
+  "entry": "src/lx_bringup/launch/conditions.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [
+        "IfCondition(LaunchConfiguration('enable_extra'))"
+      ],
+      "container": null,
+      "executable": "scan_relay",
+      "form": "node",
+      "fqn": "/if_node",
+      "gates": [
+        {
+          "mechanism": "IfCondition",
+          "period": null,
+          "target": ""
+        }
+      ],
+      "name": "if_node",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 6 with the argument flipped. Now only if_node exists.",
+  "predicates": {},
+  "strategy": "executed"
+}

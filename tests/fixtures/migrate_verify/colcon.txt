@@ -1,0 +1,22 @@
+Starting >>> controller
+Starting >>> geometry
+--- stderr: controller
+/rosio_ws/src/src/controller/node.cpp:12:7: error: removed API
+/rosio_ws/src/src/controller/node.cpp:40:3: fatal error: missing.hpp: No such file or directory
+collect2: error: ld returned 1 exit status
+---
+Failed   <<< controller [1.2s, exited with code 2]
+--- stderr: geometry
+CMake Error at /rosio_ws/src/src/geometry/CMakeLists.txt:8 (find_package):
+  By not providing "Findmissing.cmake" in CMAKE_MODULE_PATH this project asked
+  CMake to find a package configuration file provided by "missing".
+
+  Could not find a package configuration file provided by "missing".
+
+---
+Failed   <<< geometry [0.2s, exited with code 1]
+Starting >>> utility
+Finished <<< utility [0.1s]
+Summary: 1 package finished [1.4s]
+  2 packages failed: controller geometry
+  1 package not processed

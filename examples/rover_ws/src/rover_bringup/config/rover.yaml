@@ -1,0 +1,14 @@
+scan_filter:
+  ros__parameters:
+    min_range: 0.15
+    max_range: 8.0
+    frame_id: laser_link
+
+safety_stop:
+  ros__parameters:
+    stop_distnce: 0.35
+    max_speed: 0.6
+
+odometry:
+  ros__parameters:
+    publish_tf: true

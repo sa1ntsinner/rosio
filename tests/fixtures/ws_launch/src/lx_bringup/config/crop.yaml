@@ -1,0 +1,5 @@
+# Handed to the ExecuteProcess node through --params-file, after two -p assignments.
+cropper:
+  ros__parameters:
+    rate_hz: 5.0
+    input_topic: /points_raw

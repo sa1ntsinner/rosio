@@ -1,0 +1,9 @@
+---
+description: Ask rosio about this ROS 2 workspace before reading launch files or yaml by hand. Parameters, endpoints, plugins, frames and drift, answered deterministically from a prebuilt atlas.
+alwaysApply: false
+globs: ["**/*.launch.py", "**/*.yaml", "**/*.urdf", "**/*.xacro"]
+---
+
+# rosio
+
+{{core}}

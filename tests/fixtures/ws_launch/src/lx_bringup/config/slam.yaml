@@ -1,0 +1,7 @@
+slam_toolbox:
+  ros__parameters:
+    mode: mapping
+    # yaml resolves this to the string None, not to null.
+    ceres_loss_function: None
+    max_laser_range: 50.0
+    scan_topic: /scan_filtered

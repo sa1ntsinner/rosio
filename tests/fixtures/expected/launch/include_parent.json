@@ -1,0 +1,46 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/include_parent.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "scan_relay",
+      "form": "node",
+      "fqn": "/relay_child",
+      "gates": [],
+      "name": "relay_child",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "inline_dict",
+          "note": "",
+          "order": 0,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "rate_hz",
+              30.0
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 10. The child path is a substitution and the two launch arguments reach the child, so the node name and the rate both come from the parent. launch_ros infers the parameter type from the argument text, so 30.0 arrives as a float.",
+  "predicates": {},
+  "strategy": "executed"
+}

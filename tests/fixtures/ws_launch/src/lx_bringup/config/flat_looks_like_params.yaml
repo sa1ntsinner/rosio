@@ -1,0 +1,6 @@
+# Looks like a parameter file and is not one: real parameter names at the document root,
+# no node key and no ros__parameters, so a ROS 2 parameter parser finds zero parameters.
+device: tcp://203.0.113.7:28784
+configure_rx: true
+custom_commands_file: ""
+rate_hz: 20.0

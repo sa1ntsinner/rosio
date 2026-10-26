@@ -1,0 +1,16 @@
+$ rosio migrate plan --from humble --to lyrical
+rosio migrate humble -> lyrical: 35 changes in 7 packages, 0 rewritten by apply, 35 by hand
+
+action_tutorials_cpp
+  src/action_tutorials_cpp/CMakeLists.txt:34  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for rclcpp, rclcpp_action, rclcpp_components are not measured per release; check the package's exported targets and link by hand
+                                              https://github.com/ament/ament_cmake/pull/614
+
+composition
+  src/composition/CMakeLists.txt:30  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for rclcpp, rclcpp_components, std_msgs are not measured per release; check the package's exported targets and link by hand
+                                     https://github.com/ament/ament_cmake/pull/614
+  src/composition/CMakeLists.txt:41  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for rclcpp, rclcpp_components, std_msgs are not measured per release; check the package's exported targets and link by hand
+                                     https://github.com/ament/ament_cmake/pull/614
+  src/composition/CMakeLists.txt:52  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for rclcpp, rclcpp_components, std_msgs are not measured per release; check the package's exported targets and link by hand
+                                     https://github.com/ament/ament_cmake/pull/614
+  src/composition/CMakeLists.txt:63  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for example_interfaces, rclcpp, rclcpp_components are not measured per release; check the package's exported targets and link by hand
+                                     https://github.com/ament/ament_cmake/pull/614

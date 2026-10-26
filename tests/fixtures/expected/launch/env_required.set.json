@@ -1,0 +1,51 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "set",
+  "entry": "src/lx_bringup/launch/env_required.launch.py",
+  "env": [
+    [
+      "LX_ROOT",
+      "<ws_launch>"
+    ]
+  ],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "health_monitor",
+      "form": "node",
+      "fqn": "/health_monitor",
+      "gates": [],
+      "name": "health_monitor",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "inline_dict",
+          "note": "",
+          "order": 0,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "root_configured",
+              true
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 11 with the environment variable injected, which is the point of Config.env.",
+  "predicates": {},
+  "strategy": "executed"
+}

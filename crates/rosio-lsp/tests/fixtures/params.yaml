@@ -1,0 +1,8 @@
+example:
+  ros__parameters:
+    speed: 1
+    rewritten: 1
+    old: 3
+    override: 4
+    missing: true
+    unused: false

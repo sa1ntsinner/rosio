@@ -1,0 +1,121 @@
+{
+  "note": "Expected xacro handling. fx_robot.urdf.xacro is processable with no arguments because every xacro:arg has a default. fx_needs_arg.urdf.xacro declares sensor_height with no default, so processing it without an argument fails and the failure must be reported as a missing argument, not as a skipped file.",
+  "files": {
+    "src/fx_desc/xacro/fx_common.xacro": {
+      "kind": "include_only",
+      "robot_name": null,
+      "properties": [
+        {"name": "wheel_radius", "value": "0.11"},
+        {"name": "wheel_width", "value": "0.04"}
+      ],
+      "macros": [
+        {"name": "fx_wheel", "params": ["prefix", "reflect"]}
+      ],
+      "args": [],
+      "includes": []
+    },
+    "src/fx_desc/xacro/fx_robot.urdf.xacro": {
+      "kind": "model",
+      "robot_name": "fx_robot",
+      "properties": [
+        {"name": "base_height", "value": "$(arg base_height)"},
+        {"name": "sensor_x", "value": "0.4"}
+      ],
+      "macros": [],
+      "args": [
+        {"name": "base_height", "default": "0.12"}
+      ],
+      "includes": [
+        {
+          "raw": "fx_common.xacro",
+          "package": null,
+          "resolved": "src/fx_desc/xacro/fx_common.xacro"
+        }
+      ],
+      "macro_calls": [
+        {"macro": "fx_wheel", "args": {"prefix": "drive_left", "reflect": "1"}},
+        {"macro": "fx_wheel", "args": {"prefix": "drive_right", "reflect": "-1"}}
+      ],
+      "expanded": {
+        "links": [
+          "base_footprint",
+          "base_link",
+          "drive_left_wheel",
+          "drive_right_wheel",
+          "sensor_link"
+        ],
+        "joints": {
+          "base_joint": {
+            "type": "fixed",
+            "parent": "base_footprint",
+            "child": "base_link",
+            "xyz": [0.0, 0.0, 0.12],
+            "rpy": [0.0, 0.0, 0.0]
+          },
+          "drive_left_joint": {
+            "type": "continuous",
+            "parent": "base_link",
+            "child": "drive_left_wheel",
+            "xyz": [0.05, 0.21, -0.02],
+            "rpy": [0.0, 0.0, 0.0]
+          },
+          "drive_right_joint": {
+            "type": "continuous",
+            "parent": "base_link",
+            "child": "drive_right_wheel",
+            "xyz": [0.05, -0.21, -0.02],
+            "rpy": [0.0, 0.0, 0.0]
+          },
+          "sensor_joint": {
+            "type": "fixed",
+            "parent": "base_link",
+            "child": "sensor_link",
+            "xyz": [0.4, 0.0, 0.25],
+            "rpy": [0.0, 0.0, 0.0]
+          }
+        },
+        "roots": ["base_footprint"]
+      }
+    },
+    "src/fx_desc/xacro/fx_needs_arg.urdf.xacro": {
+      "kind": "model",
+      "robot_name": "fx_robot_arg",
+      "properties": [],
+      "macros": [],
+      "args": [],
+      "includes": [],
+      "macro_calls": [],
+      "needs_arguments": ["sensor_height"],
+      "needs_arguments_note": "sensor_height is used as $(arg sensor_height) and never declared, so xacro raises 'Undefined substitution argument sensor_height'. xacro:arg cannot express this, it requires a default attribute.",
+      "expanded_with": {
+        "args": {"sensor_height": "0.42"},
+        "links": ["base_link", "sensor_link"],
+        "joints": {
+          "sensor_joint": {
+            "type": "fixed",
+            "parent": "base_link",
+            "child": "sensor_link",
+            "xyz": [0.4, 0.0, 0.42],
+            "rpy": [0.0, 0.0, 0.0]
+          }
+        },
+        "roots": ["base_link"]
+      }
+    }
+  },
+  "discovery": {
+    "note": "Filter by extension, not by prefix.",
+    "urdf_files": [
+      "src/fx_desc/urdf/fx_broken.urdf",
+      "src/fx_desc/urdf/fx_robot.urdf",
+      "src/fx_desc/urdf/fx_robot_sim.urdf",
+      "src/fx_desc/urdf/fx_robot_sim_trailer.urdf"
+    ],
+    "xacro_files": [
+      "src/fx_desc/xacro/fx_common.xacro",
+      "src/fx_desc/xacro/fx_needs_arg.urdf.xacro",
+      "src/fx_desc/xacro/fx_robot.urdf.xacro"
+    ],
+    "ignored": ["src/fx_desc/urdf/fx_robot_sim.urdf.cad_backup"]
+  }
+}

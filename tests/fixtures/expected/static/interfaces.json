@@ -1,0 +1,455 @@
+{
+  "interfaces": {
+    "fx_msgs/action/FxDock": {
+      "depends_on": [
+        "fx_msgs/msg/FxPoint"
+      ],
+      "feedback": {
+        "constants": [],
+        "fields": [
+          {
+            "array": null,
+            "default": null,
+            "name": "progress",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "float32",
+            "written_relative": false
+          },
+          {
+            "array": null,
+            "default": null,
+            "name": "stage",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "string",
+            "written_relative": false
+          }
+        ]
+      },
+      "goal": {
+        "constants": [
+          {
+            "name": "MODE_FRONT",
+            "type": "uint8",
+            "value": 0
+          },
+          {
+            "name": "MODE_REAR",
+            "type": "uint8",
+            "value": 1
+          }
+        ],
+        "fields": [
+          {
+            "array": null,
+            "default": null,
+            "name": "target",
+            "package": "fx_msgs",
+            "primitive": false,
+            "string_upper_bound": null,
+            "type": "FxPoint",
+            "written_relative": true
+          },
+          {
+            "array": null,
+            "default": null,
+            "name": "mode",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "uint8",
+            "written_relative": false
+          },
+          {
+            "array": null,
+            "default": 0.05,
+            "name": "tolerance",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "float64",
+            "written_relative": false
+          }
+        ]
+      },
+      "path": "src/fx_msgs/action/FxDock.action",
+      "result": {
+        "constants": [],
+        "fields": [
+          {
+            "array": null,
+            "default": null,
+            "name": "docked",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "bool",
+            "written_relative": false
+          },
+          {
+            "array": null,
+            "default": null,
+            "name": "residual",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "float64",
+            "written_relative": false
+          }
+        ]
+      }
+    },
+    "fx_msgs/msg/FxArray": {
+      "constants": [],
+      "depends_on": [
+        "fx_msgs/msg/FxState",
+        "std_msgs/msg/Header"
+      ],
+      "fields": [
+        {
+          "array": null,
+          "default": null,
+          "name": "header",
+          "package": "std_msgs",
+          "primitive": false,
+          "string_upper_bound": null,
+          "type": "Header",
+          "written_relative": false
+        },
+        {
+          "array": {
+            "kind": "unbounded"
+          },
+          "default": null,
+          "name": "states",
+          "package": "fx_msgs",
+          "primitive": false,
+          "string_upper_bound": null,
+          "type": "FxState",
+          "written_relative": true
+        }
+      ],
+      "path": "src/fx_msgs/msg/FxArray.msg"
+    },
+    "fx_msgs/msg/FxPoint": {
+      "constants": [],
+      "depends_on": [],
+      "fields": [
+        {
+          "array": null,
+          "default": null,
+          "name": "x",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "float64",
+          "written_relative": false
+        },
+        {
+          "array": null,
+          "default": null,
+          "name": "y",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "float64",
+          "written_relative": false
+        },
+        {
+          "array": null,
+          "default": null,
+          "name": "yaw",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "float64",
+          "written_relative": false
+        }
+      ],
+      "path": "src/fx_msgs/msg/FxPoint.msg"
+    },
+    "fx_msgs/msg/FxState": {
+      "constants": [
+        {
+          "name": "STATUS_UNKNOWN",
+          "type": "uint8",
+          "value": 0
+        },
+        {
+          "name": "STATUS_OK",
+          "type": "uint8",
+          "value": 1
+        },
+        {
+          "name": "STATUS_FAULT",
+          "type": "uint8",
+          "value": 2
+        },
+        {
+          "name": "MAX_TRACKS",
+          "type": "int32",
+          "value": 16
+        },
+        {
+          "name": "DEFAULT_FRAME",
+          "type": "string",
+          "value": "odom"
+        }
+      ],
+      "depends_on": [
+        "fx_msgs/msg/FxPoint",
+        "fx_other_msgs/msg/FxTag",
+        "std_msgs/msg/Header"
+      ],
+      "fields": [
+        {
+          "array": null,
+          "default": null,
+          "name": "header",
+          "package": "std_msgs",
+          "primitive": false,
+          "string_upper_bound": null,
+          "type": "Header",
+          "written_relative": false
+        },
+        {
+          "array": null,
+          "default": "odom",
+          "name": "child_frame_id",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "string",
+          "written_relative": false
+        },
+        {
+          "array": null,
+          "default": null,
+          "name": "pose",
+          "package": "fx_msgs",
+          "primitive": false,
+          "string_upper_bound": null,
+          "type": "FxPoint",
+          "written_relative": true
+        },
+        {
+          "array": {
+            "kind": "unbounded"
+          },
+          "default": null,
+          "name": "history",
+          "package": "fx_msgs",
+          "primitive": false,
+          "string_upper_bound": null,
+          "type": "FxPoint",
+          "written_relative": true
+        },
+        {
+          "array": {
+            "kind": "fixed",
+            "size": 4
+          },
+          "default": null,
+          "name": "corners",
+          "package": "fx_msgs",
+          "primitive": false,
+          "string_upper_bound": null,
+          "type": "FxPoint",
+          "written_relative": true
+        },
+        {
+          "array": {
+            "kind": "bounded",
+            "size": 8
+          },
+          "default": null,
+          "name": "weights",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "float64",
+          "written_relative": false
+        },
+        {
+          "array": null,
+          "default": null,
+          "name": "tag",
+          "package": "fx_other_msgs",
+          "primitive": false,
+          "string_upper_bound": null,
+          "type": "FxTag",
+          "written_relative": false
+        },
+        {
+          "array": null,
+          "default": null,
+          "name": "status",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "uint8",
+          "written_relative": false
+        },
+        {
+          "array": null,
+          "default": true,
+          "name": "valid",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "bool",
+          "written_relative": false
+        },
+        {
+          "array": null,
+          "default": 0.5,
+          "name": "confidence",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "float32",
+          "written_relative": false
+        }
+      ],
+      "path": "src/fx_msgs/msg/FxState.msg"
+    },
+    "fx_msgs/srv/FxConfigure": {
+      "depends_on": [],
+      "path": "src/fx_msgs/srv/FxConfigure.srv",
+      "request": {
+        "constants": [],
+        "fields": [
+          {
+            "array": null,
+            "default": null,
+            "name": "profile",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "string",
+            "written_relative": false
+          },
+          {
+            "array": {
+              "kind": "bounded",
+              "size": 4
+            },
+            "default": null,
+            "name": "limits",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "float64",
+            "written_relative": false
+          },
+          {
+            "array": null,
+            "default": false,
+            "name": "dry_run",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "bool",
+            "written_relative": false
+          }
+        ]
+      },
+      "response": {
+        "constants": [],
+        "fields": [
+          {
+            "array": null,
+            "default": null,
+            "name": "accepted",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "bool",
+            "written_relative": false
+          },
+          {
+            "array": null,
+            "default": null,
+            "name": "reason",
+            "package": null,
+            "primitive": true,
+            "string_upper_bound": null,
+            "type": "string",
+            "written_relative": false
+          }
+        ]
+      }
+    },
+    "fx_other_msgs/msg/FxTag": {
+      "constants": [
+        {
+          "name": "KIND_NONE",
+          "type": "uint8",
+          "value": 0
+        },
+        {
+          "name": "KIND_PALLET",
+          "type": "uint8",
+          "value": 1
+        },
+        {
+          "name": "KIND_CONTAINER",
+          "type": "uint8",
+          "value": 2
+        }
+      ],
+      "depends_on": [],
+      "fields": [
+        {
+          "array": null,
+          "default": null,
+          "name": "label",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "string",
+          "written_relative": false
+        },
+        {
+          "array": null,
+          "default": null,
+          "name": "kind",
+          "package": null,
+          "primitive": true,
+          "string_upper_bound": null,
+          "type": "uint8",
+          "written_relative": false
+        }
+      ],
+      "path": "src/fx_other_msgs/msg/FxTag.msg"
+    }
+  },
+  "note": "Expected interface parse, produced by reading the fixture files with the rosidl message grammar. `package` is always resolved: a field type written without a slash resolves to the declaring package and carries written_relative true. `array` is null for a scalar. `default` is the parsed value, so an int stays an int and a float stays a float.",
+  "packages": {
+    "fx_msgs": {
+      "action": [
+        "FxDock"
+      ],
+      "msg": [
+        "FxArray",
+        "FxPoint",
+        "FxState"
+      ],
+      "path": "src/fx_msgs",
+      "srv": [
+        "FxConfigure"
+      ]
+    },
+    "fx_other_msgs": {
+      "action": [],
+      "msg": [
+        "FxTag"
+      ],
+      "path": "src/fx_other_msgs",
+      "srv": []
+    }
+  }
+}

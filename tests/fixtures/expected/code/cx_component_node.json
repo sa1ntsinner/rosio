@@ -1,0 +1,75 @@
+{
+  "note": "A component. There is no main() in this file and no add_executable for it, so the executable name exists only in the EXECUTABLE clause of rclcpp_components_register_node in CMakeLists.txt. A component has no executable of its own, so the path from a launched component to this code runs through the registered class, never through an exe id. line_hint is advisory and never compared.",
+  "package": "cx_nodes",
+  "path": "src/cx_nodes/src/cx_component_node.cpp",
+  "package_relative_path": "src/cx_component_node.cpp",
+  "language": "cpp",
+  "file_id": "file:cx_nodes|src/cx_component_node.cpp",
+  "nodes": [
+    {
+      "name": "cx_marker",
+      "name_source": "literal",
+      "node_id": null,
+      "node_id_reason": "the code states the name, the namespace comes from launch_ros and not from the container, so no fqn is formed here",
+      "form": "composable_node",
+      "base": "rclcpp::Node",
+      "class": "cx_nodes::MarkerComponent",
+      "symbol": "cx_nodes::MarkerComponent::MarkerComponent",
+      "symbol_id": "sym:cx_nodes|src/cx_component_node.cpp|cx_nodes::MarkerComponent::MarkerComponent",
+      "takes_node_options": true,
+      "line_hint": 16
+    }
+  ],
+  "components": [
+    {
+      "macro": "RCLCPP_COMPONENTS_REGISTER_NODE",
+      "class": "cx_nodes::MarkerComponent",
+      "registered_executable": "cx_marker_node",
+      "registered_executable_source": "CMakeLists.txt rclcpp_components_register_node EXECUTABLE clause",
+      "has_main": false,
+      "line_hint": 28
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "\"markers\"",
+      "name": "markers",
+      "name_state": "literal_relative",
+      "absolute": false,
+      "topic_id": null,
+      "topic_id_reason": "a relative name mints no topic id, it stays raw until a remap or a namespace binds it",
+      "type": "visualization_msgs/msg/MarkerArray",
+      "type_id": "type:visualization_msgs|msg|MarkerArray",
+      "qos": {
+        "raw": "rclcpp::QoS(rclcpp::KeepLast(1)).transient_local()",
+        "form": "qos_object",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": "transient_local",
+        "preset": null
+      },
+      "owner_symbol": "cx_nodes::MarkerComponent::MarkerComponent",
+      "line_hint": 18
+    }
+  ],
+  "parameters": [],
+  "parameter_callbacks": [],
+  "plugin_parameters": [],
+  "tf": {
+    "broadcasts": [],
+    "lookups": []
+  },
+  "unresolved": [],
+  "counts": {
+    "endpoints": 1,
+    "publishers": 1,
+    "subscribers": 0,
+    "service_servers": 0,
+    "service_clients": 0,
+    "timers": 0,
+    "parameters": 0,
+    "unresolved": 0
+  }
+}

@@ -1,0 +1,176 @@
+/* The robot model, on top of graph.css. Axis colours follow the convention every ROS viewer shares. */
+
+:root {
+  --axis-x: var(--vscode-charts-red, #e5534b);
+  --axis-y: var(--vscode-charts-green, #57ab5a);
+  --axis-z: var(--vscode-charts-blue, #539bf5);
+}
+
+svg.robot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+svg.robot.dragging {
+  cursor: grabbing;
+}
+
+.ground line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.scale {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.joint {
+  stroke: var(--edge);
+  stroke-width: 1.5;
+}
+
+.joint.fixed {
+  stroke-dasharray: 3 3;
+}
+
+.joint.near {
+  stroke: var(--focus);
+  stroke-width: 2;
+}
+
+.link {
+  cursor: pointer;
+}
+
+.link .axis {
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.link .axis.x {
+  stroke: var(--axis-x);
+}
+
+.link .axis.y {
+  stroke: var(--axis-y);
+}
+
+.link .axis.z {
+  stroke: var(--axis-z);
+}
+
+.link .dot {
+  fill: var(--ink);
+  stroke: var(--ground);
+  stroke-width: 2;
+}
+
+.link .hit {
+  fill: transparent;
+}
+
+.link.warn .dot {
+  fill: var(--warn);
+}
+
+.link.error .dot {
+  fill: var(--bad);
+}
+
+.link:hover .dot,
+.link.selected .dot {
+  fill: var(--focus);
+}
+
+.link .name {
+  fill: var(--ink);
+  text-anchor: end;
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: var(--ground);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.link:focus-visible {
+  outline: none;
+}
+
+.link:focus-visible .dot {
+  stroke: var(--focus);
+}
+
+.segmented {
+  display: inline-flex;
+}
+
+.segmented button + button {
+  border-left: 0;
+}
+
+.joint-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 0 0 8px;
+}
+
+.joint-facts dt {
+  color: var(--muted);
+}
+
+.joint-facts dd {
+  margin: 0;
+  font-family: var(--code);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.joint-facts a,
+.inspector .links a {
+  color: var(--link);
+  cursor: pointer;
+}
+
+.cast {
+  margin: 0 0 10px;
+}
+
+.cast p {
+  margin: 0 0 2px;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.shape {
+  --tint: var(--muted);
+  fill: none;
+  stroke: var(--tint);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  opacity: 0.75;
+}
+
+.shape.near {
+  stroke-width: 2;
+  opacity: 1;
+}
+.shape-row { margin: 0 0 4px; font-family: var(--code); font-size: 12px; word-break: break-word; }
+
+.stage canvas.solids {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.stage svg.robot {
+  position: relative;
+}

@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.6",
+  "entities": {
+    "profile:p": {"kind":"profile","label":"Robot","facts":[{"profile":"profile:p","values":{"entrypoints":["ros2 launch demo parent.launch.py"],"launch_files":["launchfile:demo|parent.launch.py"]}}]},
+    "profile:q": {"kind":"profile","label":"Simulation"},
+    "launchfile:demo|parent.launch.py": {"kind":"launchfile","label":"parent.launch.py","facts":[{"profile":"profile:p","values":{"arg_declarations":["mode"],"args":[["mode","real"]]}}]},
+    "launchfile:demo|unrelated.launch.py": {"kind":"launchfile","label":"unrelated","facts":[{"profile":"profile:q","values":{}}]},
+    "launchent:demo|parent.launch.py|Include(child%7Cfile.launch.py)": {
+      "kind":"launchent","facts":[{"profile":"profile:p","values":{},"evidence":[{"file":"file:@repo|tests/fixtures/ws_launch/src/lx_bringup/launch/include_parent.launch.py","line_hint":9}]}]
+    },
+    "launchent:demo|parent.launch.py|Include(child%7Cfile.launch.py)|ComposableNode(camera)": {
+      "kind":"launchent","facts":[
+        {"profile":"*","values":{"namespace":"/","conditions":[],"gates":[]}},
+        {"profile":"profile:p","values":{"pkg":"demo","namespace":"/robot","parameter_inputs":[{"kind":"inline","values":{"rate":20}}],"remaps":[["image","/image","node"]]},"evidence":[{"file":"file:@repo|tests/fixtures/ws_launch/src/lx_bringup/launch/include_child.launch.py","line_hint":4}]},
+        {"profile":"profile:q","values":{"pkg":"simulation","namespace":"/sim"},"evidence":[{"file":"file:@repo|sim.launch.py","line_hint":99}]}
+      ]
+    },
+    "launchent:demo|parent.launch.py|ComposableNodeContainer(container)": {"kind":"launchent","facts":[{"profile":"profile:p","values":{"pkg":"rclcpp_components","executable":"component_container"}}]},
+    "launchent:demo|parent.launch.py|GroupAction(sensors)": {"kind":"launchent","facts":[{"profile":"profile:p","values":{}}]},
+    "launchent:demo|parent.launch.py|GroupAction(sensors)|Node(lidar)": {"kind":"launchent","facts":[{"profile":"profile:p","values":{"conditions":["enabled"],"gates":[{"mechanism":"IfCondition"}]}}]},
+    "node:/camera": {"kind":"node","label":"camera","facts":[{"profile":"*","values":{},"evidence":[{"file":"file:@repo|crates/rosio-lsp/tests/fixtures/endpoints.cpp","line_hint":3}]}]},
+    "node:/listener": {"kind":"node","label":"listener"},
+    "frame:base": {"kind":"frame","label":"base","facts":[{"profile":"*","values":{},"evidence":[{"file":"file:@repo|tests/fixtures/ws_static/src/fx_desc/urdf/fx_robot.urdf","line_hint":2}]}]},
+    "frame:camera": {"kind":"frame","label":"camera","facts":[{"profile":"*","values":{}}]},
+    "frame:lookup": {"kind":"frame","label":"lookup","facts":[{"profile":"*","values":{}}]},
+    "frame:sim": {"kind":"frame","label":"sim","facts":[{"profile":"profile:q","values":{}}]}
+  },
+  "edges": {
+    "contains_include": {"kind":"contains","src":"launchfile:demo|parent.launch.py","dst":"launchent:demo|parent.launch.py|Include(child%7Cfile.launch.py)"},
+    "contains_camera": {"kind":"contains","src":"launchfile:demo|parent.launch.py","dst":"launchent:demo|parent.launch.py|Include(child%7Cfile.launch.py)|ComposableNode(camera)"},
+    "contains_container": {"kind":"contains","src":"launchfile:demo|parent.launch.py","dst":"launchent:demo|parent.launch.py|ComposableNodeContainer(container)"},
+    "contains_group": {"kind":"contains","src":"launchfile:demo|parent.launch.py","dst":"launchent:demo|parent.launch.py|GroupAction(sensors)"},
+    "contains_lidar": {"kind":"contains","src":"launchfile:demo|parent.launch.py","dst":"launchent:demo|parent.launch.py|GroupAction(sensors)|Node(lidar)"},
+    "launch_camera": {"kind":"launches","src":"launchent:demo|parent.launch.py|Include(child%7Cfile.launch.py)|ComposableNode(camera)","dst":"node:/camera","facts":[{"profile":"profile:p","values":{}}]},
+    "tf_camera": {"kind":"tf_parent","src":"frame:camera","dst":"frame:base","facts":[{"profile":"profile:p","values":{"joint":"camera_mount","joint_type":"fixed","model":"file:@repo|robot.urdf","xyz":[1,0,0],"rpy":[0,0,0]},"evidence":[{"file":"file:@repo|tests/fixtures/ws_static/src/fx_desc/urdf/fx_robot.urdf","line_hint":8}]}]},
+    "tf_sim": {"kind":"tf_parent","src":"frame:sim","dst":"frame:base","facts":[{"profile":"profile:q","values":{"joint":"sim_mount"}}]},
+    "broadcast": {"kind":"broadcasts_tf","src":"node:/camera","dst":"frame:camera","facts":[{"profile":"profile:p","values":{},"evidence":[{"file":"file:@repo|crates/rosio-lsp/tests/fixtures/endpoints.cpp","line_hint":12}]}]},
+    "broadcast_again": {"kind":"broadcasts_tf","src":"node:/camera","dst":"frame:camera","facts":[{"profile":"profile:p","values":{}}]},
+    "listen": {"kind":"listens_tf","src":"node:/listener","dst":"frame:lookup","facts":[{"profile":"*","values":{}}]}
+  },
+  "findings": [
+    {"id":"find:no_publisher","rule":"frame.no_publisher","about":{"entity":"frame:lookup"},"profiles":["profile:p"]},
+    {"id":"find:not_in_urdf","rule":"frame.not_in_urdf","about":{"entity":"frame:lookup"}},
+    {"id":"find:simulation","rule":"frame.no_publisher","about":{"entity":"frame:lookup"},"profiles":["profile:q"]}
+  ]
+}

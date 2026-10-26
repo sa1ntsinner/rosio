@@ -1,0 +1,433 @@
+# stampdoctor public bag corpus
+#
+# Schema. Top level key `entries`, a list of mappings. Block style only,
+# list items must be indented under their key. Fields:
+#
+#   name          required, unique slug, also the directory name under --dest
+#   tier          required, one of:
+#                   control  clean recording, used to prove we do not cry wolf
+#                   buggy    documented timestamp defect, used to prove we catch it
+#                   noise    unlabelled real world data, used for crash hunting
+#                   synthetic  built offline by run.py, no download
+#   format        required, one of: rosbag1 | rosbag2 | mcap
+#   fetch         required, one of: http | dropbox | huggingface | manual | generate
+#   url           direct download url, http and dropbox entries
+#   hf_repo       huggingface dataset repo id, huggingface entries
+#   hf_patterns   optional list of allow patterns, huggingface entries, narrows the
+#                 download to one recording instead of the whole dataset
+#   page          landing page, used when the direct link must be resolved by hand
+#   fetch_note    what a human has to do when the link is not directly fetchable
+#   size_mb       approximate download size in MB
+#   size_gb       approximate download size in GB
+#   license       licence or usage terms of the source data
+#   registration  bool, host requires an account or a registration form, null if unknown
+#   sensors       list of sensor names present in the recording
+#   notes         free text, always carries the url documenting the defect
+#   generate      synthetic entries, list of commands run in order from the repo
+#                 root to build the entry. Placeholders {python} interpreter,
+#                 {dest} entry directory, {work} scratch directory removed after.
+#   expect        optional list of rules, every rule must match at least one finding
+#   forbid        optional list of rules, no finding may match any rule
+#
+# Rule fields, at least one of check or severity:
+#   check           finding check name, exact match
+#   severity        error | warning | info, exact match
+#   topic_contains  substring of the finding topic, matched loosely
+#
+# Data is never committed. See README.md.
+
+entries:
+  - name: foxglove-nuscenes-scene0061
+    tier: control
+    format: rosbag1
+    fetch: http
+    url: https://assets.foxglove.dev/nuScenes-v1.0-mini-scene-0061.bag
+    fetch_note: >
+      The native mcap variant of this scene
+      (NuScenes-v1.0-mini-scene-0061-df24c12.mcap) answered 404 on 2026-08-11,
+      the asset looks withdrawn, so the rosbag1 export is used instead.
+    size_mb: 510
+    license: CC BY-NC-SA 4.0, nuScenes non commercial terms
+    registration: false
+    sensors:
+      - camera
+      - lidar
+      - radar
+      - imu
+    notes: >
+      One 20 s nuScenes mini scene. Known real findings on 2026-08-11: three
+      inter_topic_skew warnings around 0.26 s on /diagnostics, /imu and /odom.
+      Source https://foxglove.dev/data-platform
+    forbid:
+      - severity: error
+
+  - name: euroc-mh01
+    tier: control
+    format: rosbag1
+    fetch: http
+    url: http://robotics.ethz.ch/~asl-datasets/ijrr_euroc_mav_dataset/machine_hall/MH_01_easy/MH_01_easy.bag
+    size_gb: 2.7
+    license: ETH Zurich research use
+    registration: false
+    sensors:
+      - stereo camera
+      - imu
+      - vicon
+    notes: >
+      Clean hardware synchronised recording, the baseline for false positives.
+      Source https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets
+    forbid:
+      - severity: error
+
+  - name: euroc-v2-03
+    tier: buggy
+    format: rosbag1
+    fetch: http
+    url: http://robotics.ethz.ch/~asl-datasets/ijrr_euroc_mav_dataset/vicon_room2/V2_03_difficult/V2_03_difficult.bag
+    size_gb: 1.7
+    license: ETH Zurich research use
+    registration: false
+    sensors:
+      - stereo camera
+      - imu
+      - vicon
+    notes: >
+      Documented missing camera frames in the difficult Vicon Room 2 sequence.
+      Source https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets
+    expect:
+      - check: stamp_gaps
+        severity: warning
+        topic_contains: cam
+
+  - name: hilti-2021-lab-survey-2
+    tier: control
+    format: rosbag1
+    fetch: http
+    page: https://hilti-challenge.com/dataset-2021
+    url: https://tp-public-facing.s3.eu-north-1.amazonaws.com/Challenges/2021/LAB_Survey_2.bag
+    size_gb: 4.0
+    license: Hilti SLAM Challenge 2021 terms
+    registration: false
+    sensors:
+      - lidar
+      - camera
+      - imu
+    notes: >
+      Recorder dropouts of about 1 s were reported for this challenge in
+      https://github.com/Hilti-Research/hilti-slam-challenge-2021/issues/13
+      but did not reproduce in the published bag on 2026-08-11 (limit 5000
+      per topic, no stamp_gaps findings, per topic p95 jitter at or below
+      1 ms), so the sequence is kept as an FPGA synced control instead.
+      Real findings that day: three inter_topic_skew warnings around 0.11 s
+      against the camera dominated reference.
+    forbid:
+      - severity: error
+
+  - name: hilti-trimble-2026-sample
+    tier: buggy
+    format: rosbag2
+    fetch: huggingface
+    page: https://github.com/Hilti-Research/hilti-trimble-slam-challenge-2026
+    hf_repo: Hilti-Research/hilti-trimble-slam-challenge-2026
+    hf_patterns:
+      - data/floor_2/2025-10-28/run_2/rosbag/*
+    size_gb: 2.6
+    license: Hilti Trimble SLAM Challenge 2026 terms
+    registration: false
+    sensors:
+      - camera
+      - imu
+    notes: >
+      Insta360 fisheye pair plus IMU, the lidar is ground truth only and is not
+      in the bags. hf_patterns pulls the smallest sequence, floor_2 2025-10-28
+      run_2, 91 s and three topics. The readme documents a constant shift of
+      1e4 s applied to every run so the IMU never gets a negative stamp, see the
+      Constant Timestamp Shift section.
+      Verified on 2026-08-11. The shift is real, image stamps start at exactly
+      10000.000000 s and the IMU at 9999.253204 s, but it was applied to the
+      record times as well, so the median of receive minus stamp is 0.000000 s
+      on all three topics. epoch_offset now checks the absolute plausibility of
+      the first stamp against MIN_PLAUSIBLE_STAMP_S before the offset gate, so
+      the shift is caught on every topic regardless of that median.
+      Second finding the same day, rosbags 0.11.3 could not open the bag. It is
+      written by Jazzy with sqlite3 schema 4 and leaves type_description_hash
+      empty, and 0.11.3 asserted the RIHS01 digest of every embedded definition
+      unconditionally, so the open died on "Failed to parse sensor_msgs/msg/Imu".
+      The tool read it through a direct sqlite3 fallback instead. Fixed upstream
+      in rosbags 0.11.4, released 2026-08-12, and rechecked on 2026-08-14: the
+      bag opens on the plain reader, no fallback and no notice, all three topics
+      carry a header, and the entry still passes on epoch_offset with the same
+      three errors. The fallback stays in the tool for older readers and for
+      recordings that are genuinely damaged.
+      Source https://github.com/Hilti-Research/hilti-trimble-slam-challenge-2026
+    expect:
+      - check: epoch_offset
+        severity: error
+
+  - name: urbannav-tokyo
+    tier: buggy
+    format: rosbag1
+    fetch: dropbox
+    page: https://github.com/IPNL-POLYU/UrbanNavDataset
+    fetch_note: >
+      The Dropbox link for the Tokyo sequence lives in the repository readme,
+      copy it into url, the fetcher rewrites dl=0 to dl=1 itself.
+    size_gb: 4.1
+    license: UrbanNav dataset terms, academic use
+    registration: false
+    sensors:
+      - gnss
+      - imu
+      - lidar
+      - camera
+    notes: >
+      No hardware time synchronisation between the sensors in the Tokyo data.
+      Source https://github.com/IPNL-POLYU/UrbanNavDataset
+    expect:
+      - check: inter_topic_skew
+        severity: warning
+      - check: epoch_offset
+        severity: warning
+
+  - name: hf-nuway
+    tier: noise
+    format: mcap
+    fetch: huggingface
+    hf_repo: xrkong/nuway_rosbag
+    license: see the dataset card on Hugging Face
+    registration: false
+    sensors:
+      - vlp-16 lidar
+      - gps
+      - imu
+    notes: >
+      Autonomous shuttle recordings, unlabelled, used to hunt reader crashes.
+      Source https://huggingface.co/datasets/xrkong/nuway_rosbag
+
+  - name: hf-tesla3
+    tier: noise
+    format: mcap
+    fetch: huggingface
+    hf_repo: tfoldi/tesla3_av_rosbags
+    hf_patterns:
+      - rosbag2_2024_02_10-14_24_59/*
+    size_gb: 1.1
+    license: see the dataset card on Hugging Face
+    registration: false
+    sensors:
+      - velodyne lidar
+      - u-blox gnss
+      - imu
+      - magnetometer
+      - vehicle can bus
+    notes: >
+      Tesla Model 3 driving logs converted to mcap, unlabelled. hf_patterns
+      pulls only the smallest complete recording, rosbag2_2024_02_10-14_24_59,
+      148 s and 40 topics. The crash hunt paid off on 2026-08-11, rosbags 0.11.3
+      rejected the embedded ublox_ubx_msgs definitions because their constants use
+      binary literals such as "uint8 CALIB_STATUS_NOT_CALIBRATED = 0b00", and
+      AnyReader registers every connection type up front, so one unparseable type
+      took the whole bag down. The tool answered by registering the connection
+      types one by one and dropping only the ones that do not parse, here the
+      single topic /ubx_esf_status, reported as a notice. Fixed upstream in
+      rosbags 0.11.4, released 2026-08-12, and rechecked on 2026-08-14: every
+      definition parses, the bag reads on the plain reader with no notice, and the
+      per topic numbers are unchanged. The tolerant path stays for older readers
+      and for definitions that are genuinely damaged. What the bag holds is quiet,
+      12 header bearing topics, no error, no epoch_offset and no inter_topic_skew,
+      only two stamp_gaps warnings on the bursty RTCM correction streams
+      (/ntrip_client/rtcm 1.498 s, /ubx_rxm_rtcm 1.979 s), which is normal for
+      correction traffic and not a defect. No expect or forbid rules, the entry
+      earns its keep as the reader robustness case.
+      Source https://huggingface.co/datasets/tfoldi/tesla3_av_rosbags
+
+  - name: synthetic-tai-offset
+    tier: synthetic
+    format: rosbag2
+    fetch: generate
+    license: none, generated locally
+    registration: false
+    sensors:
+      - lidar
+      - imu
+      - gnss
+    notes: >
+      Positive control for the TAI to UTC class, built offline from the clean
+      12 s bag, /scan at 10 Hz, /imu at 50 Hz and /gps at 5 Hz. Every header
+      topic is mutated, so the whole bag shares one offset. The tai preset puts
+      the stamps 37 s ahead of the record
+      clock, which is what a grandmaster left on the TAI timescale looks like
+      to a receiver on UTC. The class matches on the magnitude, so either sign
+      lands on tai utc offset.
+    generate:
+      - "{python} corpus/stamps/synthesize.py {work}/clean"
+      - "{python} -m rosio.stamps.mutate {work}/clean {dest} --pathology tai"
+    expect:
+      - check: epoch_offset
+        severity: error
+        topic_contains: /scan
+    forbid:
+      - check: stamp_gaps
+      - check: monotonic
+
+  - name: synthetic-dropout
+    tier: synthetic
+    format: rosbag2
+    fetch: generate
+    license: none, generated locally
+    registration: false
+    sensors:
+      - lidar
+      - imu
+      - gnss
+    notes: >
+      Positive control for stamp_gaps, a 2 s window of messages removed from the
+      middle of the same clean bag, the shape of Hilti 2021 issue 13.
+    generate:
+      - "{python} corpus/stamps/synthesize.py {work}/clean"
+      - "{python} -m rosio.stamps.mutate {work}/clean {dest} --pathology dropout"
+    expect:
+      - check: stamp_gaps
+        severity: warning
+        topic_contains: /scan
+    forbid:
+      - check: epoch_offset
+      - check: monotonic
+
+  - name: synthetic-backward
+    tier: synthetic
+    format: rosbag2
+    fetch: generate
+    license: none, generated locally
+    registration: false
+    sensors:
+      - lidar
+      - imu
+      - gnss
+    notes: >
+      Positive control for monotonic, a single 1.5 s backward step at 90 percent
+      of the same clean bag, the shape of a clock correction landing mid
+      recording. The step sits late on purpose, a step at half the bag would
+      drag the median offset past the plausible latency and raise epoch_offset
+      as well. Verified on 2026-08-11, monotonic errors on all three topics and
+      nothing else beyond stamp_rate.
+    generate:
+      - "{python} corpus/stamps/synthesize.py {work}/clean"
+      - "{python} -m rosio.stamps.mutate {work}/clean {dest} --pathology backward --at 0.9"
+    expect:
+      - check: monotonic
+        severity: error
+        topic_contains: /scan
+    forbid:
+      - check: epoch_offset
+
+  - name: synthetic-frozen
+    tier: synthetic
+    format: rosbag2
+    fetch: generate
+    license: none, generated locally
+    registration: false
+    sensors:
+      - lidar
+      - imu
+      - gnss
+    notes: >
+      Positive control for frozen_stamps, 25 messages per topic held at one
+      stamp in the middle of the same clean bag, a driver that stops refreshing
+      the header. Verified on 2026-08-11, frozen_stamps errors on /scan and
+      /gps, /imu stays quiet because 25 of its messages only span 0.5 s and the
+      detector wants at least 1 s. The stamp_gaps warnings that follow the held
+      run are the same defect seen from the other side and are left alone.
+      A held stamp must never read as a backward step, so monotonic is forbidden.
+    generate:
+      - "{python} corpus/stamps/synthesize.py {work}/clean"
+      - "{python} -m rosio.stamps.mutate {work}/clean {dest} --pathology frozen"
+    expect:
+      - check: frozen_stamps
+        severity: error
+        topic_contains: /scan
+    forbid:
+      - check: monotonic
+
+  - name: synthetic-zero
+    tier: synthetic
+    format: rosbag2
+    fetch: generate
+    license: none, generated locally
+    registration: false
+    sensors:
+      - lidar
+      - imu
+      - gnss
+    notes: >
+      Positive control for zero_stamps, 5 unset stamps per topic in the middle
+      of the same clean bag. Verified on 2026-08-11, zero_stamps errors on all
+      three topics. A zero stamp is also a huge backward step and a huge gap, so
+      monotonic and stamp_gaps fire with it and are left alone, but the five
+      zeros do not move the median offset, so epoch_offset must stay quiet.
+    generate:
+      - "{python} corpus/stamps/synthesize.py {work}/clean"
+      - "{python} -m rosio.stamps.mutate {work}/clean {dest} --pathology zero"
+    expect:
+      - check: zero_stamps
+        severity: error
+        topic_contains: /scan
+    forbid:
+      - check: epoch_offset
+
+  - name: synthetic-drift
+    tier: synthetic
+    format: rosbag2
+    fetch: generate
+    license: none, generated locally
+    registration: false
+    sensors:
+      - lidar
+      - imu
+      - gnss
+    notes: >
+      Positive control for clock_drift, a free running source clock. The slope
+      is 0.02 s per s, twenty times the error threshold of 0.001 s per s, and it
+      starts at the first message because the detector demands the drift be
+      present in both halves of the series. Verified on 2026-08-11, clock_drift
+      errors at 20 ms/s on all three topics. Over the 12 s bag the offset only
+      reaches 0.24 s, which stays under the plausible latency gate, so a growing
+      offset must not be reported as a constant one.
+    generate:
+      - "{python} corpus/stamps/synthesize.py {work}/clean"
+      - "{python} -m rosio.stamps.mutate {work}/clean {dest} --pathology drift --at 0 --magnitude 0.02"
+    expect:
+      - check: clock_drift
+        severity: error
+        topic_contains: /scan
+    forbid:
+      - check: epoch_offset
+
+  - name: synthetic-skew
+    tier: synthetic
+    format: rosbag2
+    fetch: generate
+    license: none, generated locally
+    registration: false
+    sensors:
+      - lidar
+      - imu
+      - gnss
+    notes: >
+      Positive control for inter_topic_skew, one sensor running offset from the
+      rest of the system. Only /scan is mutated, by 0.3 s, so it deviates from
+      the reference built by the two clean topics. The magnitude is picked to
+      sit between the skew warning threshold of 0.1 s and the plausible latency
+      of 0.5 s, so the skew is reported without any epoch class being reached.
+      This entry needs all three topics, the skew detector ignores bags with
+      fewer. Verified on 2026-08-11, one inter_topic_skew warning on /scan at
+      0.300 s deviation and no epoch_offset anywhere.
+    generate:
+      - "{python} corpus/stamps/synthesize.py {work}/clean"
+      - "{python} -m rosio.stamps.mutate {work}/clean {dest} --pathology offset --magnitude 0.3 --topic /scan"
+    expect:
+      - check: inter_topic_skew
+        severity: warning
+        topic_contains: /scan
+    forbid:
+      - check: epoch_offset

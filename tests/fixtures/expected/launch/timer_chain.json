@@ -1,0 +1,63 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/timer_chain.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "scan_relay",
+      "form": "node",
+      "fqn": "/late_node",
+      "gates": [
+        {
+          "mechanism": "TimerAction",
+          "period": 5.0,
+          "target": ""
+        }
+      ],
+      "name": "late_node",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lidar_driver",
+      "form": "node",
+      "fqn": "/deep/deep_node",
+      "gates": [
+        {
+          "mechanism": "OnProcessExit",
+          "period": null,
+          "target": "stage_one"
+        },
+        {
+          "mechanism": "OnProcessExit",
+          "period": null,
+          "target": "stage_two"
+        }
+      ],
+      "name": "deep_node",
+      "name_source": "literal",
+      "namespace": "/deep",
+      "params": [],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 5. late_node is behind a five second timer, deep_node is behind two chained process exits. The gate trail is ordered outermost first.",
+  "predicates": {},
+  "strategy": "executed"
+}

@@ -1,0 +1,11 @@
+roots:
+  - kind: src
+    path: src
+  - kind: install
+    path: install
+
+profiles:
+  - slug: rover
+    label: the example rover as bringup.launch.py starts it
+    entrypoints:
+      - launch: rover_bringup bringup.launch.py

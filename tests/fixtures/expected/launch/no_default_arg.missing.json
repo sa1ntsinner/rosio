@@ -1,0 +1,26 @@
+{
+  "arg_declarations": [
+    {
+      "default": null,
+      "description": "Absolute path to the merged parameters file.",
+      "name": "params_file"
+    }
+  ],
+  "args": [],
+  "case": "missing",
+  "entry": "src/lx_bringup/launch/no_default_arg.launch.py",
+  "env": [],
+  "exceptions": [
+    {
+      "exc_type": "RuntimeError",
+      "message": "required launch argument 'params_file' was not provided",
+      "path": "src/lx_bringup/launch/no_default_arg.launch.py",
+      "phase": "argument"
+    }
+  ],
+  "loadable": true,
+  "nodes": [],
+  "note": "Case 14 with no arguments. The declaration has no default, so the description fails while the arguments are visited. The entry point is reported as needing arguments, never silently skipped.",
+  "predicates": {},
+  "strategy": "executed"
+}

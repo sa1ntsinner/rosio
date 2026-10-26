@@ -1,0 +1,1109 @@
+"""The parameter rule family: seven rules over the candidate chain the declared layer built
+and the declarations the coded layer read.
+
+Every rule here is scoped to one profile, skips facts rosio was not sure about, and skips
+sub keys of a plugin block the yaml did not select, because those are configuration and not
+drift. Four judgements decide what stays quiet, and each one was made against the reference
+stack rather than against a preference.
+
+  * An overlay file that changes a base file is what an overlay file is for. On the bench
+    that is 28 of the 62 shadowed values, one file against its own base, and reporting them
+    would bury the six that matter. `param.shadowed` is silent on that pair and ranks the
+    rest by where the losing line lives: a value that loses inside a parameter file, the
+    document an engineer opens to tune a number, is a warn, and a launch inline default that
+    loses to a parameter file is an info. One file that sets one parameter twice with two
+    values is an error, because no reading of the file makes both true.
+
+  * A code side default that no file overrides is not drift. 26 parameters on the bench have
+    only a `code_default` candidate, and all of them are ordinary nodes configured by their
+    own defaults. Reporting them would fire on every well behaved node in every workspace,
+    so nothing here does. `param.set_undeclared` runs the other direction, and only for a
+    node whose source rosio actually read in that profile: a yaml line for a parameter no
+    declaration names is a line that does nothing.
+
+  * `use_sim_time` is declared by rclcpp and rclpy themselves, so a file setting it is never
+    an undeclared write. It is the whole population of that case on the bench, 5 of 5. It is
+    also the reason `param.restated_identical` is graded rather than flat: 10 of the 32
+    restatements on the bench are `use_sim_time`, nobody will ever act on one, and putting
+    them on the same line as a parameter document that restates what a launcher writes
+    makes the loud case unreadable. `_restated_severity` carries that judgement.
+
+  * `param.declared_unread` needs positive evidence that the value is unreachable.
+    `declare_parameter` returns the value in rclcpp, so "no `get_parameter` call" is not
+    that evidence: 53 parameters on the bench are read exclusively through the return of
+    their own declaration, and firing on the absent read would be 53 false positives. The
+    rule therefore asks for a declaration that states it returns nothing usable, and it is
+    silent until a collector records that. Silence is the correct output here, not a
+    weaker rule.
+
+A wildcard yaml key and an inline `parameters=` dict expand one source line into N
+parameters, so all four chain rules group by the site an engineer would edit. One deletable
+line is one finding, whatever it expands to.
+
+The two block rules, `param.orphan_block` and `param.owner_name_mismatch`, reason about who
+owns a block, and both are gated on whether the owner could have been seen at all. A node
+creates child nodes at run time: a costmap is a node inside its parent, and a behaviour tree
+action server appends a suffix to its parent's name and starts a second node. The child is
+in the parent's source and nowhere else, so on a tree with no sources the declared layer
+alone cannot tell a block owned by such a child from a block owned by nothing. Asserting the
+second reads as a finding that says delete a working configuration, which is what these two
+rules did on stock nav2, four times. `owner_gate` therefore asks first whether a launched
+node could own the key at run time, from two structural facts and not from a package name:
+the key extends a launched node's name by a suffix, which is what a runtime child is called,
+or the key names a node in a namespace no launch file created, which is where a runtime
+child lives. When one of those holds and the coded layer never read the sources of the nodes
+that would declare that child, the rule states nothing. A key that is a truncation of a
+launched name is the opposite case, a misspelling, and stays reported: a child extends its
+parent's name, it never shortens it.
+
+`silences(atlas)` reports what those gates suppressed and why, one row per rule and profile,
+and `rosio/drift/plugins.py` exposes the same function. A drift report that lists a silent
+rule without a reason tells a reader the rule looked and found nothing.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass
+
+from rosio import ids, model
+from rosio.drift import plugins, rules
+from rosio.errors import ContractError
+
+DECLARED = model.Layer.DECLARED.value
+CODED = model.Layer.CODED.value
+PARAM = model.NodeKind.PARAM.value
+FILE = model.NodeKind.FILE.value
+NODE = model.NodeKind.NODE.value
+EFFECTIVE = model.ParamState.EFFECTIVE.value
+
+AUTO_DECLARED = frozenset({"use_sim_time"})
+AUTO_DECLARED_PREFIXES = ("qos_overrides.",)
+"""Names the client library declares for every node, so no source states them."""
+
+FILE_MECHANISMS = frozenset(
+    {
+        model.Mechanism.YAML_BASE.value,
+        model.Mechanism.YAML_OVERLAY_MERGE.value,
+        model.Mechanism.YAML_WILDCARD.value,
+        model.Mechanism.LAUNCH_PARAMS_FILE.value,
+        model.Mechanism.ROS_ARGS_PARAMS_FILE.value,
+    }
+)
+"""Mechanisms whose site is a parameter document. A value that loses in one of these is a
+line that reads as the configuration and is not."""
+
+CODE_TYPES = {
+    "bool": "bool",
+    "double": "float",
+    "float": "float",
+    "int": "int",
+    "int64_t": "int",
+    "long": "int",
+    "string": "str",
+    "std::string": "str",
+}
+"""C++ declaration type to the value type a yaml reader spells. A vector of anything maps to
+list, handled below, and an unmapped spelling is skipped rather than guessed."""
+
+_LIST_MARKERS = ("vector<", "[]")
+
+
+@dataclass(frozen=True)
+class _Row:
+    param: model.Node
+    profile: str
+    winner: model.Candidate
+    loser: model.Candidate
+
+    @property
+    def name(self) -> str:
+        return ids.parse_param(self.param.id).name
+
+    @property
+    def owner(self) -> str:
+        return ids.parse_param(self.param.id).owner
+
+
+# ---------------------------------------------------------------------------
+# shared reading
+
+
+def _params(atlas: model.Atlas) -> list[model.Node]:
+    return [
+        atlas.entities[key] for key in sorted(atlas.entities) if atlas.entities[key].kind == PARAM
+    ]
+
+
+def _by_profile(node: model.Node) -> dict[str, list[model.Candidate]]:
+    out: dict[str, list[model.Candidate]] = defaultdict(list)
+    for candidate in node.candidates:
+        if candidate.profile != model.ANY_PROFILE:
+            out[candidate.profile].append(candidate)
+    return {
+        profile: sorted(rows, key=lambda row: row.rank) for profile, rows in sorted(out.items())
+    }
+
+
+def _live(node: model.Node, profile: str) -> bool:
+    """The parameter is live configuration of this profile, said by this profile's own fact.
+
+    The entity keeps the strongest state of every profile written, so a key that is effective
+    in one profile and inert in another reads as effective here. Asking the profile's own fact
+    is what keeps a chain rule off a sub key whose plugin block this profile does not select,
+    and off a value no layer tracked.
+    """
+    fact = node.fact(DECLARED, profile)
+    if not rules.usable(fact):
+        return False
+    return str(fact.values.get("state") or node.state) == EFFECTIVE
+
+
+def _layers(*candidates: model.Candidate) -> list[str]:
+    return sorted(
+        {
+            CODED if candidate.mechanism == model.Mechanism.CODE_DEFAULT.value else DECLARED
+            for candidate in candidates
+        }
+    )
+
+
+def _auto_declared(name: str) -> bool:
+    return name in AUTO_DECLARED or name.startswith(AUTO_DECLARED_PREFIXES)
+
+
+def _restated_severity(row: _Row) -> str:
+    """How loud a restatement is, from what the two sites are.
+
+    Two parameter documents stating one value is hygiene: both are the same kind of
+    document, an engineer editing either sees the other in the same review, and the
+    behaviour is the same whichever line goes. A parameter document restating what a launch
+    file or a launcher module writes is a different animal. The two sites are in two
+    languages, only one of them is where a reader looks, and the line in the document that
+    reads as the configuration already does nothing. The day one of them changes, the
+    engineer who changed the document gets no effect and no warning, which is the shape of
+    the shadowed findings on this stack. That is worth a line above hygiene, with one
+    exception: a name the client library declares for every node, `use_sim_time` and the
+    qos overrides, is restated by every launch file in every workspace and acting on it
+    changes nothing anywhere, so it stays where it was.
+    """
+    if _auto_declared(row.name) or row.winner.mechanism in FILE_MECHANISMS:
+        return rules.severity_of("param.restated_identical")
+    return rules.WARN
+
+
+def _deliberate(winner: model.Candidate, loser: model.Candidate) -> bool:
+    """An overlay document beating the base document it was merged onto."""
+    return (
+        winner.mechanism == model.Mechanism.YAML_OVERLAY_MERGE.value
+        and loser.mechanism in FILE_MECHANISMS
+        and loser.source.file != winner.source.file
+    )
+
+
+def _editable(winner: model.Candidate, loser: model.Candidate) -> bool:
+    """A losing site an engineer can point at and would read as the configuration.
+
+    A losing inline dict is a default, and a default that a parameter file overrides is
+    doing its job. Its site is also unnameable: a `parameters=` list has one locator whether
+    it holds one dict or three, and one of the three on this bench is loaded from a third
+    party file that is in no repository. A finding that cannot name a line to change is not
+    a finding.
+    """
+    if loser.mechanism not in FILE_MECHANISMS or loser.source.line_hint is None:
+        return False
+    return (loser.source.file, loser.source.locator) != (winner.source.file, winner.source.locator)
+
+
+def _shadow_groups(atlas: model.Atlas, kind: str) -> dict[tuple[str, ...], list[_Row]]:
+    groups: dict[tuple[str, ...], list[_Row]] = defaultdict(list)
+    for node in _params(atlas):
+        for profile, chain in _by_profile(node).items():
+            if not _live(node, profile):
+                continue
+            winner = next((row for row in chain if row.wins), None)
+            if winner is None:
+                continue
+            for loser in chain:
+                if loser.shadow_kind != kind or not _editable(winner, loser):
+                    continue
+                if kind == model.ShadowKind.VALUE_CHANGED.value and _deliberate(winner, loser):
+                    continue
+                key = (profile, loser.source.file, loser.source.locator, winner.source.file)
+                groups[key].append(_Row(node, profile, winner, loser))
+    return {key: sorted(rows, key=lambda row: row.param.id) for key, rows in sorted(groups.items())}
+
+
+def _discriminators(groups: dict[tuple[str, ...], list[_Row]]) -> dict[tuple[str, ...], str]:
+    """One readable discriminator per group, and a content digest where a parameter carries
+    two groups in one profile."""
+    seen: dict[tuple[str, str], int] = defaultdict(int)
+    for key, group in groups.items():
+        if len(group) == 1:
+            seen[(group[0].param.id, key[0])] += 1
+    out: dict[tuple[str, ...], str] = {}
+    for key, group in groups.items():
+        slug = rules.slug_of(key[0])
+        single = len(group) == 1 and seen[(group[0].param.id, key[0])] == 1
+        out[key] = slug if single else f"{slug}.{ids.digest(key[1], key[2], key[3])}"
+    return out
+
+
+def _subject(atlas: model.Atlas, key: tuple[str, ...], group: list[_Row]) -> str:
+    if len(group) == 1:
+        return group[0].param.id
+    return key[1] if key[1] in atlas.entities else group[0].param.id
+
+
+# ---------------------------------------------------------------------------
+# the rules
+
+
+@rules.register("param.shadowed")
+def shadowed(atlas: model.Atlas) -> list[model.Finding]:
+    """A value that a reader would take for the configuration and that never takes effect."""
+    groups = _shadow_groups(atlas, model.ShadowKind.VALUE_CHANGED.value)
+    discs = _discriminators(groups)
+    out: list[model.Finding] = []
+    for key, group in groups.items():
+        head = group[0]
+        slug = rules.slug_of(head.profile)
+        same_file = head.loser.source.file == head.winner.source.file
+        trusted_loser = (
+            head.loser.mechanism in FILE_MECHANISMS and head.winner.mechanism not in FILE_MECHANISMS
+        )
+        if same_file:
+            severity = rules.severity_of("param.shadowed", "self_contradiction")
+        elif trusted_loser:
+            severity = rules.severity_of("param.shadowed")
+        else:
+            severity = rules.INFO
+        lose_at = rules.where(head.loser.source)
+        win_at = rules.where(head.winner.source)
+        owner = rules.node_text(head.owner)
+        if len(group) == 1:
+            title = f"{head.name} at {lose_at} is overridden"
+            detail = (
+                f"{owner} reads {rules.value_text(head.winner.value)} for {head.name} in "
+                f"profile {slug}, set by {rules.path_of(head.winner.source.file)} through "
+                f"{head.winner.mechanism}. The value {rules.value_text(head.loser.value)} in "
+                f"{rules.path_of(head.loser.source.file)} loses."
+            )
+            say = (
+                f"In profile {slug}, {owner} {head.name} is "
+                f"{rules.value_text(head.winner.value)} from {win_at}, so "
+                f"{rules.value_text(head.loser.value)} at {lose_at} never takes effect. "
+                f"Edit {win_at} to change it."
+            )
+        else:
+            names = ", ".join(row.name for row in group[:3])
+            title = f"{len(group)} values at {lose_at} are overridden"
+            detail = (
+                f"{rules.path_of(head.winner.source.file)} sets {len(group)} parameters of "
+                f"{owner} that {rules.path_of(head.loser.source.file)} also sets, in profile "
+                f"{slug}, and wins all of them. Affected: {names}."
+            )
+            say = (
+                f"In profile {slug}, {rules.path_of(head.winner.source.file)} overrides "
+                f"{len(group)} parameters that {lose_at} sets for {owner}, including "
+                f"{head.name} ({rules.value_text(head.loser.value)} becomes "
+                f"{rules.value_text(head.winner.value)}). Edit "
+                f"{rules.path_of(head.winner.source.file)}, the values at {lose_at} are dead."
+            )
+        out.append(
+            model.Finding(
+                rule="param.shadowed",
+                severity=severity,
+                subject=_subject(atlas, key, group),
+                discriminator=discs[key],
+                title=title,
+                detail=detail,
+                fix=(
+                    f"Change the value at {win_at}, or remove the losing line at {lose_at} so "
+                    "one file states it."
+                ),
+                say=say,
+                profiles=[head.profile],
+                layers=_layers(head.winner, head.loser),
+                where=[head.winner.source, head.loser.source],
+            )
+        )
+    return out
+
+
+@rules.register("param.restated_identical")
+def restated_identical(atlas: model.Atlas) -> list[model.Finding]:
+    """A line that repeats, byte for byte, a value another file already sets."""
+    groups = _shadow_groups(atlas, model.ShadowKind.RESTATED_IDENTICAL.value)
+    discs = _discriminators(groups)
+    out: list[model.Finding] = []
+    for key, group in groups.items():
+        head = group[0]
+        slug = rules.slug_of(head.profile)
+        lose_at = rules.where(head.loser.source)
+        win_at = rules.where(head.winner.source)
+        owner = rules.node_text(head.owner)
+        if len(group) == 1:
+            title = f"{head.name} at {lose_at} restates the value already in force"
+            detail = (
+                f"{head.name} is {rules.value_text(head.winner.value)} for {owner} in profile "
+                f"{slug} whether or not {rules.path_of(head.loser.source.file)} states it, "
+                f"because {rules.path_of(head.winner.source.file)} sets the same value and "
+                "wins."
+            )
+            say = (
+                f"{lose_at} sets {owner} {head.name} to "
+                f"{rules.value_text(head.loser.value)}, the same value {win_at} already gives "
+                f"it in profile {slug}. Delete the line at {lose_at}."
+            )
+        else:
+            names = ", ".join(row.name for row in group[:3])
+            title = f"{len(group)} values at {lose_at} restate what is already in force"
+            detail = (
+                f"{rules.path_of(head.loser.source.file)} restates {len(group)} parameters of "
+                f"{owner} that {rules.path_of(head.winner.source.file)} sets to the same "
+                f"values in profile {slug}. Affected: {names}."
+            )
+            say = (
+                f"{lose_at} restates {len(group)} parameters of {owner} that {win_at} already "
+                f"sets to the same values in profile {slug}, including {head.name} = "
+                f"{rules.value_text(head.loser.value)}. Delete them at {lose_at}."
+            )
+        out.append(
+            model.Finding(
+                rule="param.restated_identical",
+                severity=_restated_severity(head),
+                subject=_subject(atlas, key, group),
+                discriminator=discs[key],
+                title=title,
+                detail=detail,
+                fix=f"Delete the restated line at {lose_at}.",
+                say=say,
+                profiles=[head.profile],
+                layers=_layers(head.winner, head.loser),
+                where=[head.winner.source, head.loser.source],
+            )
+        )
+    return out
+
+
+@rules.register("param.set_undeclared")
+def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
+    """A file sets a parameter that the node's own source never declares.
+
+    When the node declares a name close to the one the file sets, the finding names it: a key
+    one letter off from a declared parameter is a typo far more often than a new parameter.
+    """
+    out: list[model.Finding] = []
+    declared = _declared_names(atlas)
+    blind = rules.blind_files(atlas, model.Want.PARAM_NAME.value)
+    for node in _params(atlas):
+        owner_id = ids.parse_param(node.id).owner
+        name = ids.parse_param(node.id).name
+        owner = atlas.get(owner_id)
+        if owner is None or _auto_declared(name):
+            continue
+        for profile, chain in _by_profile(node).items():
+            if not _live(node, profile):
+                continue
+            if not rules.usable(owner.fact(CODED, profile)):
+                continue
+            if rules.coded_sources(atlas, owner_id, profile) & blind:
+                # A declaration whose name is built at run time may be this one.
+                continue
+            coded = node.fact(CODED, profile)
+            if coded is not None and coded.values.get("declared_in_code"):
+                continue
+            winner = next((row for row in chain if row.wins), None)
+            if winner is None:
+                continue
+            slug = rules.slug_of(profile)
+            at = rules.where(winner.source)
+            owner_text = rules.node_text(owner_id)
+            sources = sorted(owner.fact(CODED, profile).values.get("coded_sources") or [])
+            read = ", ".join(rules.path_of(item) for item in sources) or "its source"
+            near = _nearest_name(name, declared.get(owner_id, set()))
+            meant = (
+                f" {owner_text} declares {near}, which is likely what was meant." if near else ""
+            )
+            out.append(
+                model.Finding(
+                    rule="param.set_undeclared",
+                    severity=rules.severity_of("param.set_undeclared"),
+                    subject=node.id,
+                    discriminator=slug,
+                    title=f"{name} is set for {owner_text} and never declared",
+                    detail=(
+                        f"{owner_text} is configured with {name} = "
+                        f"{rules.value_text(winner.value)} in profile {slug}, and no "
+                        f"declaration for that name was found in {read}. A node ignores a "
+                        "parameter it never declares."
+                    ),
+                    fix=(
+                        f"Rename {name} to {near} at {at}, or correct the declaration if "
+                        f"{near} is the misspelling."
+                        if near
+                        else f"Declare {name} in the node source, or delete the line at {at}."
+                    ),
+                    say=(
+                        f"In profile {slug}, {at} sets {owner_text} {name} to "
+                        f"{rules.value_text(winner.value)} and {read} declares no parameter "
+                        f"with that name, so the value is ignored.{meant}"
+                        + ("" if near else f" Delete the line at {at} or declare the parameter.")
+                    ),
+                    profiles=[profile],
+                    layers=[CODED, DECLARED],
+                    where=[winner.source],
+                )
+            )
+    return out
+
+
+def _declared_names(atlas: model.Atlas) -> dict[str, set[str]]:
+    """Owner node id to the parameter names its source declares."""
+    out: dict[str, set[str]] = {}
+    for node in _params(atlas):
+        if any(fact.layer == CODED and fact.values.get("declared_in_code") for fact in node.facts):
+            parsed = ids.parse_param(node.id)
+            out.setdefault(parsed.owner, set()).add(parsed.name)
+    return out
+
+
+def _nearest_name(name: str, declared: set[str]) -> str:
+    """The declared name a mistyped key most likely meant, or nothing when none is close."""
+    import difflib
+
+    match = difflib.get_close_matches(name, sorted(declared - {name}), n=1, cutoff=0.8)
+    return match[0] if match else ""
+
+
+@rules.register("param.declared_unread")
+def declared_unread(atlas: model.Atlas) -> list[model.Finding]:
+    """A declaration whose value no code path can reach.
+
+    The coded fact has to state both that nothing reads the parameter back and that the
+    declaration itself returns nothing usable. Without the second key the rule would report
+    every `auto value = declare_parameter(...)`, which is the normal rclcpp idiom.
+    """
+    out: list[model.Finding] = []
+    for node in _params(atlas):
+        owner_id = ids.parse_param(node.id).owner
+        name = ids.parse_param(node.id).name
+        for fact in sorted(node.facts, key=model.LayerFact.sort_key):
+            if fact.layer != CODED or not rules.usable(fact):
+                continue
+            values = fact.values
+            if not values.get("declared_in_code"):
+                continue
+            if values.get("read", True) or values.get("declaration_returns_value", True):
+                continue
+            slug = rules.slug_of(fact.profile) if fact.profile != model.ANY_PROFILE else "*"
+            at = rules.where(fact.evidence[0] if fact.evidence else None)
+            owner_text = rules.node_text(owner_id)
+            out.append(
+                model.Finding(
+                    rule="param.declared_unread",
+                    severity=rules.severity_of("param.declared_unread"),
+                    subject=node.id,
+                    discriminator=slug,
+                    title=f"{name} is declared and never read",
+                    detail=(
+                        f"{owner_text} declares {name} and no code path reads it back, and the "
+                        "declaration returns nothing the node keeps."
+                    ),
+                    fix=f"Read {name} where it is used, or delete the declaration at {at}.",
+                    say=(
+                        f"{at} declares {owner_text} {name} and nothing reads it, so every "
+                        "value a file gives it is ignored. Read it or delete the declaration."
+                    ),
+                    profiles=[] if fact.profile == model.ANY_PROFILE else [fact.profile],
+                    layers=[CODED],
+                    where=list(fact.evidence),
+                )
+            )
+    return out
+
+
+def _type_of(spelling: str) -> str:
+    text = spelling.strip()
+    if any(marker in text for marker in _LIST_MARKERS):
+        return "list"
+    return CODE_TYPES.get(text, "")
+
+
+@rules.register("param.type_changed")
+def type_changed(atlas: model.Atlas) -> list[model.Finding]:
+    """One parameter given two types inside one profile.
+
+    A node declared with one type refuses a value of another at start up, so this is an
+    error wherever it is true. Both directions are covered: two candidates of one chain
+    disagreeing, and a declaration type disagreeing with the value that wins.
+    """
+    out: list[model.Finding] = []
+    for node in _params(atlas):
+        name = ids.parse_param(node.id).name
+        owner_text = rules.node_text(ids.parse_param(node.id).owner)
+        for profile, chain in _by_profile(node).items():
+            if not _live(node, profile):
+                continue
+            typed = [
+                row
+                for row in chain
+                if row.value_type
+                and row.value_type != "unknown"
+                and row.shadow_kind != model.ShadowKind.NOT_READ_IN_PROFILE.value
+            ]
+            winner = next((row for row in typed if row.wins), None)
+            if winner is None:
+                continue
+            other = next((row for row in typed if row.value_type != winner.value_type), None)
+            declared_type = ""
+            coded = node.fact(CODED, profile)
+            if rules.usable(coded):
+                declared_type = _type_of(str(coded.values.get("type") or ""))
+            if other is None and (not declared_type or declared_type == winner.value_type):
+                continue
+            slug = rules.slug_of(profile)
+            win_at = rules.where(winner.source)
+            if other is not None:
+                other_at = rules.where(other.source)
+                other_type = other.value_type
+                other_where = [other.source]
+            else:
+                other_at = rules.where(coded.evidence[0] if coded.evidence else None)
+                other_type = declared_type
+                other_where = list(coded.evidence)
+            out.append(
+                model.Finding(
+                    rule="param.type_changed",
+                    severity=rules.severity_of("param.type_changed"),
+                    subject=node.id,
+                    discriminator=slug,
+                    title=f"{name} has two types in profile {slug}",
+                    detail=(
+                        f"{owner_text} {name} is {winner.value_type} where it wins and "
+                        f"{other_type} where it is stated a second time, inside one profile."
+                    ),
+                    fix=f"Make both sites state {winner.value_type}.",
+                    say=(
+                        f"In profile {slug}, {owner_text} {name} is "
+                        f"{rules.value_text(winner.value)} ({winner.value_type}) at {win_at} "
+                        f"while {other_at} states {other_type}. A node declared with "
+                        f"{other_type} refuses the value at start up."
+                    ),
+                    profiles=[profile],
+                    layers=sorted({*_layers(winner), *([CODED] if other is None else [])}),
+                    where=[winner.source, *other_where],
+                )
+            )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# blocks with no owner
+
+
+ORPHAN_STATES = (
+    model.ParamState.OWNER_NAME_MISMATCH.value,
+    model.ParamState.UNRESOLVED_OWNER.value,
+)
+
+
+def _line(source: model.Source) -> int:
+    """Line hints order a block's rows, for an atlas whose rows cite no block key. Advisory
+    only: it never enters an id, a discriminator or a detail."""
+    return source.line_hint if source.line_hint is not None else 1 << 30
+
+
+def _keys(count: int) -> str:
+    return "1 key" if count == 1 else f"{count} keys"
+
+
+@dataclass(frozen=True)
+class _BlockRow:
+    """One key of one block, where the chain writes it and where its block key is."""
+
+    state: str
+    name: str
+    site: model.Source
+    block_at: model.Source | None
+
+
+@dataclass(frozen=True)
+class _Block:
+    profile: str
+    file: str
+    selector: str
+    state: str
+    keys: tuple[str, ...]
+    source: model.Source
+    """Where the block key is written, which is the line a reader deleting the block starts
+    at. The parameter collector cites one block key per file on the fact, and this block
+    takes the one that names its own file. An atlas built before the collector wrote them
+    leaves the first key inside the block instead, two lines past the block key, which is the
+    closest row such an atlas has."""
+    live_in: tuple[str, ...] = ()
+    """Other profiles in which a node owns keys of this block, read from the same file."""
+
+    @property
+    def proven(self) -> bool:
+        return self.state == model.ParamState.OWNER_NAME_MISMATCH.value
+
+
+def _blocks(atlas: model.Atlas) -> list[_Block]:
+    # One block is one file. A key written under the same block name in two files belongs to
+    # two blocks, a reader has to delete both, and the count each finding states is the keys
+    # of its own block, so every write site of the chain is read and never one site standing
+    # for the parameter. The block key comes from the fact evidence row that names the file
+    # the block is in, so two blocks of one key cite their own first line and not each
+    # other's.
+    # The entity state is the strongest over all profiles (AGENTS section 7), so a block that
+    # one profile reads would hide the profile that ignores it; the fact state decides.
+    rows: dict[tuple[str, str, str], list[_BlockRow]] = defaultdict(list)
+    shared: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for node in _params(atlas):
+        name = ids.parse_param(node.id).name
+        for fact in node.facts:
+            if fact.layer != DECLARED or not rules.usable(fact):
+                continue
+            state = str(fact.values.get("state") or "")
+            selector = str(fact.values.get("selector") or "")
+            if state not in ORPHAN_STATES or not selector:
+                continue
+            keys = {row.file: row for row in fact.evidence}
+            for site in _write_sites(node, fact.profile):
+                rows[(fact.profile, site.file, selector)].append(
+                    _BlockRow(state, name, site, keys.get(site.file))
+                )
+                shared[(fact.profile, site.file, selector)].update(
+                    row.profile
+                    for row in node.candidates
+                    if row.profile != fact.profile
+                    and row.source is not None
+                    and row.source.file == site.file
+                    and _live(node, row.profile)
+                )
+    out: list[_Block] = []
+    for (profile, file_id, selector), found in sorted(rows.items()):
+        state = (
+            model.ParamState.OWNER_NAME_MISMATCH.value
+            if any(row.state == model.ParamState.OWNER_NAME_MISMATCH.value for row in found)
+            else model.ParamState.UNRESOLVED_OWNER.value
+        )
+        ordered = sorted(found, key=lambda row: (_line(row.site), row.name))
+        block_at = next((row.block_at for row in ordered if row.block_at is not None), None)
+        out.append(
+            _Block(
+                profile=profile,
+                file=file_id,
+                selector=selector,
+                state=state,
+                keys=tuple(sorted({row.name for row in found})),
+                source=block_at or ordered[0].site,
+                live_in=tuple(sorted(shared[(profile, file_id, selector)])),
+            )
+        )
+    return out
+
+
+def _write_sites(node: model.Node, profile: str) -> list[model.Source]:
+    """Every file and line this profile writes this parameter at, best rank first.
+
+    `rules.chain_site` answers with one site, which is the right answer for a rule that
+    reports a parameter. A rule that reports a block reports one per file, so it asks for all
+    of them: a key spelled in a base file and again in an overlay is one key of each block.
+    """
+    seen: dict[tuple[str, str], model.Source] = {}
+    for row in sorted(node.candidates, key=model.Candidate.sort_key):
+        if row.profile != profile or not row.source:
+            continue
+        seen.setdefault((row.source.file, row.source.locator), row.source)
+    return list(seen.values())
+
+
+def _launched(atlas: model.Atlas, profile: str) -> list[str]:
+    return sorted(
+        entity.id
+        for entity in atlas.entities.values()
+        if entity.kind == model.NodeKind.NODE.value
+        and profile in entity.profiles
+        and not ids.is_synthetic(entity.id)
+    )
+
+
+def _unnamed(atlas: model.Atlas, profile: str) -> int:
+    return sum(
+        1
+        for entity in atlas.entities.values()
+        if entity.kind == model.NodeKind.NODE.value
+        and profile in entity.profiles
+        and ids.is_synthetic(entity.id)
+    )
+
+
+def _near_names(atlas: model.Atlas, profile: str, selector: str) -> list[str]:
+    """Launched nodes whose name is the block key plus or minus a suffix."""
+    key = selector.strip("/").rsplit("/", 1)[-1]
+    if not key:
+        return []
+    found = []
+    for node_id in _launched(atlas, profile):
+        fqn = ids.parse_node(node_id).fqn or ""
+        base = fqn.strip("/").rsplit("/", 1)[-1]
+        if base == key:
+            continue
+        if base.startswith(f"{key}_") or key.startswith(f"{base}_"):
+            found.append(fqn)
+    return sorted(found)
+
+
+def _coded_packages(atlas: model.Atlas) -> frozenset[str]:
+    """Packages whose sources the coded layer read. A package with no file read cannot
+    contradict anything the declared layer says about a node it would create."""
+    return frozenset(
+        ids.parse_file(node.id).package for node in atlas.by_kind(FILE) if CODED in node.layers
+    )
+
+
+def _package_of(atlas: model.Atlas, node_id: str, profile: str) -> str:
+    node = atlas.get(node_id)
+    if node is None:
+        return ""
+    for fact in sorted(node.facts, key=model.LayerFact.sort_key):
+        if fact.layer != DECLARED or not rules.usable(fact):
+            continue
+        if fact.profile not in (profile, model.ANY_PROFILE):
+            continue
+        package = str(fact.values.get("pkg") or "")
+        if package:
+            return package
+    return ""
+
+
+def _fqn(node_id: str) -> str:
+    return ids.parse_node(node_id).fqn or ""
+
+
+def _namespace_of(selector: str) -> str:
+    try:
+        fqn = ids.normalise_ros_name("/" + selector.strip().strip("/"))
+    except ContractError:
+        return ""
+    head = fqn.rsplit("/", 1)[0]
+    return head or "/"
+
+
+def _runtime_namespace(atlas: model.Atlas, profile: str, selector: str) -> bool:
+    """The block key names a node in a namespace no launch file of this profile created."""
+    namespace = _namespace_of(selector)
+    if namespace in ("", "/"):
+        return False
+    prefix = namespace + "/"
+    return not any(_fqn(node_id).startswith(prefix) for node_id in _launched(atlas, profile))
+
+
+def _parent_names(atlas: model.Atlas, profile: str, selector: str) -> list[str]:
+    """Launched nodes whose name the block key extends by a suffix.
+
+    That is the shape of a node another node creates at run time, so the key may be owned by
+    a child of one of these. The reverse relation, a key that is a truncation of a launched
+    name, is a misspelled key and not a child, because a child extends its parent's name.
+    """
+    key = selector.strip("/").rsplit("/", 1)[-1]
+    if not key:
+        return []
+    found = []
+    for node_id in _launched(atlas, profile):
+        base = _fqn(node_id).strip("/").rsplit("/", 1)[-1]
+        if base and base != key and key.startswith(f"{base}_"):
+            found.append(node_id)
+    return sorted(found)
+
+
+def owner_gate(atlas: model.Atlas, profile: str, selector: str) -> str:
+    """Empty when a rule may state that no node owns this block, otherwise why it may not.
+
+    Three questions in order: was this profile's launch tree read, could a launched node own
+    the key through a child it creates at run time, and were the sources of those nodes read.
+    """
+    unread = plugins.unread_entry_points(atlas, profile)
+    if unread:
+        return (
+            "the launch tree of this profile was not read to the end ("
+            + ", ".join(plugins.launch_path(item) for item in unread)
+            + "), so the launched node set is a lower bound"
+        )
+    parents = _parent_names(atlas, profile, selector)
+    reason = "the key extends the name of a launched node, which is what a runtime child is called"
+    if _runtime_namespace(atlas, profile, selector):
+        parents = _launched(atlas, profile)
+        reason = "the key names a node in a namespace no launch file of this profile creates"
+    if not parents:
+        return ""
+    coded = _coded_packages(atlas)
+    # A node whose package is unknown has unread sources by the same test.
+    owners = {
+        _package_of(atlas, node_id, profile) or ids.parse_node(node_id).package
+        for node_id in parents
+    }
+    blind = sorted(owners - coded)
+    if not blind:
+        return ""
+    packages = ", ".join(item for item in blind if item) or "the launched nodes"
+    return (
+        f"{reason}, and no source of {packages} was read, so a child node that reads the "
+        "block cannot be ruled out"
+    )
+
+
+def _gated(atlas: model.Atlas) -> dict[tuple[str, str], str]:
+    """The blocks the owner gate holds back, keyed by profile and block key."""
+    return {
+        (block.profile, block.selector): reason
+        for block in _blocks(atlas)
+        if (reason := owner_gate(atlas, block.profile, block.selector))
+    }
+
+
+def _reachable(atlas: model.Atlas, owner: str, profile: str) -> bool:
+    sites = []
+    for edge in atlas.edges.values():
+        if edge.kind != "launches" or edge.dst != owner:
+            continue
+        if not any(
+            rules.usable(edge.fact(DECLARED, slot)) for slot in (profile, model.ANY_PROFILE)
+        ):
+            continue
+        sites.append(rules.site_live(atlas.entities[edge.src], profile))
+    if sites:
+        return any(sites)
+    # A node with no launch site and no fact in this profile is not started by it.
+    entity = atlas.entities[owner]
+    started = profile in entity.profiles or any(
+        rules.usable(fact) and fact.profile == model.ANY_PROFILE for fact in entity.facts
+    )
+    return started and not entity.attrs.get("unreachable", False)
+
+
+@rules.register("param.sim_time_mixed")
+def sim_time_mixed(atlas: model.Atlas) -> list[model.Finding]:
+    """Nodes of one profile that disagree about use_sim_time.
+
+    One node on wall time among nodes on simulated time stamps its messages decades away from
+    the others, and the symptom is a TF lookup that extrapolates into the past or the future,
+    far from the parameter that caused it. Only values the chain states are compared: a node
+    whose use_sim_time no file sets is not assumed false, so a profile fires only when two
+    stated values disagree.
+    """
+    sides: dict[str, dict[bool, list[tuple[str, model.Candidate]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for node in _params(atlas):
+        owner, name = ids.parse_param(node.id)
+        if name != "use_sim_time":
+            continue
+        for profile, rows in _by_profile(node).items():
+            winner = next((row for row in rows if row.wins), None)
+            if (
+                winner is None
+                or not isinstance(winner.value, bool)
+                or not _live(node, profile)
+                or not _reachable(atlas, owner, profile)
+            ):
+                continue
+            sides[profile][winner.value].append((owner, winner))
+    out: list[model.Finding] = []
+    for profile, split in sorted(sides.items()):
+        if len(split) < 2:
+            continue
+        on_sim, on_wall = split[True], split[False]
+        fewer, more, fewer_value = (
+            (on_wall, on_sim, False) if len(on_wall) <= len(on_sim) else (on_sim, on_wall, True)
+        )
+        slug = rules.slug_of(profile)
+        named = ", ".join(rules.node_text(owner) for owner, _ in sorted(fewer)[:3])
+        if len(fewer) > 3:
+            named += f" and {len(fewer) - 3} more"
+        first_owner, first = sorted(fewer)[0]
+        out.append(
+            model.Finding(
+                rule="param.sim_time_mixed",
+                severity=rules.SEVERITY["param.sim_time_mixed"],
+                subject=ids.build_profile(slug),
+                title=(
+                    f"use_sim_time is {fewer_value} for {len(fewer)} and "
+                    f"{not fewer_value} for {len(more)} nodes in profile {slug}"
+                ),
+                detail=(
+                    f"In profile {slug}, {len(on_sim)} nodes run on simulated time and "
+                    f"{len(on_wall)} on wall time. Messages stamped by one clock reach nodes "
+                    "reading the other, so transforms and message filters drop or "
+                    f"extrapolate. On {fewer_value}: {named}."
+                ),
+                fix=(
+                    f"Give every node of {slug} the same use_sim_time, for example with one "
+                    "SetParameter action at the top of the launch file that starts them."
+                ),
+                say=(
+                    f"{named} run with use_sim_time {fewer_value} while {len(more)} other nodes "
+                    f"of profile {slug} use {not fewer_value}; {rules.node_text(first_owner)} "
+                    f"gets it from {rules.where(first.source)}. Set one value for the profile."
+                ),
+                profiles=[profile],
+                layers=sorted({layer for _, row in fewer + more for layer in _layers(row)}),
+                where=rules.sources([row.source for _, row in sorted(fewer)]),
+            )
+        )
+    return out
+
+
+@rules.register("param.owner_name_mismatch")
+def owner_name_mismatch(atlas: model.Atlas) -> list[model.Finding]:
+    """A block key that misses a launched node by a suffix.
+
+    This is the case that is silently ignored today and is one rename away from working, so
+    it is separated from a block that owns nothing at all.
+    """
+    out: list[model.Finding] = []
+    gated = _gated(atlas)
+    for block in _blocks(atlas):
+        if not block.proven or (block.profile, block.selector) in gated:
+            continue
+        near = _near_names(atlas, block.profile, block.selector)
+        if not near:
+            continue
+        slug = rules.slug_of(block.profile)
+        at = rules.where(block.source)
+        listed = ", ".join(near)
+        target = near[0] if len(near) == 1 else "the node it configures"
+        out.append(
+            model.Finding(
+                rule="param.owner_name_mismatch",
+                severity=rules.severity_of("param.owner_name_mismatch"),
+                subject=block.file,
+                discriminator=f"{slug}.{block.selector}",
+                title=f"block {block.selector} misses the node name in {slug}",
+                detail=(
+                    f"The block {block.selector} carries {_keys(len(block.keys))} and profile "
+                    f"{slug} launches no node of that name. It launches {listed}, whose names "
+                    "start the same way, so nothing in the block is read."
+                ),
+                fix=f"Rename the block key {block.selector} to {target}.",
+                say=(
+                    f"{at} configures a node called {block.selector} with "
+                    f"{_keys(len(block.keys))}, and profile {slug} launches {listed} instead, "
+                    f"so none of the block is read. Rename the block key at {at} to {target}."
+                ),
+                profiles=[block.profile],
+                layers=[DECLARED],
+                where=[block.source],
+            )
+        )
+    return out
+
+
+@rules.register("param.orphan_block")
+def orphan_block(atlas: model.Atlas) -> list[model.Finding]:
+    """A parameter block no node of the profile can own.
+
+    Reported once per block, because one deletable block is one edit. A profile that holds a
+    process whose runtime name rosio could not form cannot prove the block owns nothing,
+    so the same finding drops to info and says which half of the claim is unproven.
+
+    The instruction is scoped to the profile the claim is scoped to. A bare delete tells a
+    reader to remove a block that another profile of the same workspace does launch.
+    """
+    out: list[model.Finding] = []
+    gated = _gated(atlas)
+    for block in _blocks(atlas):
+        if (block.profile, block.selector) in gated:
+            continue
+        if block.proven and _near_names(atlas, block.profile, block.selector):
+            continue
+        slug = rules.slug_of(block.profile)
+        at = rules.where(block.source)
+        blind = 0 if block.proven else _unnamed(atlas, block.profile)
+        variant = "shared" if block.live_in else ("" if block.proven else "unproven")
+        severity = rules.severity_of("param.orphan_block", variant)
+        caveat = (
+            ""
+            if not blind
+            else (
+                f" {blind} processes of this profile carry no name rosio could form, so the "
+                "block is dead unless one of them answers to it."
+            )
+        )
+        if block.live_in:
+            count = len(block.live_in)
+            others = ", ".join(rules.slug_of(item) for item in block.live_in[:3])
+            if count > 3:
+                others += f" and {count - 3} more"
+            launch = f"profile {others} launches" if count == 1 else f"profiles {others} launch"
+            caveat += (
+                f" The file is shared: {launch} a node that reads this block, so it is not "
+                "dead configuration."
+            )
+        out.append(
+            model.Finding(
+                rule="param.orphan_block",
+                severity=severity,
+                subject=block.file,
+                discriminator=f"{slug}.{block.selector}",
+                title=f"block {block.selector} owns nothing in {slug}",
+                detail=(
+                    f"The block {block.selector} carries {_keys(len(block.keys))} and no node "
+                    f"launched by profile {slug} answers to that name."
+                ),
+                fix=(
+                    f"Launch the node in profile {slug}, or delete the {block.selector} block "
+                    "once no profile launches it."
+                ),
+                say=(
+                    f"{at} configures a node called {block.selector} with "
+                    f"{_keys(len(block.keys))} and profile {slug} launches no node by that "
+                    f"name or a similar one.{caveat} Launch the node in {slug}, or delete the "
+                    f"block at {at} once no profile launches it."
+                ),
+                profiles=[block.profile],
+                layers=[DECLARED],
+                where=[block.source],
+            )
+        )
+    return out
+
+
+def silences(atlas: model.Atlas) -> list[dict[str, str]]:
+    """The rules this module kept quiet over this atlas, and why.
+
+    One row per rule, profile and reason, sorted, with the block keys the reason held back.
+    `rosio/drift/plugins.py` exposes the same function, so a renderer walks
+    `rules.FAMILIES` and asks each module that has one.
+    """
+    grouped: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for (profile, selector), reason in sorted(_gated(atlas).items()):
+        grouped[(profile, reason)].append(selector)
+    out: list[dict[str, str]] = []
+    for (profile, reason), blocks in sorted(grouped.items()):
+        listed = ", ".join(sorted(blocks))
+        for rule in ("param.orphan_block", "param.owner_name_mismatch"):
+            out.append(
+                {
+                    "rule": rule,
+                    "profile": profile,
+                    "reason": f"{reason}, so nothing is stated about {listed}",
+                }
+            )
+    return sorted(out, key=lambda row: (row["rule"], row["profile"], row["reason"]))
+
+
+__all__ = [
+    "declared_unread",
+    "orphan_block",
+    "owner_gate",
+    "owner_name_mismatch",
+    "restated_identical",
+    "set_undeclared",
+    "shadowed",
+    "silences",
+    "type_changed",
+]

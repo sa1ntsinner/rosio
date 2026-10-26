@@ -1,0 +1,13 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/legacy_ros1.launch",
+  "env": [],
+  "exceptions": [],
+  "loadable": false,
+  "nodes": [],
+  "note": "Case 12. ROS 1 XML. It is detected by shape and refused, never parsed. The file entity carries loadable false and the run carries one launch.unloadable finding. Reading the two node elements here would invent nodes that can never run.",
+  "predicates": {},
+  "strategy": "refused"
+}

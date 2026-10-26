@@ -1,0 +1,255 @@
+{
+  "arg_declarations": [
+    {
+      "default": "src/lx_bringup/config/zoo_base.yaml",
+      "name": "params_file"
+    },
+    {
+      "default": "navigation_zoo",
+      "name": "profile"
+    },
+    {
+      "default": "false",
+      "name": "use_sim_time"
+    }
+  ],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/nav_stack.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lx_controller",
+      "form": "node",
+      "fqn": "/controller_server",
+      "gates": [],
+      "name": "controller_server",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "the params_file argument default",
+          "order": 0,
+          "path": "src/lx_bringup/config/zoo_base.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        },
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 1,
+          "path": "src/lx_bringup/config/zoo_overlay.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        },
+        {
+          "kind": "inline_dict",
+          "note": "launch_ros infers bool from the argument text 'false'",
+          "order": 2,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "use_sim_time",
+              false
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_bringup",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "health_monitor",
+      "form": "node",
+      "fqn": "/lifecycle_manager_navigation",
+      "gates": [],
+      "name": "lifecycle_manager_navigation",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "inline_dict",
+          "note": "inline only, so the zoo_base lifecycle_manager block owns nothing",
+          "order": 0,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "autostart",
+              true
+            ],
+            [
+              "node_names",
+              [
+                "controller_server"
+              ]
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "health_monitor",
+      "form": "node",
+      "fqn": "/map_server",
+      "gates": [],
+      "name": "map_server",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/zoo_base.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "scan_relay",
+      "form": "node",
+      "fqn": "/scan_relay",
+      "gates": [],
+      "name": "scan_relay",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/zoo_dotted.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        },
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 1,
+          "path": "src/lx_bringup/config/zoo_wildcard.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lx_controller",
+      "form": "node",
+      "fqn": "/local_costmap/local_costmap",
+      "gates": [],
+      "name": "local_costmap",
+      "name_source": "literal",
+      "namespace": "/local_costmap",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/zoo_base.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        },
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 1,
+          "path": "src/lx_bringup/config/zoo_overlay.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_bringup",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lidar_driver",
+      "form": "node",
+      "fqn": "/ouster/os_driver",
+      "gates": [],
+      "name": "os_driver",
+      "name_source": "literal",
+      "namespace": "/ouster",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/zoo_node_wildcard.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        },
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 1,
+          "path": "src/lx_bringup/config/zoo_wildcard.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "The parameter zoo entry point. expected/params/zoo_chains.json scores the candidate chains that come out of these six nodes.",
+  "predicates": {},
+  "strategy": "executed"
+}

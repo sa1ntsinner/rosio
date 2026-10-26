@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!-- Case 12: ROS 1 XML syntax. Not loadable by ROS 2 launch. It must be detected and
+     refused, never parsed, or the walker invents nodes that can never run. -->
+<launch>
+  <arg name="param_file_name" default="rover" />
+  <arg name="use_gdb" default="false" />
+
+  <group if="$(arg use_gdb)">
+    <node pkg="lx_sensors" type="lidar_driver" name="lidar_driver" output="screen"
+          launch-prefix="gdb -ex run --args" clear_params="true">
+      <rosparam command="load" file="$(find lx_bringup)/config/$(arg param_file_name).yaml" />
+      <param name="rate_hz" type="double" value="20.0" />
+      <remap from="points" to="/sensors/points_raw" />
+    </node>
+  </group>
+
+  <node pkg="lx_sensors" type="imu_driver" name="imu_driver" clear_params="true">
+    <param name="frame_id" type="string" value="imu_link" />
+  </node>
+</launch>

@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>linked_nodes</name>
+  <version>0.0.1</version>
+  <description>Constructed classes in a shared library.</description>
+  <maintainer email="maintainer@example.com">Maintainer</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+</package>

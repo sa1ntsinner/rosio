@@ -1,0 +1,183 @@
+{
+  "note": "The rclpy half of the literal case. A bare integer depth is an int converted by the API into keep_last of that depth, so history is stated there. A QoSProfile spells its own keyword arguments, so anything it does not pass stays null rather than taking the rclpy default. line_hint is advisory and never compared.",
+  "package": "px_nodes",
+  "path": "src/px_nodes/px_nodes/literal_node.py",
+  "package_relative_path": "px_nodes/literal_node.py",
+  "language": "python",
+  "file_id": "file:px_nodes|px_nodes/literal_node.py",
+  "executables": ["px_literal"],
+  "nodes": [
+    {
+      "name": "px_literal",
+      "name_source": "literal",
+      "node_id": null,
+      "node_id_reason": "the code states the name, the namespace comes from the declared layer, so no fqn is formed here",
+      "form": "node",
+      "base": "rclpy.node.Node",
+      "class": "px_nodes.literal_node.LiteralNode",
+      "symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "symbol_id": "sym:px_nodes|px_nodes/literal_node.py|px_nodes.literal_node.LiteralNode.__init__",
+      "line_hint": 13
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "\"/px/odom\"",
+      "name": "/px/odom",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "nav_msgs/msg/Odometry",
+      "type_id": "type:nav_msgs|msg|Odometry",
+      "qos": {
+        "raw": "5",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 5,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "line_hint": 19
+    },
+    {
+      "kind": "publisher",
+      "raw": "\"/px/ready\"",
+      "name": "/px/ready",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "std_msgs/msg/Bool",
+      "type_id": "type:std_msgs|msg|Bool",
+      "qos": {
+        "raw": "latched_qos",
+        "form": "variable",
+        "variable": "latched_qos",
+        "mutated": false,
+        "history": null,
+        "depth": 1,
+        "reliability": "reliable",
+        "durability": "transient_local",
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "line_hint": 27
+    },
+    {
+      "kind": "publisher",
+      "raw": "\"cmd_vel\"",
+      "name": "cmd_vel",
+      "name_state": "literal_relative",
+      "absolute": false,
+      "topic_id": null,
+      "topic_id_reason": "a relative name mints no topic id, it stays raw until a remap or a namespace binds it",
+      "type": "geometry_msgs/msg/Twist",
+      "type_id": "type:geometry_msgs|msg|Twist",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "line_hint": 20
+    },
+    {
+      "kind": "service_client",
+      "raw": "\"/px/enable_motion\"",
+      "name": "/px/enable_motion",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "std_srvs/srv/SetBool",
+      "type_id": "type:std_srvs|srv|SetBool",
+      "qos": null,
+      "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "line_hint": 36
+    },
+    {
+      "kind": "service_server",
+      "raw": "\"/px/reset\"",
+      "name": "/px/reset",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "std_srvs/srv/Trigger",
+      "type_id": "type:std_srvs|srv|Trigger",
+      "qos": null,
+      "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "line_hint": 35
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/px/points\"",
+      "name": "/px/points",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "qos_profile_sensor_data",
+        "form": "preset",
+        "preset": "sensor_data",
+        "history": null,
+        "depth": null,
+        "reliability": null,
+        "durability": null
+      },
+      "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "line_hint": 15
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/px/scan\"",
+      "name": "/px/scan",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/LaserScan",
+      "type_id": "type:sensor_msgs|msg|LaserScan",
+      "qos": {
+        "raw": "state_qos",
+        "form": "variable",
+        "variable": "state_qos",
+        "mutated": true,
+        "history": null,
+        "depth": 1,
+        "reliability": null,
+        "durability": "transient_local",
+        "preset": null
+      },
+      "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "line_hint": 31
+    },
+    {
+      "kind": "timer",
+      "raw": "0.1",
+      "name": null,
+      "name_state": "not_applicable",
+      "period_s": 0.1,
+      "period_state": "literal",
+      "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "line_hint": 37
+    }
+  ],
+  "parameters": [],
+  "parameter_callbacks": [],
+  "plugin_parameters": [],
+  "tf": {
+    "broadcasts": [],
+    "lookups": []
+  },
+  "unresolved": [],
+  "counts": {
+    "endpoints": 8,
+    "publishers": 3,
+    "subscribers": 2,
+    "service_servers": 1,
+    "service_clients": 1,
+    "timers": 1,
+    "parameters": 0,
+    "unresolved": 0
+  }
+}

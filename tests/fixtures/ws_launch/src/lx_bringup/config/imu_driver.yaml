@@ -1,0 +1,4 @@
+imu_driver:
+  ros__parameters:
+    frame_id: imu_link
+    rate_hz: 100.0

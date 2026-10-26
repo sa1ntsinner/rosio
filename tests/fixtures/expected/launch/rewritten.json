@@ -1,0 +1,109 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/rewritten.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lx_controller",
+      "form": "node",
+      "fqn": "/rewritten_node",
+      "gates": [],
+      "name": "rewritten_node",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "rewritten_file",
+          "note": "root_key empty, the document is not reshaped",
+          "order": 0,
+          "path": null,
+          "rewrites": [
+            [
+              "anchor_tag",
+              "2.5"
+            ],
+            [
+              "autostart",
+              "false"
+            ],
+            [
+              "use_sim_time",
+              "true"
+            ]
+          ],
+          "root_key": "",
+          "source_path": "src/lx_bringup/config/rewrite_source.yaml",
+          "values": []
+        },
+        {
+          "kind": "inline_dict",
+          "note": "appended after the file precisely because the rewrite missed",
+          "order": 1,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "use_sim_time",
+              true
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_bringup",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lx_controller",
+      "form": "node",
+      "fqn": "/robot1/rewritten_node",
+      "gates": [],
+      "name": "rewritten_node",
+      "name_source": "literal",
+      "namespace": "/robot1",
+      "params": [
+        {
+          "kind": "rewritten_file",
+          "note": "the whole document is wrapped under robot1",
+          "order": 0,
+          "path": null,
+          "rewrites": [
+            [
+              "anchor_tag",
+              "2.5"
+            ],
+            [
+              "autostart",
+              "false"
+            ],
+            [
+              "use_sim_time",
+              "true"
+            ]
+          ],
+          "root_key": "robot1",
+          "source_path": "src/lx_bringup/config/rewrite_source.yaml",
+          "values": []
+        }
+      ],
+      "pkg": "lx_bringup",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 15. Both nodes are handed a file that does not exist until the description is evaluated, so path is null and provenance is source_path plus the rewrite list. Verified effects of the rewrite: autostart is replaced at node level and at nested level, anchor_tag turns from the string v1 into the float 2.5 because convert_types inspects the text, and use_sim_time is a silent no op because the source file has no such key. The second node also shows root_key wrapping the whole document, which reshapes every node key to /robot1/<node>.",
+  "predicates": {},
+  "strategy": "executed"
+}

@@ -1,0 +1,171 @@
+{
+  "note": "Each case is one real argv array as it would be handed to an ExecuteProcess or read from /proc/<pid>/cmdline. Expected RosArgs live in tests/fixtures/expected/static/ros_args.json, keyed by the same name. argv_arrays.json holds the same arrays in the same order without the names.",
+  "cases": [
+    {
+      "name": "empty",
+      "argv": [],
+      "note": "nothing to parse"
+    },
+    {
+      "name": "plain_only",
+      "argv": ["--config", "sim.yaml", "-v"],
+      "note": "no --ros-args at all, everything is leftover"
+    },
+    {
+      "name": "node_name_remap",
+      "argv": ["--ros-args", "-r", "__node:=fx_alpha"],
+      "note": "the canonical way a node gets its name from argv"
+    },
+    {
+      "name": "node_name_long_form",
+      "argv": ["--ros-args", "--remap", "__name:=fx_alpha"],
+      "note": "__name is the accepted alias of __node"
+    },
+    {
+      "name": "namespace_remap",
+      "argv": ["--ros-args", "-r", "__ns:=/fx/left"],
+      "note": "namespace from argv"
+    },
+    {
+      "name": "legacy_assignments",
+      "argv": ["__node:=fx_alpha", "__ns:=/fx", "input:=/fx/points"],
+      "note": "ROS 1 style bare assignments with no --ros-args block"
+    },
+    {
+      "name": "params_file_repeated",
+      "argv": [
+        "--ros-args",
+        "--params-file", "/fx/base.yaml",
+        "--params-file", "/fx/overrides.yaml",
+        "--params-file", "/fx/base.yaml"
+      ],
+      "note": "order is load bearing and duplicates are kept"
+    },
+    {
+      "name": "typed_params",
+      "argv": [
+        "--ros-args",
+        "-p", "use_sim_time:=true",
+        "-p", "queue_depth:=20",
+        "-p", "gain:=0.5",
+        "-p", "state_frame:=odom",
+        "-p", "limits:=[1.0, 2.0, 3.0]",
+        "-p", "empty_topic:=",
+        "-p", "nested.sub.key:=7"
+      ],
+      "note": "typed values stay raw strings, typing is the consumer's job"
+    },
+    {
+      "name": "param_long_form",
+      "argv": ["--ros-args", "--param", "gain:=0.5", "--param", "gain:=0.9"],
+      "note": "a repeated name is kept twice in order, last wins downstream"
+    },
+    {
+      "name": "topic_remaps",
+      "argv": [
+        "--ros-args",
+        "-r", "input:=/fx/points",
+        "-r", "/tf:=/fx/tf",
+        "-r", "fx_alpha:output:=/fx/points_filtered"
+      ],
+      "note": "the third form is a node prefixed remap and keeps its prefix"
+    },
+    {
+      "name": "log_level_and_enclave",
+      "argv": [
+        "--ros-args",
+        "--log-level", "debug",
+        "--enclave", "/fx/enclave",
+        "--log-level", "WARN"
+      ],
+      "note": "log level keeps its raw spelling, last one wins"
+    },
+    {
+      "name": "mixed_short_forms",
+      "argv": [
+        "--ros-args",
+        "-p", "a:=1",
+        "-r", "b:=/fx/c",
+        "--log-level", "info",
+        "-p", "d:=2",
+        "--params-file", "/fx/tail.yaml"
+      ],
+      "note": "flags interleaved in one block"
+    },
+    {
+      "name": "double_dash_tail",
+      "argv": [
+        "fx_alpha_node",
+        "--config", "x.yaml",
+        "--ros-args",
+        "-r", "__node:=fx_alpha",
+        "-p", "gain:=0.25",
+        "--",
+        "--not-ros", "tail"
+      ],
+      "note": "double dash closes the ros-args block, the tail is leftover"
+    },
+    {
+      "name": "two_ros_args_blocks",
+      "argv": [
+        "--ros-args",
+        "-p", "a:=1",
+        "--",
+        "plain",
+        "--ros-args",
+        "-r", "__ns:=/two",
+        "--params-file", "/fx/second.yaml"
+      ],
+      "note": "a second block reopens parsing"
+    },
+    {
+      "name": "everything_at_once",
+      "argv": [
+        "fx_alpha_node",
+        "--ros-args",
+        "-r", "__node:=fx_alpha",
+        "-r", "__ns:=/fx",
+        "-p", "use_sim_time:=false",
+        "-r", "input:=/fx/points",
+        "--params-file", "/fx/base.yaml",
+        "--params-file", "/fx/overrides.yaml",
+        "--log-level", "warn",
+        "--enclave", "/fx/enclave",
+        "--",
+        "trailing"
+      ],
+      "note": "every recognised form in one argv"
+    },
+    {
+      "name": "malformed_missing_value",
+      "argv": ["--ros-args", "-p"],
+      "note": "flag at end of argv with nothing to consume"
+    },
+    {
+      "name": "malformed_no_separator",
+      "argv": [
+        "--ros-args",
+        "-p", "novalue",
+        "-r", "alsobad",
+        "--params-file"
+      ],
+      "note": "assignments with no := and a params-file with no path"
+    },
+    {
+      "name": "malformed_empty_and_unknown",
+      "argv": [
+        "--ros-args",
+        "",
+        "-p", ":=1",
+        "--unknown-flag", "x",
+        "-r", ":=/fx/c"
+      ],
+      "note": "empty token, empty names, unknown flag, none of it may raise"
+    },
+    {
+      "name": "malformed_ros_args_only",
+      "argv": ["--ros-args"],
+      "note": "an empty block"
+    }
+  ]
+}

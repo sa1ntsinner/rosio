@@ -1,0 +1,126 @@
+{
+  "note": "A costmap style plugin. Its parameters have no node scoped name in the source: declareParameter auto prefixes with the plugin instance name, while the read side spells name_ + \".\" + key by hand, so the two spellings describe one parameter. The code layer emits the suffix bound to the plugin class and the drift engine crosses the yaml plugin selector list to form the full path. Recording these as parameters called \"topic\" or as names starting with a dot are both wrong. line_hint is advisory and never compared.",
+  "package": "cx_nodes",
+  "path": "src/cx_nodes/src/cx_layer_plugin.cpp",
+  "package_relative_path": "src/cx_layer_plugin.cpp",
+  "language": "cpp",
+  "file_id": "file:cx_nodes|src/cx_layer_plugin.cpp",
+  "nodes": [],
+  "plugins": [
+    {
+      "macro": "PLUGINLIB_EXPORT_CLASS",
+      "macro_wrapped_lines": true,
+      "type": "cx_nodes::DecayLayer",
+      "base_class": "cx_core::Layer",
+      "lookup_name": "cx_nodes/DecayLayer",
+      "lookup_name_source": "cx_layers_plugin.xml, joined from the manifest and not stated by the source",
+      "plugin_id": "plugin:cx_core::Layer|cx_nodes/DecayLayer",
+      "line_hint": 42
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "subscriber",
+      "raw": "topic_",
+      "name": "obstacle_cloud",
+      "name_state": "resolved_from_plugin_parameter_default",
+      "absolute": false,
+      "confidence": "inferred",
+      "topic_id": null,
+      "topic_id_reason": "a relative name mints no topic id, and the value is only the code side default of a plugin parameter the yaml may override",
+      "from_plugin_parameter": "topic",
+      "effective_needs": "<costmap node>.<layer instance>.topic from the parameter layer",
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "rclcpp::SensorDataQoS()",
+        "form": "preset",
+        "preset": "sensor_data",
+        "history": null,
+        "depth": null,
+        "reliability": null,
+        "durability": null
+      },
+      "owner_symbol": "cx_nodes::DecayLayer::onInitialize",
+      "line_hint": 29
+    }
+  ],
+  "parameters": [],
+  "parameter_callbacks": [],
+  "plugin_parameters": [
+    {
+      "suffix": "decay_s",
+      "type": "double",
+      "has_default": true,
+      "default": 3.0,
+      "base_class": "cx_core::Layer",
+      "lookup_name": "cx_nodes/DecayLayer",
+      "pparam_id": "pparam:cx_core::Layer|cx_nodes/DecayLayer|decay_s",
+      "declare_api": "declareParameter",
+      "declare_spelling": "\"decay_s\"",
+      "read_spelling": "name_ + \".\" + \"decay_s\"",
+      "asymmetric": true,
+      "owner_symbol": "cx_nodes::DecayLayer::onInitialize",
+      "reads": [{"api": "get_parameter_out", "target": "decay_s_", "line_hint": 27}],
+      "line_hint": 23
+    },
+    {
+      "suffix": "enabled",
+      "type": "bool",
+      "has_default": true,
+      "default": true,
+      "base_class": "cx_core::Layer",
+      "lookup_name": "cx_nodes/DecayLayer",
+      "pparam_id": "pparam:cx_core::Layer|cx_nodes/DecayLayer|enabled",
+      "declare_api": "declareParameter",
+      "declare_spelling": "\"enabled\"",
+      "read_spelling": null,
+      "asymmetric": false,
+      "owner_symbol": "cx_nodes::DecayLayer::onInitialize",
+      "reads": [],
+      "line_hint": 24
+    },
+    {
+      "suffix": "topic",
+      "type": "string",
+      "has_default": true,
+      "default": "obstacle_cloud",
+      "base_class": "cx_core::Layer",
+      "lookup_name": "cx_nodes/DecayLayer",
+      "pparam_id": "pparam:cx_core::Layer|cx_nodes/DecayLayer|topic",
+      "declare_api": "declareParameter",
+      "declare_spelling": "\"topic\"",
+      "read_spelling": "name_ + \".\" + \"topic\"",
+      "asymmetric": true,
+      "owner_symbol": "cx_nodes::DecayLayer::onInitialize",
+      "reads": [{"api": "get_parameter_out", "target": "topic_", "line_hint": 26}],
+      "line_hint": 22
+    }
+  ],
+  "tf": {
+    "broadcasts": [],
+    "lookups": []
+  },
+  "unresolved": [
+    {
+      "want": "other",
+      "expr": "name_ + \".\"",
+      "reason": "plugin_instance_prefix",
+      "detail": "the parameter prefix is the plugin instance name chosen by the yaml plugin list, so the node scoped parameter path cannot be formed from the source. The three suffixes are emitted as pparam entries instead, which is a resolved answer to a smaller question, not a guess at a larger one",
+      "resolvable_by": ["declared"],
+      "owner_symbol": "cx_nodes::DecayLayer::onInitialize",
+      "line_hint": 26
+    }
+  ],
+  "counts": {
+    "endpoints": 1,
+    "publishers": 0,
+    "subscribers": 1,
+    "service_servers": 0,
+    "service_clients": 0,
+    "timers": 0,
+    "parameters": 0,
+    "plugin_parameters": 3,
+    "unresolved": 1
+  }
+}

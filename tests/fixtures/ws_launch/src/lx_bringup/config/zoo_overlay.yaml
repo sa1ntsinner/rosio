@@ -1,0 +1,21 @@
+# Overlay half of the pair. Overlay wins per leaf, lists replace wholesale, and an overlay
+# key the base never had is inserted rather than rejected.
+
+controller_server:
+  ros__parameters:
+    # Restated with the identical value: not a value change, still a maintenance trap.
+    controller_frequency: 20.0
+    FollowPath:
+      # Shadows the base value.
+      plugin: "lx_bringup/OrbitFollower"
+      # Restated identical.
+      lookahead_dist: 2.4
+      # New key the base never had.
+      state_timeout: 0.4
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      width: 40
+      # The whole list is replaced, never merged element wise.
+      plugins: ["obstacle_layer", "static_layer", "inflation_layer"]

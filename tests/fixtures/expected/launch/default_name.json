@@ -1,0 +1,41 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/default_name.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "imu_driver",
+      "form": "node",
+      "fqn": null,
+      "gates": [],
+      "name": null,
+      "name_source": "executable_default",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/imu_driver.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 2. Launch states neither the name nor the namespace. The unstated namespace is the launch_ros unspecified sentinel, which means the root namespace, so it resolves to /. The name stays unknown, it comes from the executable at run time, so the fully qualified name still cannot be formed at declare time.",
+  "predicates": {},
+  "strategy": "executed"
+}

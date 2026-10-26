@@ -1,0 +1,8 @@
+<package format="3">
+  <name>argument_nodes</name>
+  <version>0.0.0</version>
+  <description>Constructor name fixtures</description>
+  <maintainer email="test@example.org">Test</maintainer>
+  <license>Apache-2.0</license>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

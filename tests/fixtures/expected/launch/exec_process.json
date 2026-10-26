@@ -1,0 +1,91 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/exec_process.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [
+        "python3",
+        "src/lx_bringup/scripts/crop_cloud.py",
+        "--ros-args",
+        "-p",
+        "rate_hz:=20.0",
+        "-p",
+        "decimate_rings:=2",
+        "-r",
+        "input:=/points_raw",
+        "__node:=cropper",
+        "__ns:=/prep",
+        "--params-file",
+        "src/lx_bringup/config/crop.yaml"
+      ],
+      "conditions": [],
+      "container": null,
+      "executable": "crop_cloud.py",
+      "form": "process",
+      "fqn": "/prep/cropper",
+      "gates": [],
+      "name": "cropper",
+      "name_source": "argv",
+      "namespace": "/prep",
+      "params": [
+        {
+          "kind": "ros_args_assign",
+          "note": "raw argv text, the type is the consumer's business",
+          "order": 0,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "rate_hz",
+              "20.0"
+            ]
+          ]
+        },
+        {
+          "kind": "ros_args_assign",
+          "note": "",
+          "order": 1,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "decimate_rings",
+              "2"
+            ]
+          ]
+        },
+        {
+          "kind": "ros_args_file",
+          "note": "",
+          "order": 2,
+          "path": "src/lx_bringup/config/crop.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "",
+      "plugin_class": null,
+      "remaps": [
+        {
+          "from": "input",
+          "scope": "node",
+          "to": "/points_raw"
+        }
+      ]
+    }
+  ],
+  "note": "Case 9. The whole identity is in the argv. Both remap spellings are present, the -r form and the bare __node and __ns form. The parameters file is listed after the two assignments, so for rate_hz the file is the later input and wins.",
+  "predicates": {},
+  "strategy": "executed"
+}

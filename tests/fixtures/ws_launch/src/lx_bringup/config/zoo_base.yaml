@@ -1,0 +1,49 @@
+# Base half of the overlay pair. Shapes 1 and 4 plus the silently ignored blocks.
+
+# SHAPE 1: node name key, ros__parameters at depth 2.
+controller_server:
+  ros__parameters:
+    controller_frequency: 20.0
+    controller_plugins: ["FollowPath"]
+    goal_checker:
+      xy_goal_tolerance: 0.25
+      yaw_goal_tolerance: 0.087
+    FollowPath:
+      plugin: "lx_bringup/PathFollower"
+      desired_linear_vel: 1.2
+      lookahead_dist: 2.4
+    # Inert by design: the key is not in controller_plugins, so nothing reads this block.
+    # One rename reverts it, which is why it is kept.
+    FollowPath_DISABLED:
+      plugin: "lx_bringup/MppiFollower"
+      batch_size: 2000
+    # Commented out value. It must never become a candidate.
+    # controller_frequency: 5.0
+
+# SHAPE 4: two level key, the outer key is the namespace and the inner one the node name,
+# ros__parameters at depth 3.
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      width: 20
+      height: 20
+      update_frequency: 5.0
+      # A list value.
+      plugins: ["obstacle_layer", "inflation_layer"]
+      # A list delivered as a string, parsed by the consumer and not by yaml.
+      footprint: "[[-0.48, -0.31], [0.48, -0.31], [0.48, 0.31], [-0.48, 0.31]]"
+      obstacle_layer:
+        max_obstacle_height: 2.0
+
+map_server:
+  ros__parameters:
+    # Explicit empty value. It is meaningful and it is not the same as unset.
+    yaml_filename: ""
+    save_map_timeout: 10.0
+
+# No node is ever launched with this name. The stack launches lifecycle_manager_navigation
+# and hands it an inline dict, so this whole block is parsed and dropped.
+lifecycle_manager:
+  ros__parameters:
+    autostart: true
+    node_names: ["controller_server", "velocity_smoother"]

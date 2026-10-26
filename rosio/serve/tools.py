@@ -1,0 +1,1081 @@
+"""The tool set an assistant calls instead of reading the atlas.
+
+A full atlas on a real stack is megabytes, so no model reads it. Every function here takes
+one loaded atlas and returns one plain text answer, capped so it fits a small context
+window, carrying the file and line a reader needs before editing anything. There is no
+language model in any of it, nothing here reads a file except the atlas itself, and a
+synthetic id never reaches the text.
+
+The consumer is assumed to know nothing about this project, so every answer states what it
+is, and every answer that hit a cap says how to narrow the next call.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from rosio import ids, schema
+from rosio import query as slices
+from rosio.errors import ContractError, UsageError
+from rosio.model import ANY_PROFILE, SCHEMA_MINOR, SEVERITY_ORDER, Atlas, Edge, Finding, Node
+
+ATLAS_NAME = "atlas.json"
+DRIFT_CAPABILITY = "drift.findings"
+
+MAX_BYTES = 4000
+"""Ceiling on one answer. A model with a 4k window has to hold the question too."""
+
+DEFAULT_LIMIT = 8
+WIDE_LIMIT = 5
+"""Rows that carry a whole sentence each, so fewer of them fit one answer."""
+
+MAX_LIMIT = 50
+
+
+# ---------------------------------------------------------------------------
+# the atlas, loaded once
+
+
+class AtlasSource:
+    """One atlas, read from disk on the first question and answered from memory after."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path).expanduser()
+        self._atlas: Atlas | None = None
+
+    def atlas(self) -> Atlas:
+        if self._atlas is None:
+            self._atlas = load(self.path)
+        return self._atlas
+
+    @property
+    def loaded(self) -> bool:
+        return self._atlas is not None
+
+
+def load(path: str | Path) -> Atlas:
+    """Read one atlas.json, validated, with a message a caller can act on.
+
+    Every answer this module gives is a statement about a workspace, so the document is
+    checked before it is answered from. A hand edited or truncated file otherwise reaches a
+    reader as a confident sentence about layers or counters that the file does not support.
+
+    The one document that is loaded without being held to this build's schema is one that
+    states a newer minor: its unknown keys and unknown enum members are exactly what a
+    newer minor is allowed to add, and section 9a says a reader tolerates them. Wrong types
+    on the closed fields are refused by the loader itself, in both cases.
+    """
+    target = Path(path).expanduser()
+    if target.is_dir():
+        target = target / ATLAS_NAME
+    if not target.is_file():
+        raise UsageError(
+            f"no atlas at {target}. run: rosio extract <workspace> --out <dir>, "
+            f"then point this server at <dir>/{ATLAS_NAME}"
+        )
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise UsageError(f"{target} does not parse as json: {exc}") from exc
+    try:
+        atlas = Atlas.from_json(payload)
+    except ContractError as exc:
+        raise ContractError(
+            f"{exc}. extract this workspace again with the installed rosio, "
+            "or upgrade rosio to the build that wrote the file"
+        ) from exc
+    if not _newer_minor(atlas.schema_version):
+        problems = schema.validate(payload)
+        if problems:
+            raise ContractError(
+                f"{target.name} does not satisfy the atlas schema, so it is not answered "
+                f"from: {_named(problems, top=3, more='violations')}. "
+                "extract this workspace again with: rosio extract <workspace> --out <dir>"
+            )
+    return atlas
+
+
+def _newer_minor(version: str) -> bool:
+    _, _, tail = str(version).partition(".")
+    try:
+        return int(tail or "0") > int(SCHEMA_MINOR)
+    except ValueError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# shaping
+
+
+def _fit(lines: Sequence[str], hint: str, cap: int = MAX_BYTES) -> str:
+    """One answer, capped, saying so and saying how to ask for less."""
+    text = "\n".join(lines)
+    if len(text.encode("utf-8")) <= cap:
+        return text
+    kept: list[str] = []
+    size = 0
+    room = cap - len(hint.encode("utf-8")) - 80
+    for line in lines:
+        size += len(line.encode("utf-8")) + 1
+        if size > room:
+            break
+        kept.append(line)
+    kept.append(f"truncated after {len(kept)} of {len(lines)} lines, {hint}")
+    return "\n".join(kept)
+
+
+def _limit(value: int | None, fallback: int = DEFAULT_LIMIT) -> int:
+    if not value:
+        return fallback
+    return max(1, min(int(value), MAX_LIMIT))
+
+
+def _text(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def _ref(entity_id: str) -> str:
+    """The id a caller may quote back, empty when the identity is synthetic."""
+    return "" if ids.parse(entity_id).synthetic else entity_id
+
+
+def _profile_id(atlas: Atlas, profile: str | None) -> str:
+    wanted = _text(profile)
+    if not wanted:
+        return ""
+    full = wanted if wanted.startswith("profile:") else ids.build_profile(wanted)
+    if full not in atlas.entities:
+        known = _named(
+            [slices.profile_name(item.id) for item in atlas.by_kind("profile")],
+            more="more profiles",
+        )
+        raise UsageError(f"no profile named {wanted}, this atlas holds: {known}")
+    return full
+
+
+def _entity(atlas: Atlas, selector: str) -> tuple[str, list[str]]:
+    """One entity id, or an empty id and the lines that say why."""
+    matches = slices.resolve(atlas, selector)
+    if len(matches) == 1:
+        return matches[0], []
+    if not matches:
+        return "", [
+            f"nothing in this atlas is named {selector!r}",
+            "  call query with the plain words, or overview for what this atlas holds",
+        ]
+    lines = [f"{selector!r} names {len(matches)} entities, ask again with one of these"]
+    for entity_id in matches[:DEFAULT_LIMIT]:
+        lines.append(f"  {atlas.entities[entity_id].kind} {slices.label(entity_id)}")
+    if len(matches) > DEFAULT_LIMIT:
+        lines.append(f"  and {len(matches) - DEFAULT_LIMIT} more")
+    return "", lines
+
+
+def _out(atlas: Atlas, entity_id: str) -> list[Edge]:
+    handles = (atlas.indexes.get("out") or {}).get(entity_id)
+    if handles is None:
+        return atlas.out_edges(entity_id)
+    return [atlas.edges[handle] for handle in sorted(handles) if handle in atlas.edges]
+
+
+def _into(atlas: Atlas, entity_id: str) -> list[Edge]:
+    handles = (atlas.indexes.get("in") or {}).get(entity_id)
+    if handles is None:
+        return atlas.in_edges(entity_id)
+    return [atlas.edges[handle] for handle in sorted(handles) if handle in atlas.edges]
+
+
+def _counted(rows: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for name in rows:
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def _ranked(counts: dict[str, int], top: int = 8, noun: str = "kinds") -> str:
+    order = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    shown = ", ".join(f"{_clip(name, 90)} {count}" for name, count in order[:top])
+    if len(order) > top:
+        shown = f"{shown}, and {len(order) - top} more {noun}"
+    return shown or "none"
+
+
+def _named(items: Sequence[str], top: int = DEFAULT_LIMIT, more: str = "more") -> str:
+    """A list of names, capped. Every answer is capped, and so is every refusal: an atlas
+    with a thousand profiles once put seven kilobytes into a message promising four."""
+    shown = ", ".join(_clip(str(item), 90) for item in items[:top])
+    if len(items) > top:
+        shown = f"{shown}, and {len(items) - top} {more}"
+    return shown or "none"
+
+
+def _clip(text: str, width: int) -> str:
+    return text if len(text) <= width else text[: width - 3] + "..."
+
+
+def _subject(item: Finding) -> str:
+    if isinstance(item.subject, str):
+        return slices.label(item.subject)
+    return f"{slices.label(item.subject.src)} {item.subject.kind} {slices.label(item.subject.dst)}"
+
+
+# ---------------------------------------------------------------------------
+# overview, the first call
+
+
+def overview(atlas: Atlas) -> str:
+    """Profiles, layers, counts, coverage and the worst findings, in one screen."""
+    counters = atlas.counters or {}
+    kinds = dict(counters.get("entities_by_kind") or {})
+    resolved = dict(counters.get("resolved") or {})
+    blind = dict(counters.get("unresolved") or {})
+    total_resolved = sum(resolved.values())
+    total_wanted = total_resolved + sum(blind.values())
+    rate = (total_resolved / total_wanted) if total_wanted else 1.0
+    present = [name for name, status in sorted(atlas.layers.items()) if status.present]
+    profiles = [slices.profile_name(item.id) for item in atlas.by_kind("profile")]
+    findings = sorted(atlas.findings, key=Finding.sort_key)
+    counts = _counted(item.severity for item in findings)
+
+    lines = [
+        f"rosio atlas, schema {atlas.schema_version}, "
+        f"{len(atlas.entities)} entities and {len(atlas.edges)} edges",
+        f"layers present: {', '.join(present) or 'none'}"
+        f"   capabilities: {', '.join(atlas.capabilities) or 'none'}",
+        f"profiles ({len(profiles)}): {_named(profiles, top=10, more='more profiles')}",
+        f"entities: {_ranked(kinds, top=10)}",
+        f"coverage: {sum(blind.values())} values unresolved of {total_wanted} wanted, "
+        f"rate {rate:.3f}",
+    ]
+    weak = sorted((counters.get("resolution_rate") or {}).items(), key=lambda item: item[1])[:3]
+    if weak:
+        lines.append("  weakest: " + ", ".join(f"{name} {value:.2f}" for name, value in weak))
+    if DRIFT_CAPABILITY not in atlas.capabilities:
+        lines.append("drift: the rules never ran over this atlas, so it carries no findings")
+    else:
+        summary = ", ".join(f"{count} {name}" for name, count in sorted(counts.items())) or "none"
+        lines.append(f"drift: {len(findings)} findings, {summary}")
+        for item in findings[:4]:
+            where = slices.site(item.where[0]) if item.where else ""
+            lines.append(f"  {item.severity:<5} {item.rule}  {_clip(item.title, 90)}   {where}")
+    lines.append(
+        "next: param_chain for one parameter value, drift for the findings, "
+        "explain for one entity, query for plain words"
+    )
+    return _fit(lines, "this answer is already the summary")
+
+
+# ---------------------------------------------------------------------------
+# param_chain, the highest value question in the product
+
+
+def param_chain(
+    atlas: Atlas,
+    node: str,
+    name: str | None = None,
+    *,
+    profile: str | None = None,
+) -> str:
+    """The effective value, its type, the line that set it and every line it shadows."""
+    owner = _text(node)
+    if not owner:
+        raise UsageError("param_chain needs a node, for example /controller_server")
+    wanted = _profile_id(atlas, profile)
+    answer = slices.param(atlas, owner, _text(name) or None, profile=wanted or None)
+    if not answer.ok:
+        return _fit(
+            answer.lines,
+            "name one node and one parameter, for example /controller_server FollowPath.plugin",
+        )
+    hint = "narrow with profile=<name>" if not wanted else "this parameter has a long chain"
+    return _fit(answer.lines, hint)
+
+
+# ---------------------------------------------------------------------------
+# drift
+
+
+def drift(
+    atlas: Atlas,
+    *,
+    severity: str | None = None,
+    rule: str | None = None,
+    profile: str | None = None,
+    limit: int | None = None,
+) -> str:
+    """The findings, each with the sentence to quote and the line to edit."""
+    if DRIFT_CAPABILITY not in atlas.capabilities:
+        return (
+            "this atlas carries no findings because the drift rules never ran over it. "
+            f"it declares {', '.join(atlas.capabilities) or 'nothing'}, and "
+            f"{DRIFT_CAPABILITY} is what says they ran. extract the workspace again"
+        )
+    floor = None
+    if _text(severity):
+        floor = SEVERITY_ORDER.get(_text(severity))
+        if floor is None:
+            raise UsageError(
+                f"no severity named {severity!r}, use one of: {', '.join(SEVERITY_ORDER)}"
+            )
+    wanted_rule = _text(rule)
+    wanted_profile = _profile_id(atlas, profile)
+    rows = [
+        item
+        for item in sorted(atlas.findings, key=Finding.sort_key)
+        if (floor is None or SEVERITY_ORDER.get(item.severity, 9) <= floor)
+        and (not wanted_rule or item.rule == wanted_rule)
+        and (not wanted_profile or not item.profiles or wanted_profile in item.profiles)
+    ]
+    fired = _counted(item.rule for item in atlas.findings)
+    if wanted_rule and wanted_rule not in fired:
+        return _fit(
+            [
+                f"no finding of rule {wanted_rule} in this atlas",
+                f"  rules that fired: {_ranked(fired, top=12, noun='rules')}",
+            ],
+            "call drift with no rule for all of them",
+        )
+    scope = [
+        f"severity {severity} or worse" if floor is not None else "",
+        f"rule {wanted_rule}" if wanted_rule else "",
+        f"profile {slices.profile_name(wanted_profile)}" if wanted_profile else "",
+    ]
+    filters = ", ".join(part for part in scope if part)
+    counts = _counted(item.severity for item in rows)
+    summary = ", ".join(f"{count} {name}" for name, count in sorted(counts.items())) or "none"
+    head = f"{len(rows)} findings of {len(atlas.findings)}: {summary}"
+    lines = [f"{head}   filters: {filters}" if filters else head]
+    kept = rows[: _limit(limit, WIDE_LIMIT)]
+    for item in kept:
+        lines.append(f"{item.severity:<5} {item.rule}  on {_subject(item)}")
+        lines.append(f"      say: {item.spoken}")
+        if item.where:
+            lines.append(f"      edit: {slices.site(item.where[0], locator=True)}")
+    if len(rows) > len(kept):
+        lines.append(f"  and {len(rows) - len(kept)} more, raise limit or filter by rule")
+    if rows:
+        lines.append("call explain on a subject above for its layers and provenance")
+    elif filters:
+        lines.append("nothing matches those filters, which is an answer and not a failure")
+    return _fit(lines, "narrow with severity=error, rule=<rule> or a smaller limit")
+
+
+# ---------------------------------------------------------------------------
+# explain
+
+
+def explain(atlas: Atlas, entity: str, *, limit: int | None = None) -> str:
+    """One entity or one finding in full: layers, facts, effective values and provenance."""
+    selector = _text(entity)
+    if not selector:
+        raise UsageError("explain needs an entity, for example /controller_server or /scan")
+    if selector.startswith(("find:", "sha256:")):
+        return _fit(slices.explain(atlas, selector).lines, "that finding is one row")
+    entity_id, complaint = _entity(atlas, selector)
+    if not entity_id:
+        return _fit(complaint, "call query with the plain words instead")
+    rows = _limit(limit)
+    data = slices.explain(atlas, entity_id, limit=rows).data
+    node = atlas.entities[entity_id]
+    lines = [f"{data['kind']} {data['label']}"]
+    handle = _ref(entity_id)
+    if handle:
+        lines.append(f"  id {handle}")
+    lines.append(
+        f"  layers {', '.join(data['layers']) or 'none'}"
+        f"   profiles {', '.join(slices.profile_name(item) for item in data['profiles']) or 'any'}"
+        f"   agreement {data['agreement']}"
+    )
+    if node.state is not None:
+        lines.append(f"  state {node.state}")
+    if data["conflicts"]:
+        lines.append(f"  layers disagree about: {', '.join(data['conflicts'])}")
+    for row in data["facts"][:rows]:
+        lines.append(
+            f"  {row['layer']} in {slices.profile_name(row['profile'])} "
+            f"({row['confidence']}): {row['values']}"
+        )
+        for where in row["where"][:2]:
+            lines.append(f"      {where}")
+    states_more = len(data["layers"]) > 1 or node.kind in ("param", "pparam")
+    for profile, per_key in data["effective"].items():
+        if not per_key or not states_more:
+            continue
+        pairs = ", ".join(f"{key}={row['value']!r}" for key, row in list(per_key.items())[:rows])
+        lines.append(f"  effective in {slices.profile_name(profile)}: {_clip(pairs, 220)}")
+        for key, row in list(per_key.items())[:rows]:
+            if row["where"]:
+                lines.append(f"      {key} ({row['value_type']}) from {row['where']}")
+    for way, arrow in (("out", "->"), ("in", "<-")):
+        counts = data["edges"][f"{way}_by_kind"]
+        if not counts:
+            continue
+        lines.append(f"  {way} edges: {_ranked(counts)}")
+        for row in data["edges"][way]:
+            lines.append(f"    {arrow} {row['kind']} {row['label']}")
+    for row in data["unresolved"][:3]:
+        lines.append(f"  unresolved {row['want']}: {row['expr']} ({row['reason']}) {row['where']}")
+    if data["findings"]:
+        lines.append(f"  {len(data['findings'])} findings, call drift for the sentences")
+    if node.kind in ("param", "pparam"):
+        lines.append("  call param_chain for the candidate chain and the line to edit")
+    lines.append("  call neighbours for the full fan in and fan out")
+    return _fit(lines, "call neighbours with a kind, or explain a neighbour instead")
+
+
+# ---------------------------------------------------------------------------
+# query
+
+
+def query(atlas: Atlas, question: str, *, budget: int | None = None) -> str:
+    """A scoped subgraph for a question in plain words, matched by name and kind only."""
+    if not _text(question):
+        raise UsageError('query needs a question, for example "which nodes publish cmd_vel"')
+    answer = slices.query(atlas, question, limit=_limit(budget))
+    lines = list(answer.lines)
+    if answer.ok and not answer.data.get("kinds") and not answer.data.get("relations"):
+        lines.append(
+            "  these matched the words by name only. name a kind (node, topic, parameter, "
+            "frame) or a relation (publishes, subscribes) to mean something narrower"
+        )
+    return _fit(lines, "ask for one name at a time, or lower budget")
+
+
+# ---------------------------------------------------------------------------
+# path
+
+
+def path(atlas: Atlas, a: str, b: str) -> str:
+    """The shortest path between two entities, with the kind and direction of every hop."""
+    if not _text(a) or not _text(b):
+        raise UsageError("path needs two entities, for example /controller_server and /cmd_vel")
+    answer = slices.path(atlas, _text(a), _text(b))
+    return _fit(answer.lines, "name both ends exactly, an id is accepted")
+
+
+# ---------------------------------------------------------------------------
+# neighbours
+
+
+def neighbours(
+    atlas: Atlas,
+    entity: str,
+    *,
+    kind: str | None = None,
+    direction: str | None = None,
+    limit: int | None = None,
+) -> str:
+    """Fan in and fan out of one entity, counted by edge kind, without scanning."""
+    entity_id, complaint = _entity(atlas, _text(entity))
+    if not entity_id:
+        return _fit(complaint, "call query with the plain words instead")
+    way = _text(direction).lower() or "both"
+    if way not in ("out", "in", "both"):
+        raise UsageError(f"no direction named {direction!r}, use out, in or both")
+    wanted = _text(kind)
+    rows = _limit(limit)
+    out_edges = _out(atlas, entity_id)
+    in_edges = _into(atlas, entity_id)
+    lines = [
+        f"{atlas.entities[entity_id].kind} {slices.label(entity_id)}: "
+        f"{len(out_edges)} edges out, {len(in_edges)} edges in"
+    ]
+    kinds = _counted(edge.kind for edge in out_edges + in_edges)
+    if wanted and wanted not in kinds:
+        lines.append(f"  no {wanted} edge touches it. kinds here: {_ranked(kinds, top=12)}")
+        return _fit(lines, "pick one of the kinds above")
+    for name, edges, arrow in (("out", out_edges, "->"), ("in", in_edges, "<-")):
+        if way not in (name, "both"):
+            continue
+        # counted by neighbour and not by edge, because one relation can hold at several
+        # launch sites and a reader wants the entity list to match the number above it
+        pairs = sorted({(edge.kind, edge.dst if name == "out" else edge.src) for edge in edges})
+        if wanted:
+            pairs = [pair for pair in pairs if pair[0] == wanted]
+        if not pairs:
+            lines.append(f"  {name}: none")
+            continue
+        lines.append(f"  {name}: {_ranked(_counted(kind for kind, _other in pairs), top=12)}")
+        for edge_kind, other in pairs[:rows]:
+            lines.append(f"    {arrow} {edge_kind} {slices.label(other)}")
+        if len(pairs) > rows:
+            lines.append(f"    and {len(pairs) - rows} more, raise limit or pass a kind")
+    return _fit(lines, "pass kind=<edge kind> and direction=out or in")
+
+
+# ---------------------------------------------------------------------------
+# graph
+
+LINK_KINDS = ("publishes", "subscribes", "serves", "calls")
+CHANNEL_KINDS = ("topic", "service", "action")
+QOS_KEYS = ("preset", "reliability", "durability", "history", "depth")
+_TOPIC_SIDES = (
+    ("publishes", "published by", "no publisher"),
+    ("subscribes", "subscribed by", "no subscriber"),
+)
+_SERVER_SIDES = (("serves", "served by", "no server"), ("calls", "called by", "no client"))
+_SIDES = {"topic": _TOPIC_SIDES, "service": _SERVER_SIDES, "action": _SERVER_SIDES}
+
+
+def _in_profile(item: Node | Edge, wanted: str) -> bool:
+    if not wanted:
+        return True
+    return wanted in item.profiles or any(
+        fact.profile in (wanted, ANY_PROFILE) for fact in item.facts
+    )
+
+
+def _qos(edge: Edge, wanted: str) -> str:
+    """The QoS the atlas states for one endpoint, never a default. Empty when it states none."""
+    if wanted:
+        stated = edge.effective.get(wanted) or edge.effective.get(ANY_PROFILE) or {}
+    else:
+        stated = edge.effective[min(edge.effective)] if edge.effective else {}
+    parts = []
+    for key in QOS_KEYS:
+        row = stated.get(f"qos.{key}")
+        if row is None or row.value is None:
+            continue
+        if key == "preset":
+            parts.append(f"{row.value} preset")
+        elif key == "depth":
+            parts.append(f"depth {row.value}")
+        else:
+            parts.append(str(row.value))
+    if edge.conflicts:
+        parts.append(f"layers differ on {', '.join(edge.conflicts)}")
+    return ", ".join(parts)
+
+
+def _wrapper(edge: Edge, wanted: str) -> bool:
+    return edge.attrs.get("via_known_wrapper") is True or any(
+        fact.values.get("via_known_wrapper") is True
+        for fact in edge.facts
+        if not wanted or fact.profile in (wanted, ANY_PROFILE)
+    )
+
+
+def _channel_type(atlas: Atlas, channel: str, wanted: str) -> str:
+    names = {
+        "/".join(ids.parse(edge.dst).segments)
+        for edge in _out(atlas, channel)
+        if edge.kind == "uses_type" and _in_profile(edge, wanted)
+    }
+    return next(iter(names)) if len(names) == 1 else ""
+
+
+def _rules(atlas: Atlas, channel: str, wanted: str) -> list[str]:
+    """Rule ids of the findings about one channel or about an endpoint edge on it."""
+    rules = set()
+    for item in atlas.findings:
+        if wanted and item.profiles and not {wanted, ANY_PROFILE} & set(item.profiles):
+            continue
+        subject = item.subject
+        if subject == channel or (
+            not isinstance(subject, str) and subject.kind in LINK_KINDS and subject.dst == channel
+        ):
+            rules.add(item.rule)
+    return sorted(rules)
+
+
+def _many(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+@dataclass
+class GraphSelection:
+    """What graph shows: channels in reading order and the endpoint edges ending on each.
+
+    `complaint` is set instead when the focus named nothing usable, with `hint` beside it.
+    """
+
+    wanted: str
+    hops: int
+    head: str = ""
+    focus_id: str = ""
+    complaint: list[str] = field(default_factory=list)
+    hint: str = ""
+    channels: list[str] = field(default_factory=list)
+    rules: dict[str, list[str]] = field(default_factory=dict)
+    by_channel: dict[str, list[Edge]] = field(default_factory=dict)
+    hidden: int = 0
+    beyond: int = 0
+
+
+def select_graph(
+    atlas: Atlas,
+    *,
+    profile: str | None = None,
+    focus: str | None = None,
+    depth: int | None = None,
+    wrappers: bool = False,
+) -> GraphSelection:
+    """The selection behind `graph` and `diagram`, made once for both.
+
+    The same selection as the editor's system graph: endpoint edges between nodes and
+    channels of one profile, cut to the neighbourhood of a focus within depth hops.
+    """
+    wanted = _profile_id(atlas, profile)
+    scope = {
+        entity_id
+        for entity_id, entity in atlas.entities.items()
+        if (entity.kind == "node" or entity.kind in CHANNEL_KINDS) and _in_profile(entity, wanted)
+    }
+    links = [
+        edge
+        for edge in atlas.edges.values()
+        if edge.kind in LINK_KINDS
+        and edge.src in scope
+        and edge.dst in scope
+        and _in_profile(edge, wanted)
+    ]
+    where = f"profile {slices.profile_name(wanted)}" if wanted else "every profile"
+    hops = 2 if depth is None else max(1, int(depth))
+    selector = _text(focus)
+    focus_id = ""
+    beyond = 0
+    if selector:
+        focus_id, complaint = _entity(atlas, selector)
+        if not focus_id:
+            return GraphSelection(
+                wanted, hops, complaint=complaint, hint="call query with the plain words instead"
+            )
+        kind = atlas.entities[focus_id].kind
+        if kind != "node" and kind not in CHANNEL_KINDS:
+            return GraphSelection(
+                wanted,
+                hops,
+                complaint=[
+                    f"{kind} {slices.label(focus_id)} is not a node, topic, service or action",
+                    "  call neighbours for what it is connected to",
+                ],
+                hint="focus on a node or a channel",
+            )
+        reached = {focus_id} & scope
+        frontier = set(reached)
+        for _ in range(hops):
+            step = set()
+            for edge in links:
+                for here, there in ((edge.src, edge.dst), (edge.dst, edge.src)):
+                    if here in frontier and there not in reached:
+                        step.add(there)
+            if not step:
+                break
+            reached |= step
+            frontier = step
+        beyond = sum(1 for edge in links if (edge.src in reached) != (edge.dst in reached))
+        scope = reached
+        links = [edge for edge in links if edge.src in scope and edge.dst in scope]
+
+    shown = links if wrappers else [edge for edge in links if not _wrapper(edge, wanted)]
+    hidden = len(links) - len(shown)
+    by_channel: dict[str, list[Edge]] = {}
+    for edge in shown:
+        by_channel.setdefault(edge.dst, []).append(edge)
+    library_only = {edge.dst for edge in links} - set(by_channel)
+    channels = sorted(
+        (entity_id for entity_id in scope if atlas.entities[entity_id].kind in CHANNEL_KINDS),
+        key=slices.label,
+    )
+    channels = [entity_id for entity_id in channels if entity_id not in library_only]
+    rules = {entity_id: _rules(atlas, entity_id, wanted) for entity_id in channels}
+    channels.sort(key=lambda entity_id: not rules[entity_id])
+
+    nodes = sum(1 for entity_id in scope if atlas.entities[entity_id].kind == "node")
+    counts = _counted(atlas.entities[entity_id].kind for entity_id in channels)
+    tally = ", ".join(_many(counts.get(kind, 0), kind) for kind in CHANNEL_KINDS)
+    head = f"{_many(nodes, 'node')}, {tally}, {_many(len(shown), 'endpoint')} in {where}"
+    if focus_id:
+        around = f"{atlas.entities[focus_id].kind} {slices.label(focus_id)}"
+        head = f"around {around} within {_many(hops, 'hop')}: {head}"
+        if focus_id not in scope:
+            head = f"{around} has no endpoint in {where}"
+    return GraphSelection(
+        wanted,
+        hops,
+        head=head,
+        focus_id=focus_id,
+        channels=channels,
+        rules=rules,
+        by_channel=by_channel,
+        hidden=hidden,
+        beyond=beyond,
+    )
+
+
+def graph(
+    atlas: Atlas,
+    *,
+    profile: str | None = None,
+    focus: str | None = None,
+    depth: int | None = None,
+    wrappers: bool = False,
+    limit: int | None = None,
+) -> str:
+    """Who talks to what: nodes and the topics, services and actions between them.
+
+    The same selection as the editor's system graph: endpoint edges between nodes and
+    channels of one profile, cut to the neighbourhood of a focus within depth hops. QoS is
+    the edge's effective block for the profile and is left out where the atlas states none.
+    """
+    chosen = select_graph(atlas, profile=profile, focus=focus, depth=depth, wrappers=wrappers)
+    if chosen.complaint:
+        return _fit(chosen.complaint, chosen.hint)
+    wanted, hops = chosen.wanted, chosen.hops
+    lines = [chosen.head]
+    rows = _limit(limit)
+    for entity_id in chosen.channels[:rows]:
+        kind = atlas.entities[entity_id].kind
+        rules = chosen.rules[entity_id]
+        flags = f" [{', '.join(rules)}]" if rules else ""
+        sides = []
+        for edge_kind, verb, none in _SIDES[kind]:
+            ends: dict[str, set[str]] = {}
+            for edge in chosen.by_channel.get(entity_id, []):
+                if edge.kind == edge_kind:
+                    qos = _qos(edge, wanted)
+                    ends.setdefault(slices.label(edge.src), set()).add(f" [{qos}]" if qos else "")
+            named = [name + "".join(sorted(qos)) for name, qos in sorted(ends.items())]
+            sides.append(f"{verb} {_named(named, more='more')}" if named else none)
+        type_name = _channel_type(atlas, entity_id, wanted)
+        typed = f" ({type_name})" if type_name else ""
+        lines.append(f"{slices.label(entity_id)}{typed}{flags}: " + "; ".join(sides))
+    if len(chosen.channels) > rows:
+        lines.append(
+            f"and {_many(len(chosen.channels) - rows, 'more channel')}, raise limit or pass focus"
+        )
+    if chosen.hidden:
+        lines.append(
+            f"{_many(chosen.hidden, 'library endpoint')} left out (tf2_ros, diagnostic_updater "
+            "and similar wrappers), pass wrappers=true to list them"
+        )
+    if chosen.focus_id and chosen.beyond:
+        lines.append(
+            f"{_many(chosen.beyond, 'endpoint')} beyond {_many(hops, 'hop')}, "
+            "raise depth to follow them"
+        )
+    if not wanted and len(atlas.by_kind("profile")) > 1:
+        lines.append("these merge every profile, narrow with profile=<name>")
+    return _fit(lines, "pass focus=<node or topic> or a smaller limit")
+
+
+# ---------------------------------------------------------------------------
+# diagram, the graph selection drawn
+
+DIAGRAM_FORMATS = ("dot", "mermaid")
+_FLOWS_OUT = ("publishes", "calls")
+"""Data leaves a publisher or a caller, and reaches a subscriber or a server."""
+
+_DOT_SHAPES = {
+    "node": "shape=box",
+    "topic": "shape=box, style=rounded",
+    "service": "shape=hexagon",
+    "action": "shape=octagon",
+}
+_MERMAID_SHAPES = {
+    "node": ('["', '"]'),
+    "topic": ('(["', '"])'),
+    "service": ('{{"', '"}}'),
+    "action": ('[["', '"]]'),
+}
+_MERMAID_CODES = {
+    "#": "#35;",
+    '"': "#quot;",
+    "<": "#lt;",
+    ">": "#gt;",
+    "|": "#124;",
+    "&": "#amp;",
+    "`": "#96;",
+    "\r": "",
+    "\n": "<br/>",
+}
+_FINDING_COLOUR = "#d00000"
+
+
+def _dot_text(text: str) -> str:
+    text = text.replace("\\", "\\\\").replace('"', '\\"')
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
+
+
+def _mermaid_text(text: str) -> str:
+    return "".join(_MERMAID_CODES.get(char, char) for char in text)
+
+
+def _comment(text: str) -> str:
+    return " ".join(text.split())
+
+
+def diagram(
+    atlas: Atlas,
+    fmt: str,
+    *,
+    profile: str | None = None,
+    focus: str | None = None,
+    depth: int | None = None,
+    wrappers: bool = False,
+    limit: int | None = None,
+) -> str:
+    """The graph selection as a Graphviz digraph or a Mermaid flowchart, data left to right.
+
+    Nodes are boxes and channels rounded, with the message type on a second line when the
+    atlas states one. A channel with findings is drawn red and names their rules. An arrow
+    carries QoS only where the atlas states it. `limit` counts channels, as in `graph`, and is
+    the only cap: a diagram cut at a byte count does not parse.
+    """
+    if fmt not in DIAGRAM_FORMATS:
+        raise UsageError(f"no diagram format named {fmt!r}, use one of: dot, mermaid")
+    chosen = select_graph(atlas, profile=profile, focus=focus, depth=depth, wrappers=wrappers)
+    if chosen.complaint:
+        raise UsageError("; ".join(line.strip() for line in chosen.complaint))
+    rows = max(1, int(limit)) if limit else len(chosen.channels)
+    boxes: dict[str, list[str]] = {}
+    marked: set[str] = set()
+    arrows: dict[tuple[str, str], set[str]] = {}
+    for channel in chosen.channels[:rows]:
+        boxes[channel] = [slices.label(channel)]
+        type_name = _channel_type(atlas, channel, chosen.wanted)
+        if type_name:
+            boxes[channel].append(type_name)
+        if chosen.rules[channel]:
+            boxes[channel].append(f"[{', '.join(chosen.rules[channel])}]")
+            marked.add(channel)
+        for edge in chosen.by_channel.get(channel, []):
+            boxes.setdefault(edge.src, [slices.label(edge.src)])
+            ends = (edge.src, channel) if edge.kind in _FLOWS_OUT else (channel, edge.src)
+            qos = _qos(edge, chosen.wanted)
+            arrows.setdefault(ends, set()).update([qos] if qos else [])
+    notes = [chosen.head]
+    if len(chosen.channels) > rows:
+        notes.append(f"{_many(len(chosen.channels) - rows, 'more channel')} not drawn")
+    if chosen.hidden:
+        notes.append(f"{_many(chosen.hidden, 'library endpoint')} left out")
+
+    def name(entity_id: str) -> str:
+        return f"{atlas.entities[entity_id].kind[0]}_{ids.digest(entity_id, length=12)}"
+
+    order = sorted(boxes, key=lambda entity_id: (boxes[entity_id], entity_id))
+    links = sorted(
+        arrows.items(),
+        key=lambda item: (boxes[item[0][0]], boxes[item[0][1]], item[0]),
+    )
+    if fmt == "dot":
+        lines = ["digraph rosio {", *(f"  // {_comment(note)}" for note in notes)]
+        lines.append("  rankdir=LR;")
+        for entity_id in order:
+            label = "\\n".join(_dot_text(line) for line in boxes[entity_id])
+            style = _DOT_SHAPES[atlas.entities[entity_id].kind]
+            if entity_id in marked:
+                style += f', color="{_FINDING_COLOUR}", fontcolor="{_FINDING_COLOUR}", penwidth=2'
+            lines.append(f'  {name(entity_id)} [label="{label}", {style}];')
+        for (src, dst), qos in links:
+            label = f' [label="{_dot_text("; ".join(sorted(qos)))}"]' if qos else ""
+            lines.append(f"  {name(src)} -> {name(dst)}{label};")
+        lines.append("}")
+    else:
+        lines = ["flowchart LR", *(f"  %% {_comment(note)}" for note in notes)]
+        for entity_id in order:
+            label = "<br/>".join(_mermaid_text(line) for line in boxes[entity_id])
+            opening, closing = _MERMAID_SHAPES[atlas.entities[entity_id].kind]
+            lines.append(f"  {name(entity_id)}{opening}{label}{closing}")
+        for (src, dst), qos in links:
+            label = f'|"{_mermaid_text("; ".join(sorted(qos)))}"|' if qos else ""
+            lines.append(f"  {name(src)} -->{label} {name(dst)}")
+        if marked:
+            lines.append(
+                f"  classDef finding stroke:{_FINDING_COLOUR},stroke-width:2px,"
+                f"color:{_FINDING_COLOUR}"
+            )
+            lines.append(f"  class {','.join(sorted(name(item) for item in marked))} finding")
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# unresolved
+
+
+def unresolved(
+    atlas: Atlas,
+    *,
+    want: str | None = None,
+    owner: str | None = None,
+    limit: int | None = None,
+) -> str:
+    """The blind spots: what this atlas could not resolve, and where each one sits."""
+    rows = _limit(limit, WIDE_LIMIT)
+    entries = sorted(atlas.unresolved, key=lambda item: item.id)
+    wanted = _text(want)
+    kinds = _counted(entry.want for entry in entries)
+    if wanted and wanted not in kinds:
+        return _fit(
+            [
+                f"nothing unresolved of want {wanted}",
+                f"  wants in this atlas: {_ranked(kinds, top=12, noun='wants')}",
+            ],
+            "call unresolved with no want for all of them",
+        )
+    owner_id = ""
+    if _text(owner):
+        owner_id, complaint = _entity(atlas, _text(owner))
+        if not owner_id:
+            return _fit(complaint, "name the owning node, symbol or file")
+    kept = [
+        entry
+        for entry in entries
+        if (not wanted or entry.want == wanted) and (not owner_id or entry.owner == owner_id)
+    ]
+    rates = dict(sorted((atlas.counters.get("resolution_rate") or {}).items()))
+    lines = [
+        f"{len(kept)} unresolved values of {len(entries)} in this atlas"
+        + (f", want {wanted}" if wanted else "")
+        + (f", owner {slices.label(owner_id)}" if owner_id else "")
+    ]
+    lines.append(
+        f"  by want: {_ranked(_counted(entry.want for entry in kept), top=10, noun='wants')}"
+    )
+    if rates:
+        lines.append(
+            "  resolution rate: "
+            + ", ".join(f"{name} {value:.2f}" for name, value in list(rates.items())[:8])
+        )
+    owners = _counted(slices.label(entry.owner) for entry in kept)
+    if not owner_id and owners:
+        lines.append(f"  owners: {_ranked(owners, top=3, noun='owners')}")
+    for entry in kept[:rows]:
+        lines.append(f"  {entry.want}: {entry.expr}")
+        lines.append(
+            f"      in {slices.label(entry.owner)} ({entry.reason})"
+            + (f" at {slices.site(entry.evidence[0])}" if entry.evidence else "")
+        )
+        if entry.resolvable_by:
+            lines.append(f"      resolvable by {', '.join(entry.resolvable_by)}")
+    if len(kept) > rows:
+        lines.append(f"  and {len(kept) - rows} more, narrow with want or owner")
+    return _fit(lines, "narrow with want=<want> or owner=<node>")
+
+
+# ---------------------------------------------------------------------------
+# stamps
+
+
+def stamps(atlas: Atlas, *, bag: str | None = None, limit: int | None = None) -> str:
+    """The header stamp verdict of every recording, and the topics whose checks failed."""
+    rows = _limit(limit)
+    wanted = _text(bag)
+    bags = []
+    for entity in atlas.by_kind("bag"):
+        fact = entity.fact("recorded")
+        verdict = (fact.values.get("stamp_verdict") if fact else None) or {}
+        if verdict and (not wanted or entity.label == wanted):
+            bags.append((entity, verdict))
+    if not bags:
+        known = sorted(entity.label for entity in atlas.by_kind("bag"))
+        if wanted and wanted not in known:
+            return _fit(
+                [f"no recording named {wanted}", f"  recordings: {_named(known)}"],
+                "call stamps with no bag for all of them",
+            )
+        return _fit(
+            ["no recording in this atlas carries header stamp checks"],
+            "add a bag root to rosio.yaml and extract, or run rosio stamps on a recording",
+        )
+
+    lines = [f"{len(bags)} recordings with header stamp checks"]
+    for entity, verdict in sorted(bags, key=lambda item: item[0].label):
+        lines.append(f"{entity.label}: {verdict.get('level', 'unknown')}")
+        lines.extend(f"  {hypothesis}" for hypothesis in verdict.get("hypotheses") or [])
+        failed = []
+        for edge in _out(atlas, entity.id):
+            topic = atlas.entities.get(edge.dst)
+            fact = (
+                topic.fact("recorded") if topic is not None and topic.kind == "bagtopic" else None
+            )
+            checks = ((fact.values.get("stamps") or {}).get("checks") or []) if fact else []
+            failed.extend((ids.parse_bagtopic(topic.id).topic, row) for row in checks)
+        for name, row in sorted(failed, key=lambda item: (item[1]["severity"], item[0]))[:rows]:
+            lines.append(
+                f"  {row['severity']:<5} {name} {row['check']}: {_clip(row['message'], 110)}"
+            )
+        if len(failed) > rows:
+            lines.append(f"  and {len(failed) - rows} more failed checks, raise limit")
+    lines.append("next: drift rule=time.backward and the other time.* rules for the line to fix")
+    return _fit(lines, "narrow with bag=<recording>")
+
+
+# ---------------------------------------------------------------------------
+# migrate
+
+
+def migrate(
+    workspace: str,
+    target: str,
+    *,
+    start: str | None = None,
+    package: str | None = None,
+    limit: int | None = None,
+) -> str:
+    """What moving the workspace to another release asks, by hand items first.
+
+    The exact rewrites are counted and handed to `rosio migrate apply` rather than listed,
+    because an agent that retypes them can only add mistakes. This reads source files, not
+    the atlas, and edits nothing.
+    """
+    import os
+
+    from rosio import migrate as release
+
+    source = _text(start) or os.environ.get("ROS_DISTRO", "")
+    if not source:
+        return _fit(
+            ["the current release is unknown: pass start, or source ROS so ROS_DISTRO is set"],
+            "call migrate with start=<release>",
+        )
+    changes, _root = release.plan_workspace(_text(workspace) or ".", source, target)
+    wanted = _text(package)
+    if wanted:
+        changes = [change for change in changes if change.package == wanted]
+    automatic = [change for change in changes if change.automatic]
+    by_hand = [change for change in changes if not change.automatic]
+    rows = _limit(limit, fallback=MAX_LIMIT)
+    lines = [
+        f"{source} -> {target}: {len(changes)} changes, {len(automatic)} exact rewrites, "
+        f"{len(by_hand)} by hand"
+    ]
+    if automatic:
+        lines.append(
+            f"rewrites: run `rosio migrate apply --from {source} --to {target}` once, "
+            "do not retype them"
+        )
+    for change in by_hand[:rows]:
+        lines.append(
+            f"{change.file}:{change.line} {change.effect} in {change.release}: {change.say}"
+        )
+    if len(by_hand) > rows:
+        lines.append(f"and {len(by_hand) - rows} more by hand, narrow with package")
+    if not changes:
+        lines.append("nothing in this workspace changes")
+    else:
+        lines.append(f"then run `rosio migrate verify --from {source} --to {target}` to confirm")
+    return _fit(lines, "narrow with package=<name>")
+
+
+__all__ = [
+    "DEFAULT_LIMIT",
+    "MAX_BYTES",
+    "AtlasSource",
+    "diagram",
+    "drift",
+    "explain",
+    "graph",
+    "load",
+    "migrate",
+    "neighbours",
+    "overview",
+    "param_chain",
+    "path",
+    "query",
+    "stamps",
+    "unresolved",
+]

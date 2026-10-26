@@ -1,0 +1,298 @@
+# The hand written half of `rosio migrate`.
+#
+# The measured half needs no entry here: a dependency that rosdistro does not release for the
+# target, and a header that the target's image does not install, are found from
+# distros.json. This file adds what a measurement cannot say: the replacement, the API that
+# changed without a file disappearing, and the source a reader can check.
+#
+# Every rule names the release where the old form started to warn (`deprecated`) and where
+# it stopped building (`removed`), so a move that only crosses the first gets a warning and
+# not an error. `works_from` is the oldest release where the fixed form builds, which tells a
+# package that has to support both ends whether it can take the fix today.
+#
+# `title` names what changed in a few words, for a list; `say` is the sentence to act on.
+#
+# A rule with `fix` is rewritten by `rosio migrate apply`. Everything else is a change made by
+# a person (or an agent), with the sentence in `say` as the instruction.
+
+rules:
+  - id: bt.xml_format
+    title: BehaviorTree.CPP XML format
+    removed: kilted
+    find: {bt_xml: format, package_depends: [behaviortree_cpp_v3]}
+    say: add BTCPP_format="4" to the behavior tree root element for BehaviorTree.CPP 4
+    source: https://www.behaviortree.dev/docs/migration
+
+  - id: bt.xml_sequence_star
+    title: SequenceStar XML tag
+    removed: kilted
+    find: {bt_xml: SequenceStar, package_depends: [behaviortree_cpp_v3]}
+    fix: {rename: SequenceWithMemory}
+    say: BehaviorTree.CPP 4 renames the SequenceStar XML tag to SequenceWithMemory
+    source: https://www.behaviortree.dev/docs/migration
+
+  - id: bt.xml_subtree_plus
+    title: SubTreePlus XML tag
+    removed: kilted
+    find: {bt_xml: SubTreePlus, package_depends: [behaviortree_cpp_v3]}
+    say: change SubTreePlus to SubTree and review its port remapping attributes for BehaviorTree.CPP 4
+    source: https://www.behaviortree.dev/docs/migration
+
+  - id: bt.sequence_star
+    title: SequenceStarNode
+    removed: kilted
+    find: {cpp_identifier: SequenceStarNode, package_depends: [behaviortree_cpp_v3]}
+    fix: {rename: SequenceWithMemory}
+    say: BehaviorTree.CPP 4 calls the SequenceStar control SequenceWithMemory
+    source: https://www.behaviortree.dev/docs/migration
+
+  - id: bt.tick_root
+    title: Tree::tickRoot()
+    removed: kilted
+    find: {cpp_identifier: tickRoot, package_depends: [behaviortree_cpp_v3]}
+    say: >-
+      BehaviorTree.CPP 4 removes tickRoot; tickExactlyOnce preserves one tick,
+      tickOnce may tick repeatedly, and tickWhileRunning adds its own sleep loop
+    source: https://www.behaviortree.dev/docs/migration
+
+  - id: ceres.local_parameterization
+    title: Ceres LocalParameterization
+    removed: jazzy
+    find:
+      cpp_identifier: [LocalParameterization, AutoDiffLocalParameterization, IdentityParameterization, SubsetParameterization, QuaternionParameterization, EigenQuaternionParameterization, HomogeneousVectorParameterization, LineParameterization, ProductParameterization, SetParameterization, GetParameterization, local_parameterization_ownership, ParameterBlockLocalSize]
+      package_depends: [libceres-dev]
+    say: >-
+      Ceres 2.2 removes LocalParameterization and its problem APIs; implement Manifold
+      with Plus and Minus, use AutoDiffManifold or the matching built in manifold,
+      and use SetManifold, GetManifold, manifold_ownership and ParameterBlockTangentSize on Problem
+    source: https://github.com/ceres-solver/ceres-solver/blob/2.2.0/docs/source/version_history.rst
+
+  - id: params.default_changed
+    title: Changed parameter default
+    find: {params_yaml: default_changed}
+    say: the node's default for a parameter this file leaves unset changed
+    source: https://github.com/ros-navigation/navigation2
+
+  - id: params.not_declared
+    title: Parameter no longer declared
+    find: {params_yaml: not_declared}
+    say: the node no longer declares a parameter this file sets, so the value is ignored
+    source: https://github.com/ros-navigation/navigation2
+
+  - id: cmake.ament_target_dependencies
+    title: ament_target_dependencies()
+    deprecated: kilted
+    removed: lyrical
+    find: {cmake_call: ament_target_dependencies}
+    fix: target_link_libraries
+    say: >-
+      ament_target_dependencies() is removed; link each package's exported targets with
+      target_link_libraries
+    source: https://github.com/ament/ament_cmake/pull/614
+
+  - id: cmake.minimum_required
+    title: cmake_minimum_required below 3.5
+    removed: lyrical
+    find: {cmake_call: cmake_minimum_required, below: "3.5"}
+    fix: cmake_minimum_version
+    works_from: humble
+    say: >-
+      CMake 4 (lyrical) refuses cmake_minimum_required below 3.5; ROS packages use 3.8
+    source: https://cmake.org/cmake/help/latest/release/4.0.html#deprecated-and-removed-features
+
+  - id: cpp.get_typesupport_handle
+    title: rclcpp::get_typesupport_handle()
+    deprecated: jazzy
+    removed: kilted
+    find: {cpp_identifier: get_typesupport_handle, after: "rclcpp::"}
+    fix: {rename: get_message_typesupport_handle}
+    works_from: jazzy
+    say: rclcpp::get_typesupport_handle is replaced by rclcpp::get_message_typesupport_handle
+    source: https://docs.ros.org/en/rolling/Releases/Release-Jazzy-Jalisco.html#rclcpp-get-typesupport-handle-is-deprecated
+
+  - id: cpp.static_single_threaded_executor
+    title: StaticSingleThreadedExecutor
+    deprecated: kilted
+    removed: lyrical
+    find: {cpp_identifier: StaticSingleThreadedExecutor}
+    fix: {rename: SingleThreadedExecutor}
+    works_from: humble
+    say: >-
+      StaticSingleThreadedExecutor is removed; SingleThreadedExecutor took over its
+      performance work and has the same interface
+    source: https://github.com/ros2/rclcpp/blob/kilted/rclcpp/include/rclcpp/executors/static_single_threaded_executor.hpp
+
+  - id: ros2_control.export_by_value
+    title: export_state_interfaces and export_command_interfaces
+    deprecated: jazzy
+    find: {cpp_identifier: [export_state_interfaces, export_command_interfaces], package_depends: [hardware_interface]}
+    say: >-
+      export_state_interfaces and export_command_interfaces are deprecated and ros2_control
+      6.12 removes them; delete them, list every interface in the URDF ros2_control tag, and
+      use set_state and get_command in read and write instead of the member variables they
+      exported
+    source: https://control.ros.org/rolling/doc/ros2_control/doc/migration.html#hardware-interface
+
+  - id: ros2_control.on_init_hardware_info
+    title: on_init(const HardwareInfo &)
+    deprecated: jazzy
+    removed: lyrical
+    find:
+      cpp_regex: '\bon_init\s*\(\s*const\s+(?:hardware_interface\s*::\s*)?HardwareInfo\b'
+      package_depends: [hardware_interface]
+    say: >-
+      on_init(const HardwareInfo &) is removed; override on_init(const
+      hardware_interface::HardwareComponentInterfaceParams & params) and read
+      params.hardware_info
+    works_from: jazzy
+    source: https://control.ros.org/rolling/doc/ros2_control/doc/migration.html#hardware-interface
+
+  - id: ros2_control.chainable_exports
+    title: Chainable controller exports
+    deprecated: kilted
+    removed: lyrical
+    find:
+      cpp_regex: '\b(?:on_export_reference_interfaces|on_export_state_interfaces)\s*\(\s*\)|\b(?:reference_interfaces_|state_interfaces_values_)\b'
+      package_depends: [controller_interface]
+    say: >-
+      a chainable controller now exports through on_export_state_interfaces_list and
+      on_export_reference_interfaces_list returning shared pointers, and
+      reference_interfaces_ and state_interfaces_values_ are gone; keep the exported pointers
+      as members and use get_optional and set_value
+    source: https://control.ros.org/rolling/doc/ros2_control/doc/migration.html#chainablecontrollerinterface
+
+  - id: ros2_control.node_remappings
+    title: Remappings on ros2_control_node
+    removed: lyrical
+    find:
+      launch_node:
+        executable: ros2_control_node
+        keyword: remappings
+        exclude_sources: [~/robot_description]
+    say: >-
+      the controller manager no longer passes its remappings to the controllers, so this
+      remapping silently stops applying; pass it to the spawner with --controller-ros-args
+      "--remap <from>:=<to>"
+    source: https://github.com/ros-controls/ros2_control/pull/3016
+
+  - id: ros2_control.robot_description_remap
+    title: Private robot_description remapping on ros2_control_node
+    removed: jazzy
+    find:
+      launch_node:
+        executable: ros2_control_node
+        keyword: remappings
+        source: ~/robot_description
+    say: >-
+      the controller manager subscribes to robot_description since jazzy, so this
+      ~/robot_description remapping does nothing; delete this pair
+    works_from: jazzy
+    source: https://github.com/ros-controls/ros2_control/blob/jazzy/controller_manager/src/controller_manager.cpp#L735
+
+  - id: cpp.executor_memory_strategy
+    title: ExecutorOptions::memory_strategy
+    removed: lyrical
+    find: {cpp_regex: '(?:\.|->)\s*memory_strategy\b'}
+    say: >-
+      rclcpp::ExecutorOptions has no memory_strategy in lyrical, and the memory strategy
+      classes are deprecated; drop the assignment
+    source: https://github.com/ros2/rclcpp/pull/3136
+
+  - id: python.removed_module
+    title: Python import
+    find: {python_import: removed_modules}
+    say: the module is not in the python of the target release
+    source: https://docs.python.org/3/whatsnew/
+
+# Python modules removed from the standard library, by the version that removed them.
+# The target's python version comes from distros.json.
+removed_modules:
+  "3.12": [asynchat, asyncore, distutils, imp, smtpd]
+  "3.13": [aifc, audioop, cgi, cgitb, chunk, crypt, imghdr, lib2to3, mailcap, msilib, nis, nntplib, ossaudiodev, pipes, sndhdr, spwd, sunau, telnetlib, uu, xdrlib]
+
+# A prefix rename is usable only when the exact target header was measured.
+header_prefixes:
+  behaviortree_cpp_v3/:
+    use: behaviortree_cpp/
+    source: https://www.behaviortree.dev/docs/migration
+
+# A header the target no longer installs, and what to include instead. Without `use` the
+# change is by hand. A header whose other spelling (.h / .hpp) is installed needs no entry:
+# that replacement is read from the measurements.
+headers:
+  pcl/io/io.h:
+    use: pcl/common/io.h
+    source: https://github.com/PointCloudLibrary/pcl/issues/6039
+  pcl/make_shared.h:
+    use: pcl/memory.h
+    source: https://github.com/PointCloudLibrary/pcl/issues/6039
+  pcl/point_traits.h:
+    use: pcl/type_traits.h
+    source: https://github.com/PointCloudLibrary/pcl/issues/6039
+  ceres/local_parameterization.h:
+    say: Ceres 2.2 removes LocalParameterization; implement Manifold from ceres/manifold.h with Plus and Minus
+    source: https://github.com/ceres-solver/ceres-solver/blob/2.2.0/docs/source/version_history.rst
+  ceres/autodiff_local_parameterization.h:
+    say: Ceres 2.2 removes AutoDiffLocalParameterization; implement Plus and Minus for AutoDiffManifold from ceres/autodiff_manifold.h
+    source: https://github.com/ceres-solver/ceres-solver/blob/2.2.0/docs/source/version_history.rst
+  rclcpp/qos_event.hpp:
+    use: rclcpp/event_handler.hpp
+    source: https://docs.ros.org/en/rolling/Releases/Release-Jazzy-Jalisco.html#deprecated-rclcpp-qos-event-hpp-header-was-removed
+  rcutils/get_env.h:
+    use: rcutils/env.h
+    source: https://docs.ros.org/en/rolling/Releases/Release-Iron-Irwini.html#deprecated-rcutils-get-env-h-header-was-removed
+  rcpputils/get_env.hpp:
+    use: rcpputils/env.hpp
+    source: https://github.com/ros2/rcpputils/pull/195
+  rclcpp/executors/static_single_threaded_executor.hpp:
+    use: rclcpp/executors/single_threaded_executor.hpp
+    source: https://github.com/ros2/rclcpp/blob/kilted/rclcpp/include/rclcpp/executors/static_single_threaded_executor.hpp
+  rmw/localhost.h:
+    say: ROS_LOCALHOST_ONLY is replaced by ROS_AUTOMATIC_DISCOVERY_RANGE (Iron)
+    source: https://docs.ros.org/en/rolling/Releases/Release-Iron-Irwini.html
+  rcl/localhost.h:
+    say: ROS_LOCALHOST_ONLY is replaced by ROS_AUTOMATIC_DISCOVERY_RANGE (Iron)
+    source: https://docs.ros.org/en/rolling/Releases/Release-Iron-Irwini.html
+  rcppmath/clamp.hpp:
+    say: rcppmath is gone; std::clamp from <algorithm> does the same
+    source: https://github.com/ros2/rcpputils/pull/193
+
+# A dependency the target does not release, and its successor where there is one.
+packages:
+  gazebo_ros:
+    say: Gazebo Classic reached end of life; move to gz sim with ros_gz_sim and ros_gz_bridge
+    source: https://gazebosim.org/docs/all/migrating_gazebo_classic_ros2_packages/
+  gazebo_plugins:
+    say: Gazebo Classic reached end of life; gz sim systems and ros_gz_bridge replace these plugins
+    source: https://gazebosim.org/docs/all/migrating_gazebo_classic_ros2_packages/
+  gazebo_ros_pkgs:
+    say: Gazebo Classic reached end of life; move to gz sim with ros_gz
+    source: https://gazebosim.org/docs/all/migrating_gazebo_classic_ros2_packages/
+  gazebo_msgs:
+    say: Gazebo Classic reached end of life; ros_gz_interfaces carries the gz sim services
+    source: https://gazebosim.org/docs/all/migrating_gazebo_classic_ros2_packages/
+  gazebo_ros2_control:
+    use: gz_ros2_control
+    say: the Gazebo Classic ros2_control plugin is replaced by gz_ros2_control
+    source: https://control.ros.org/jazzy/doc/gz_ros2_control/doc/index.html
+  ign_ros2_control:
+    use: gz_ros2_control
+    say: ign_ros2_control was renamed gz_ros2_control
+    source: https://control.ros.org/jazzy/doc/gz_ros2_control/doc/index.html
+  ros_ign_bridge: {use: ros_gz_bridge, say: the ign packages were renamed gz, source: "https://gazebosim.org/docs/all/ros_installation/"}
+  ros_ign_gazebo: {use: ros_gz_sim, say: the ign packages were renamed gz, source: "https://gazebosim.org/docs/all/ros_installation/"}
+  ros_ign_image: {use: ros_gz_image, say: the ign packages were renamed gz, source: "https://gazebosim.org/docs/all/ros_installation/"}
+  ros_ign_interfaces: {use: ros_gz_interfaces, say: the ign packages were renamed gz, source: "https://gazebosim.org/docs/all/ros_installation/"}
+  ros_ign: {use: ros_gz, say: the ign packages were renamed gz, source: "https://gazebosim.org/docs/all/ros_installation/"}
+  behaviortree_cpp_v3:
+    use: behaviortree_cpp
+    say: BehaviorTree.CPP 3 is not released; version 4 is behaviortree_cpp, with renamed headers and namespace BT changes
+    source: https://www.behaviortree.dev/docs/migration
+  fastrtps:
+    use: fastdds
+    say: the Fast DDS package was renamed fastdds (Fast DDS 3)
+    source: https://docs.ros.org/en/rolling/Releases/Release-Kilted-Kaiju.html#renaming-package-from-fastrtps-to-fastdds
+  actionlib_msgs:
+    use: action_msgs
+    say: actionlib_msgs is not released for lyrical; GoalStatus and GoalInfo live in action_msgs
+    source: https://github.com/ros2/common_interfaces/pull/280

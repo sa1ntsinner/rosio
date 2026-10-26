@@ -1,0 +1,6 @@
+# Same basename as lx_bringup/config/lidar_driver.yaml and a different value, so a file id
+# keyed on the basename alone collapses two real files into one.
+lidar_driver:
+  ros__parameters:
+    rate_hz: 10.0
+    frame_id: os_sensor

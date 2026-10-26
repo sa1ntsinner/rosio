@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<robot name="fx_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Relative include so the file processes without an installed package. -->
+  <xacro:include filename="fx_common.xacro"/>
+
+  <xacro:arg name="base_height" default="0.12"/>
+  <xacro:property name="base_height" value="$(arg base_height)"/>
+  <xacro:property name="sensor_x" value="0.4"/>
+
+  <link name="base_footprint"/>
+
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${base_height}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="base_link"/>
+
+  <xacro:fx_wheel prefix="drive_left" reflect="1"/>
+  <xacro:fx_wheel prefix="drive_right" reflect="-1"/>
+
+  <joint name="sensor_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="sensor_link"/>
+    <origin xyz="${sensor_x} 0 0.25" rpy="0 0 0"/>
+  </joint>
+
+  <link name="sensor_link"/>
+
+</robot>

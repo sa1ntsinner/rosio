@@ -1,0 +1,156 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# No secret and no workspace outside the tree is used anywhere below: a green run here is a
+# green run for a stranger with a clone.
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "ruff==0.17.2"
+      - run: ruff check .
+      - run: ruff format --check .
+
+  python:
+    name: python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,mcp,stamps]"
+      - name: pytest
+        env:
+          ROSIO_SKIP_ROS: "1"
+        run: pytest -m "not ros" --cov=rosio --cov-report=term-missing
+
+  ros:
+    name: ros ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    container: ros:${{ matrix.distro }}-ros-base
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [jazzy, humble]
+    steps:
+      - uses: actions/checkout@v4
+      - name: system packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3-pip python3-venv \
+            ros-${{ matrix.distro }}-xacro ros-${{ matrix.distro }}-rosbag2-py
+          if [ "${{ matrix.distro }}" = "jazzy" ]; then
+            apt-get install -y --no-install-recommends ros-jazzy-rmw-zenoh-cpp
+          fi
+      - name: install
+        shell: bash
+        run: |
+          python3 -m venv --system-site-packages /opt/venv
+          /opt/venv/bin/python -m pip install --upgrade pip
+          /opt/venv/bin/python -m pip install -e ".[dev,cpp,mcp,stamps]"
+      - name: pytest
+        shell: bash
+        env:
+          # humble registers launch_testing as a pytest11 plugin whose
+          # pytest_pycollect_makemodule takes a "path" argument no current hookspec has, so
+          # autoloading it ends collection before a test runs. Autoload stays off everywhere.
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          set -e
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          # conftest skips every ros test when rclpy is absent, which would be a green run
+          # over nothing, so its absence fails here instead
+          /opt/venv/bin/python -c "import rclpy"
+          /opt/venv/bin/python -m pytest
+      - name: rosio_monitor
+        shell: bash
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          set -e
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          mkdir -p /tmp/ws/src && cp -r ros/rosio_monitor /tmp/ws/src/
+          cd /tmp/ws && colcon build --packages-select rosio_monitor
+          source install/setup.bash
+          cd src/rosio_monitor
+          PYTHONPATH="$GITHUB_WORKSPACE:$PYTHONPATH" /opt/venv/bin/python -m pytest -q test
+
+  rust:
+    name: rust ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  vscode:
+    name: vs code extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: language server for the end to end test
+        working-directory: .
+        run: cargo build --release -p rosio-lsp
+      - name: end to end in a real VS Code
+        env:
+          ROSIO_LSP: ${{ github.workspace }}/target/release/rosio-lsp
+        run: xvfb-run -a npm run test:e2e
+
+  zed:
+    name: zed extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/zed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --target wasm32-wasip1 -- -D warnings
+      - run: cargo build --release --target wasm32-wasip1

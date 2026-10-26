@@ -1,0 +1,48 @@
+[
+ {
+  "file": "assets/turtlebot3-burger.jpg",
+  "media": "image",
+  "ref": "commons:91518261",
+  "title": "TurtleBot3 Burger",
+  "creator": "Kuscu0",
+  "creatorUrl": null,
+  "date": "2020-06-24",
+  "license": "CC BY-SA 4.0",
+  "licenseCode": "by-sa",
+  "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+  "creditRequired": true,
+  "page": "https://commons.wikimedia.org/wiki/File:TurtleBot3_Burger.jpg",
+  "via": "Wikimedia Commons",
+  "image": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/48/TurtleBot3_Burger.jpg/1920px-TurtleBot3_Burger.jpg",
+  "width": 1920,
+  "height": 2621,
+  "bytes": 339362,
+  "credit": "\"TurtleBot3 Burger\" by Kuscu0, CC BY-SA 4.0, via Wikimedia Commons",
+  "notes": [
+   "Share-alike: an altered version (recoloured, combined with other pictures) must be shared under the same licence."
+  ],
+  "saved": "2026-10-26T09:51:23.288Z"
+ },
+ {
+  "file": "assets/geology-section.jpg",
+  "media": "image",
+  "ref": "commons:36574185",
+  "title": "Geology: a long section through mountains, and a volcano, sh",
+  "creator": null,
+  "creatorUrl": null,
+  "date": null,
+  "license": "CC BY 4.0",
+  "licenseCode": "by",
+  "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+  "creditRequired": true,
+  "page": "https://commons.wikimedia.org/wiki/File:Geology;_a_long_section_through_mountains,_and_a_volcano,_sh_Wellcome_V0025106.jpg",
+  "via": "Wikimedia Commons",
+  "image": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4d/Geology%3B_a_long_section_through_mountains%2C_and_a_volcano%2C_sh_Wellcome_V0025106.jpg/1920px-Geology%3B_a_long_section_through_mountains%2C_and_a_volcano%2C_sh_Wellcome_V0025106.jpg",
+  "width": 1920,
+  "height": 363,
+  "bytes": 649971,
+  "credit": "\"Geology: a long section through mountains, and a volcano, sh\", CC BY 4.0, via Wikimedia Commons",
+  "notes": [],
+  "saved": "2026-10-26T09:51:36.440Z"
+ }
+]

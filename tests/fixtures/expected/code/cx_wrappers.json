@@ -1,0 +1,107 @@
+{
+  "note": "The two known wrapper cases. This node has no create_publisher and no create_subscription call at all, yet it publishes /diagnostics and subscribes to two point cloud topics. Without the wrapper table these three endpoints show up as observed only and read as drift. The /diagnostics topic name is stated by diagnostic_updater and not by this source, so it is marked wrapper_constant. line_hint is advisory and never compared.",
+  "package": "cx_nodes",
+  "path": "src/cx_nodes/src/cx_wrappers.cpp",
+  "package_relative_path": "src/cx_wrappers.cpp",
+  "language": "cpp",
+  "file_id": "file:cx_nodes|src/cx_wrappers.cpp",
+  "nodes": [
+    {
+      "name": "cx_wrappers",
+      "name_source": "literal",
+      "node_id": null,
+      "node_id_reason": "the code states the name, the namespace comes from the declared layer, so no fqn is formed here",
+      "form": "node",
+      "base": "rclcpp::Node",
+      "class": "cx_nodes::WrapperNode",
+      "symbol": "cx_nodes::WrapperNode::WrapperNode",
+      "symbol_id": "sym:cx_nodes|src/cx_wrappers.cpp|cx_nodes::WrapperNode::WrapperNode",
+      "line_hint": 21
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "diagnostic_updater::Updater(this)",
+      "name": "/diagnostics",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "diagnostic_msgs/msg/DiagnosticArray",
+      "type_id": "type:diagnostic_msgs|msg|DiagnosticArray",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside diagnostic_updater, not in this source",
+      "via_known_wrapper": "diagnostic_updater::Updater",
+      "owner_symbol": "cx_nodes::WrapperNode::WrapperNode",
+      "line_hint": 22
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/cx/left/points\"",
+      "name": "/cx/left/points",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": null,
+      "qos_reason": "message_filters::Subscriber::subscribe was given no qos argument, so the source states none",
+      "via_known_wrapper": "message_filters::Subscriber",
+      "owner_symbol": "cx_nodes::WrapperNode::WrapperNode",
+      "line_hint": 27
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/cx/right/points\"",
+      "name": "/cx/right/points",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": null,
+      "qos_reason": "message_filters::Subscriber::subscribe was given no qos argument, so the source states none",
+      "via_known_wrapper": "message_filters::Subscriber",
+      "owner_symbol": "cx_nodes::WrapperNode::WrapperNode",
+      "line_hint": 28
+    }
+  ],
+  "parameters": [],
+  "parameter_callbacks": [],
+  "plugin_parameters": [],
+  "wrappers": [
+    {
+      "symbol": "diagnostic_updater::Updater",
+      "kind": "known_wrapper",
+      "publishes": ["/diagnostics"],
+      "detail": "the updater owns the publisher and a periodic timer. The timer period is a constructor default that this source does not state, so no period is recorded",
+      "line_hint": 22
+    },
+    {
+      "symbol": "message_filters::Subscriber",
+      "kind": "known_wrapper",
+      "subscribes": ["/cx/left/points", "/cx/right/points"],
+      "detail": "subscribe(node, topic) creates a real subscription that no create_subscription call names",
+      "line_hint": 27
+    }
+  ],
+  "tf": {
+    "broadcasts": [],
+    "lookups": []
+  },
+  "unresolved": [],
+  "counts": {
+    "endpoints": 3,
+    "publishers": 1,
+    "subscribers": 2,
+    "service_servers": 0,
+    "service_clients": 0,
+    "timers": 0,
+    "parameters": 0,
+    "unresolved": 0,
+    "via_known_wrapper": 3
+  },
+  "constructions": [
+    {
+      "class": "cx_nodes::WrapperNode",
+      "owner_symbol": "main"
+    }
+  ]
+}

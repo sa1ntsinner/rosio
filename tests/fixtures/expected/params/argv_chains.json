@@ -1,0 +1,87 @@
+{
+  "entry": "src/lx_bringup/launch/exec_process.launch.py",
+  "note": "The candidate chain of an ExecuteProcess node whose whole configuration is in its argv. Within one --ros-args tail the later input wins, so the parameters file listed after the two assignments takes rate_hz. A resolver with no argv parser reports this node as observed only and every one of these values as drift.",
+  "owner": "/prep/cropper",
+  "parameters": [
+    {
+      "candidates": [
+        {
+          "file": "src/lx_bringup/launch/exec_process.launch.py",
+          "locator": "ExecuteProcess(cropper_proc).cmd[-p decimate_rings]",
+          "mechanism": "ros_args_assign",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "2",
+          "value_as_yaml": 2,
+          "wins": true
+        }
+      ],
+      "effective": 2,
+      "id": "param:/prep/cropper|decimate_rings",
+      "name": "decimate_rings",
+      "note": "",
+      "state": "effective",
+      "type": "int"
+    },
+    {
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/crop.yaml",
+          "locator": "cropper.ros__parameters.input_topic",
+          "mechanism": "ros_args_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "/points_raw",
+          "value_as_yaml": "/points_raw",
+          "wins": true
+        }
+      ],
+      "effective": "/points_raw",
+      "id": "param:/prep/cropper|input_topic",
+      "name": "input_topic",
+      "note": "The file keys on cropper, which is the name the argv gave the node.",
+      "state": "effective",
+      "type": "str"
+    },
+    {
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/crop.yaml",
+          "locator": "cropper.ros__parameters.rate_hz",
+          "mechanism": "ros_args_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 5.0,
+          "value_as_yaml": 5.0,
+          "wins": true
+        },
+        {
+          "file": "src/lx_bringup/launch/exec_process.launch.py",
+          "locator": "ExecuteProcess(cropper_proc).cmd[-p rate_hz]",
+          "mechanism": "ros_args_assign",
+          "rank": 1,
+          "shadow_kind": "overridden",
+          "shadowed_by": "src/lx_bringup/config/crop.yaml",
+          "value": "20.0",
+          "value_as_yaml": 20.0,
+          "wins": false
+        }
+      ],
+      "effective": 5.0,
+      "id": "param:/prep/cropper|rate_hz",
+      "name": "rate_hz",
+      "note": "The only shadowed pair in this chain, and the reason argv order has to be kept: moving the --params-file ahead of the -p flips the winner to 20.0.",
+      "state": "effective",
+      "type": "float"
+    }
+  ],
+  "profile": "argv_only",
+  "rules": [
+    "Inputs are ranked by argv position, latest first, exactly like a parameters list.",
+    "A -p value is recorded as the raw argv text. rcl parses it as a yaml scalar, so the text 20.0 becomes a float and the text 2 becomes an int.",
+    "__node and __ns are identity, not parameters, and never enter the chain."
+  ]
+}

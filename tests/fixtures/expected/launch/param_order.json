@@ -1,0 +1,98 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/param_order.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lx_controller",
+      "form": "node",
+      "fqn": "/file_wins",
+      "gates": [],
+      "name": "file_wins",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "inline_dict",
+          "note": "",
+          "order": 0,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "width",
+              40
+            ]
+          ]
+        },
+        {
+          "kind": "repo_file",
+          "note": "later entry, so width is 20",
+          "order": 1,
+          "path": "src/lx_bringup/config/order_base.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_bringup",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lx_controller",
+      "form": "node",
+      "fqn": "/inline_wins",
+      "gates": [],
+      "name": "inline_wins",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/order_base.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        },
+        {
+          "kind": "inline_dict",
+          "note": "later entry, so width is 40",
+          "order": 1,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "width",
+              40
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_bringup",
+      "plugin_class": null,
+      "remaps": []
+    }
+  ],
+  "note": "Case 13. One file, two nodes, two list orders. For width the inline dict wins in inline_wins and the file wins in file_wins, so a resolver that ignores the list order inverts exactly one of the two.",
+  "predicates": {},
+  "strategy": "executed"
+}

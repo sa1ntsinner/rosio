@@ -1,0 +1,41 @@
+name: stampdoctor-demo
+
+x-demo: &demo
+  image: stampdoctor-demo:latest
+  build:
+    context: ..
+    dockerfile: demo/Dockerfile
+  network_mode: host
+  # same host, so the default DDS picks shared memory, which needs one IPC namespace
+  ipc: host
+
+x-env: &env
+  ROS_DOMAIN_ID: "42"
+  ROS_LOCALHOST_ONLY: "0"
+  RATE_HZ: "50"
+
+services:
+
+  clean_publisher:
+    <<: *demo
+    command: ["python3", "/opt/demo/publishers.py"]
+    environment:
+      <<: *env
+      ROLE: clean
+
+  skewed_publisher:
+    <<: *demo
+    command: ["python3", "/opt/demo/publishers.py"]
+    environment:
+      <<: *env
+      ROLE: skewed
+      MODE: ${MODE:-fixed}
+      OFFSET_S: ${OFFSET_S:-37}
+      DRIFT_S_PER_S: ${DRIFT_S_PER_S:-0.005}
+
+  doctor:
+    <<: *demo
+    profiles: [doctor]
+    command: ["ros2", "run", "stampdoctor", "check", "--duration", "10"]
+    environment:
+      <<: *env

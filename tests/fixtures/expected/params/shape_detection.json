@@ -1,0 +1,42 @@
+{
+  "install_copies": [
+    {
+      "note": "A stale copy of the src file with controller_frequency 10.0 instead of 20.0. The install tree holds copies, not symlinks. One entity reading both roots is one build staleness finding, not a pile of value drifts.",
+      "path": "install/lx_bringup/share/lx_bringup/config/zoo_base.yaml"
+    },
+    {
+      "note": "An up to date copy, so the same file id can legitimately have two roots.",
+      "path": "install/lx_sensors/share/lx_sensors/config/lidar_driver.yaml"
+    }
+  ],
+  "note": "Which yaml files in the fixture workspace are ROS 2 parameter files. Detection is shape based, never extension based: a mapping root with a ros__parameters key somewhere below it. Everything in refused is a real file that a naive walker would turn into parameters that no node has.",
+  "parameter_files": [
+    "src/lx_bringup/config/crop.yaml",
+    "src/lx_bringup/config/filter.yaml",
+    "src/lx_bringup/config/imu_driver.yaml",
+    "src/lx_bringup/config/lidar_driver.yaml",
+    "src/lx_bringup/config/order_base.yaml",
+    "src/lx_bringup/config/rewrite_source.yaml",
+    "src/lx_bringup/config/slam.yaml",
+    "src/lx_bringup/config/zoo_base.yaml",
+    "src/lx_bringup/config/zoo_dotted.yaml",
+    "src/lx_bringup/config/zoo_node_wildcard.yaml",
+    "src/lx_bringup/config/zoo_overlay.yaml",
+    "src/lx_bringup/config/zoo_wildcard.yaml",
+    "src/lx_sensors/config/lidar_driver.yaml"
+  ],
+  "refused": [
+    {
+      "path": "src/lx_bringup/config/flat_looks_like_params.yaml",
+      "reason": "flat document, real parameter names at the root, no ros__parameters key"
+    },
+    {
+      "path": "src/lx_bringup/config/not_params_list.yaml",
+      "reason": "the document root is a list"
+    },
+    {
+      "path": "src/lx_bringup/config/not_params_map.yaml",
+      "reason": "a map descriptor, a different schema entirely"
+    }
+  ]
+}

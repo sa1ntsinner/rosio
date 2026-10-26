@@ -1,0 +1,4 @@
+cloud_filter:
+  ros__parameters:
+    voxel_size: 0.08
+    keep_ratio: 0.5

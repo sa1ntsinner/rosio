@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rosio: find the layer that disagrees</title>
+<meta name="description" content="rosio reads a ROS 2 system four ways: launch files, source code, the running graph and recorded bags. It shows where they disagree and which line to edit.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="bar" data-ink="night">
+  <a class="home" href="#top" aria-label="rosio, top of the page">
+    <svg viewBox="3 4 26 24" aria-hidden="true"><rect x="3.5" y="4.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="10.5" width="19" height="5" rx="1.3"/><rect class="slid" x="9.5" y="16.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="22.5" width="19" height="5" rx="1.3"/></svg>
+    <span>rosio</span>
+  </a>
+  <nav aria-label="Sections">
+    <a href="#output">Output</a>
+    <a href="#checks">Checks</a>
+    <a href="#editor">Editor</a>
+    <a href="#agents">Agents</a>
+    <a class="action" href="#install">Install</a>
+  </nav>
+</header>
+
+<main id="top">
+<section class="hero night" data-ink="night" aria-labelledby="hero-title">
+  <h1 id="hero-title" class="sentence">
+    <span>Find the layer</span>
+    <button class="inline-mark" type="button" aria-pressed="false" aria-label="Four layers, the third out of line. Press to line it up.">
+      <svg viewBox="3 4 26 24" aria-hidden="true"><rect x="3.5" y="4.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="10.5" width="19" height="5" rx="1.3"/><rect class="slid" x="9.5" y="16.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="22.5" width="19" height="5" rx="1.3"/></svg>
+    </button>
+    <span>that disagrees.</span>
+  </h1>
+  <p class="lead">rosio reads a ROS 2 system four ways: launch files, source code, the running graph and recorded bags. It shows where they disagree and which line to edit.</p>
+  <div class="hero-act">
+    <a class="button" href="#install">Install</a>
+    <a class="quiet-link" href="#output">See what it prints</a>
+  </div>
+  <ol class="strata" aria-label="The four layers">
+    <li style="--c: var(--declared)"><b>declared</b><span>launch files, yaml, URDF, plugin manifests</span></li>
+    <li style="--c: var(--coded)"><b>coded</b><span>C++ and Python sources, read, never run</span></li>
+    <li class="moved" style="--c: var(--observed)"><b>observed</b><span>the running graph: nodes, QoS, parameters, TF</span></li>
+    <li style="--c: var(--recorded)"><b>recorded</b><span>rosbag2: topics, rates, header stamps</span></li>
+  </ol>
+  <p class="state" aria-live="polite">Observed is out of line: what runs is not what the launch file says.</p>
+</section>
+
+<section id="output" class="output chalk" data-ink="chalk" aria-labelledby="output-title">
+  <div class="output-head">
+    <h2 id="output-title">What it prints</h2>
+    <div class="names" role="tablist" aria-label="Commands">
+      <button role="tab" aria-selected="true" aria-controls="sheet-drift" id="tab-drift" data-sheet="drift">drift</button>
+      <button role="tab" aria-selected="false" aria-controls="sheet-explain" id="tab-explain" data-sheet="explain">explain</button>
+      <button role="tab" aria-selected="false" aria-controls="sheet-param" id="tab-param" data-sheet="param">param</button>
+      <button role="tab" aria-selected="false" aria-controls="sheet-migrate" id="tab-migrate" data-sheet="migrate">migrate</button>
+      <button role="tab" aria-selected="false" aria-controls="sheet-agent" id="tab-agent" data-sheet="agent">agent</button>
+    </div>
+  </div>
+  <div class="stage">
+    <article class="sheet is-on" id="sheet-drift" role="tabpanel" aria-labelledby="tab-drift">
+      <p class="sheet-note">The example workspace in the repository ships with faults planted on purpose. This is what <code>rosio drift</code> says about it, worst first.</p>
+      <pre><span class="prompt">$ rosio drift</span>
+5 findings: 1 error, 0 info, 4 warn
+  <span class="sev-error">error</span> qos.incompatible  /safety_stop never receives /scan_filtered
+        /safety_stop subscribes to /scan_filtered requesting reliable while /scan_filter publishes it best effort, so the two never connect and no message arrives.
+        rover_control/rover_control/safety_stop.py:18 rover_control.safety_stop.SafetyStop.__init__
+        rover_perception/src/scan_filter.cpp:24 ScanFilter::ScanFilter
+  <span class="sev-warn">warn</span>  frame.not_in_urdf  /scan_filter looks up laser_frame, which no robot model has
+        rover_perception/src/scan_filter.cpp:34 looks up the frame laser_frame, which no robot model declares and nothing publishes, so the lookup never succeeds, the model has laser_link.
+        rover_perception/src/scan_filter.cpp:34 ScanFilter::on_scan
+  <span class="sev-warn">warn</span>  param.orphan_block  block odometry owns nothing in rover
+        rover_bringup/config/rover.yaml:12 configures a node called odometry with 1 key and profile rover launches no node by that name or a similar one. Launch the node in rover, or delete the block at rover_bringup/config/rover.yaml:12 once no profile launches it.
+        rover_bringup/config/rover.yaml:12 odometry
+  <span class="sev-warn">warn</span>  param.set_undeclared  stop_distnce is set for /safety_stop and never declared
+        In profile rover, rover_bringup/config/rover.yaml:9 sets /safety_stop stop_distnce to 0.35 and rover_control/rover_control/safety_stop.py declares no parameter with that name, so the value is ignored. /safety_stop declares stop_distance, which is likely what was meant.
+        rover_bringup/config/rover.yaml:9 safety_stop.ros__parameters.stop_distnce
+  <span class="sev-warn">warn</span>  param.shadowed  max_range at rover_bringup/config/rover.yaml:4 is overridden
+        In profile rover, /scan_filter max_range is 10.0 from rover_bringup/launch/bringup.launch.py:28, so 8.0 at rover_bringup/config/rover.yaml:4 never takes effect. Edit rover_bringup/launch/bringup.launch.py:28 to change it.
+        rover_bringup/config/rover.yaml:4 scan_filter.ros__parameters.max_range
+        rover_bringup/launch/bringup.launch.py:28 parameters
+  explain a finding id for the full evidence</pre>
+    </article>
+    <article class="sheet" id="sheet-explain" role="tabpanel" aria-labelledby="tab-explain">
+      <p class="sheet-note">One finding in full: why it is true, what to change, and one sentence an agent can quote as it stands.</p>
+      <pre><span class="prompt">$ rosio explain find:qos.incompatible|topic:/scan_filtered|a53e8bc7</span>
+<span class="sev-error">error</span> qos.incompatible: /safety_stop never receives /scan_filtered
+  about /scan_filtered
+  in rover the coded layer has /scan_filter offering best effort on /scan_filtered and /safety_stop requesting reliable; a subscription that asks for more than a publisher offers is never matched
+  fix: make /safety_stop request best effort, or make /scan_filter offer reliable, on both ends of the topic
+  say: /safety_stop subscribes to /scan_filtered requesting reliable while /scan_filter publishes it best effort, so the two never connect and no message arrives.
+      rover_control/rover_control/safety_stop.py:18 rover_control.safety_stop.SafetyStop.__init__
+      rover_perception/src/scan_filter.cpp:24 ScanFilter::ScanFilter
+  profiles rover</pre>
+    </article>
+    <article class="sheet" id="sheet-param" role="tabpanel" aria-labelledby="tab-param">
+      <p class="sheet-note">Stock nav2_bringup on jazzy. No yaml sets use_sim_time on the controller. A SetParameter in the launch file does, and rosio names that line.</p>
+      <pre><span class="prompt">$ rosio param /controller_server use_sim_time</span>
+use_sim_time on /controller_server   state effective
+  profile nav2_bringup_composed
+    effective False (bool)   edit nav2_bringup/launch/navigation_launch.py:253 [install]
+    rank 0 wins launch_inline_dict   False (bool)
+        nav2_bringup/launch/navigation_launch.py:253 [install] SetParameter</pre>
+    </article>
+    <article class="sheet" id="sheet-migrate" role="tabpanel" aria-labelledby="tab-migrate">
+      <p class="sheet-note">Humble packages planned for lyrical. Every change carries its line and the upstream change behind it.</p>
+      <pre><span class="prompt">$ rosio migrate plan --from humble --to lyrical</span>
+rosio migrate humble -&gt; lyrical: 35 changes in 7 packages, 0 rewritten by apply, 35 by hand
+
+action_tutorials_cpp
+  src/action_tutorials_cpp/CMakeLists.txt:34  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for rclcpp, rclcpp_action, rclcpp_components are not measured per release; check the package's exported targets and link by hand
+                                              https://github.com/ament/ament_cmake/pull/614
+
+composition
+  src/composition/CMakeLists.txt:30  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for rclcpp, rclcpp_components, std_msgs are not measured per release; check the package's exported targets and link by hand
+                                     https://github.com/ament/ament_cmake/pull/614
+  src/composition/CMakeLists.txt:41  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for rclcpp, rclcpp_components, std_msgs are not measured per release; check the package's exported targets and link by hand
+                                     https://github.com/ament/ament_cmake/pull/614
+  src/composition/CMakeLists.txt:52  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for rclcpp, rclcpp_components, std_msgs are not measured per release; check the package's exported targets and link by hand
+                                     https://github.com/ament/ament_cmake/pull/614
+  src/composition/CMakeLists.txt:63  removed in lyrical  ament_target_dependencies() is removed; link each package's exported targets with target_link_libraries; exports for example_interfaces, rclcpp, rclcpp_components are not measured per release; check the package's exported targets and link by hand
+                                     https://github.com/ament/ament_cmake/pull/614</pre>
+    </article>
+    <article class="sheet" id="sheet-agent" role="tabpanel" aria-labelledby="tab-agent">
+      <p class="sheet-note">The same atlas over MCP: the overview tool, asked of stock nav2.</p>
+      <pre>rosio atlas, schema 1.13, 1865 entities and 2196 edges
+layers present: declared   capabilities: drift.findings, layer.declared, param.candidates, profile.entrypoints
+profiles (1): nav2_bringup_composed
+entities: file 586, type 530, param 354, pparam 97, plugin 90, pkg 85, frame 48, launchent 20, pinst 19, node 17, and 4 more kinds
+coverage: 10 values unresolved of 1012 wanted, rate 0.990
+  weakest: node_name 0.89, other 0.92, frame_id 1.00
+drift: 27 findings, 24 info, 3 warn
+  <span class="sev-warn">warn</span>  extract.input_refused  nav2_theta_star_planner/global_planner_plugin.xml was refused: plugin_manifest_missing   nav2_theta_star_planner/global_planner_plugin.xml [install]
+  <span class="sev-warn">warn</span>  param.orphan_block  block loopback_simulator owns nothing in nav2_bringup_composed   nav2_bringup/params/nav2_params.yaml:458 [install]
+  <span class="sev-warn">warn</span>  param.orphan_block  block map_saver owns nothing in nav2_bringup_composed   nav2_bringup/params/nav2_params.yaml:271 [install]
+  <span class="note">info</span>  plugin.unused  dwb_core::DWBLocalPlanner is built and never selected   dwb_core/local_planner_plugin.xml [install]
+next: param_chain for one parameter value, drift for the findings, explain for one entity, query for plain words</pre>
+    </article>
+  </div>
+</section>
+
+<section id="checks" class="checks night" data-ink="night" aria-labelledby="checks-title">
+  <div class="checks-head">
+    <h2 id="checks-title">What it catches</h2>
+    <p>Each check reads the joined atlas and names the value, the file and the line to edit.</p>
+  </div>
+  <ul class="rules">
+    <li>
+      <h3>Parameters that never apply</h3>
+      <p class="said">stop_distnce is set for /safety_stop in rover.yaml:9 and never declared. /safety_stop declares stop_distance.</p>
+      <p class="ids"><code>param.set_undeclared</code> <code>param.shadowed</code> <code>param.owner_name_mismatch</code></p>
+    </li>
+    <li>
+      <h3>Links that never connect</h3>
+      <p class="said">/safety_stop asks for reliable on /scan_filtered while /scan_filter offers best effort, so no message arrives.</p>
+      <p class="ids"><code>qos.incompatible</code> <code>type.differ</code> <code>topic.no_publisher</code></p>
+    </li>
+    <li>
+      <h3>Frames nobody provides</h3>
+      <p class="said">scan_filter.cpp:34 looks up laser_frame. No robot model has it; the model has laser_link.</p>
+      <p class="ids"><code>frame.not_in_urdf</code> <code>frame.no_publisher</code> <code>frame.parent_differs</code></p>
+    </li>
+    <li>
+      <h3>Clocks that disagree</h3>
+      <p class="said">In the simulation profile rviz runs on wall time while every other node uses simulated time.</p>
+      <p class="ids"><code>param.sim_time_mixed</code> <code>time.backward</code> <code>time.frozen</code></p>
+    </li>
+    <li>
+      <h3>Nodes that never come up</h3>
+      <p class="said">Nothing drives /map_server through its lifecycle in this profile, so it stays unconfigured and never serves the map.</p>
+      <p class="ids"><code>node.declared_not_observed</code> <code>lifecycle.unmanaged</code> <code>launch.file_not_installed</code></p>
+    </li>
+    <li>
+      <h3>Middleware that splits the graph</h3>
+      <p class="said">Two nodes in one profile run different RMW implementations, and one cannot reach the Zenoh router.</p>
+      <p class="ids"><code>rmw.mixed</code> <code>zenoh.router_unreachable</code></p>
+    </li>
+  </ul>
+  <p class="honest">When a value is built at run time and rosio cannot follow it, the atlas says so and keeps it on the list. It never fills in a default.</p>
+</section>
+
+<section id="editor" class="editor chalk" data-ink="chalk" aria-labelledby="editor-title">
+  <div class="editor-head">
+    <h2 id="editor-title">In your editor</h2>
+    <p>VS Code today, Zed through the same language server. The findings sit on the line they are about.</p>
+  </div>
+  <div class="shots">
+    <figure class="wide"><img src="assets/vscode-graph.jpg" width="1600" height="1000" loading="lazy" alt="The system graph in VS Code: nodes, topics and the QoS on every link"><figcaption><b>Graph.</b> What rqt_graph would show, before the robot runs. A link that can never connect is drawn in the colour of its finding.</figcaption></figure>
+    <figure><img src="assets/vscode-typo.jpg" width="1600" height="1000" loading="lazy" alt="A misspelt parameter key underlined in a yaml file"><figcaption><b>Diagnostics.</b> A misspelt key, with the name the node declares.</figcaption></figure>
+    <figure><img src="assets/vscode-parameters.jpg" width="1600" height="1000" loading="lazy" alt="The parameters view with the winning value and every line it overrides"><figcaption><b>Parameters.</b> The value that wins and every line it beats.</figcaption></figure>
+    <figure><img src="assets/vscode-qos.jpg" width="1600" height="1000" loading="lazy" alt="A QoS mismatch shown on the line that creates the subscription"><figcaption><b>Code lens.</b> Who else is on this topic, and whether the QoS matches.</figcaption></figure>
+    <figure><img src="assets/vscode-launch.jpg" width="1600" height="1000" loading="lazy" alt="The launch view listing what each profile starts"><figcaption><b>Launch.</b> What each profile starts, and what a false condition keeps from starting.</figcaption></figure>
+  </div>
+</section>
+
+<section class="how night" data-ink="night" aria-labelledby="how-title">
+  <div class="how-head">
+    <h2 id="how-title">Read, join, answer</h2>
+    <figure class="engraving">
+      <img src="assets/geology-section.jpg" width="1837" height="317" loading="lazy" alt="Hand coloured long section through mountains and a volcano, the strata in bands">
+      <figcaption>A long section through mountains and a volcano. Wellcome Collection.</figcaption>
+    </figure>
+  </div>
+  <div class="how-cols">
+    <div><h3>Read</h3><p>Each layer is read on its own, by its own collector. Launch files run in a sandbox; source code is parsed and never executed; the live probe and the bags are optional.</p></div>
+    <div><h3>Join</h3><p>One id per node, topic, parameter and frame. Where two layers disagree inside one profile, the atlas keeps both values and says which won.</p></div>
+    <div><h3>Answer</h3><p>Findings come out worst first, each with the file and line to edit, a fix and a sentence a person or a small model can repeat.</p></div>
+  </div>
+  <ul class="promises">
+    <li>The same inputs give the same bytes, so <code>atlas.json</code> lives in git and diffs line by line.</li>
+    <li><code>rosio drift --fail-on error</code> is the CI gate. A waiver needs a reason, and a stale one is reported.</li>
+    <li>A merge driver joins two atlases and states every disagreement instead of picking one.</li>
+    <li>No language model in extraction, join, drift or rendering. Nothing leaves the machine.</li>
+  </ul>
+</section>
+
+<section id="releases" class="releases chalk" data-ink="chalk" aria-labelledby="releases-title">
+  <div class="releases-text">
+    <h2 id="releases-title">Move releases</h2>
+    <p><code>rosio migrate</code> lists what a move between two ROS 2 releases asks of your own packages: removed CMake calls, renamed headers, changed parameters. It rewrites what is mechanical, leaves the rest with a link to the upstream change, and builds the result in the target release's container.</p>
+    <p class="releases-list">humble · iron · jazzy · kilted · lyrical</p>
+  </div>
+  <figure class="releases-shot"><img src="assets/turtlebot3-burger.jpg" width="1920" height="2621" loading="lazy" alt="TurtleBot3 Burger, a small ROS 2 robot"><figcaption>TurtleBot3 Burger, the robot the nav2 simulation examples drive.</figcaption></figure>
+</section>
+
+<section id="agents" class="agents night" data-ink="night" aria-labelledby="agents-title">
+  <div class="agents-text">
+    <h2 id="agents-title">For agents</h2>
+    <p class="statement">rosio has no language model in it. Any agent, including a small local one, reads the same facts you do, one short answer at a time.</p>
+    <p class="tools"><code>overview</code> <code>drift</code> <code>explain</code> <code>param_chain</code> <code>query</code> <code>path</code> <code>neighbours</code> <code>graph</code> <code>unresolved</code> <code>stamps</code> <code>migrate</code></p>
+    <pre class="cmd"><span class="prompt">$ rosio install claude-code</span></pre>
+    <p class="small">Also Codex, Copilot, Cursor, Gemini CLI, Aider and more: <code>rosio install --list</code>.</p>
+  </div>
+  <figure class="agents-ui">
+    <figcaption>overview, asked of the nav2 atlas</figcaption>
+    <pre>rosio atlas, schema 1.13, 1865 entities and 2196 edges
+layers present: declared   capabilities: drift.findings, layer.declared, param.candidates, profile.entrypoints
+profiles (1): nav2_bringup_composed
+entities: file 586, type 530, param 354, pparam 97, plugin 90, pkg 85, frame 48, launchent 20, pinst 19, node 17, and 4 more kinds
+coverage: 10 values unresolved of 1012 wanted, rate 0.990
+  weakest: node_name 0.89, other 0.92, frame_id 1.00
+drift: 27 findings, 24 info, 3 warn
+  <span class="sev-warn">warn</span>  extract.input_refused  nav2_theta_star_planner/global_planner_plugin.xml was refused: plugin_manifest_missing   nav2_theta_star_planner/global_planner_plugin.xml [install]
+  <span class="sev-warn">warn</span>  param.orphan_block  block loopback_simulator owns nothing in nav2_bringup_composed   nav2_bringup/params/nav2_params.yaml:458 [install]
+  <span class="sev-warn">warn</span>  param.orphan_block  block map_saver owns nothing in nav2_bringup_composed   nav2_bringup/params/nav2_params.yaml:271 [install]
+  <span class="note">info</span>  plugin.unused  dwb_core::DWBLocalPlanner is built and never selected   dwb_core/local_planner_plugin.xml [install]
+next: param_chain for one parameter value, drift for the findings, explain for one entity, query for plain words</pre>
+  </figure>
+</section>
+
+<section class="proof chalk" data-ink="chalk" aria-labelledby="proof-title">
+  <h2 id="proof-title">Found in public stacks</h2>
+  <table>
+    <thead><tr><th scope="col">Package</th><th scope="col">File</th><th scope="col">What</th><th scope="col">Release</th></tr></thead>
+    <tbody>
+      <tr><td>nav2_theta_star_planner</td><td><code>package.xml</code></td><td>Exports global_planner_plugin.xml, installs theta_star_planner.xml</td><td>jazzy</td></tr>
+      <tr><td>robot_localization</td><td><code>src/<wbr>navsat_<wbr>transform.cpp</code></td><td>Declares broadcast_utm_transform_as_parent_frame_ with a trailing underscore, so the yaml value never applies</td><td>jazzy</td></tr>
+      <tr><td>slam_toolbox</td><td><code>config/<wbr>mapper_<wbr>params_<wbr>online_<wbr>async.yaml</code></td><td>Sets min_laser_range, which nothing declares or reads</td><td>jazzy</td></tr>
+    </tbody>
+  </table>
+</section>
+</main>
+
+<footer id="install" class="end night" data-ink="night">
+  <div class="install">
+    <h2>Install</h2>
+<pre><code><span class="prompt">$ pip install "rosio[cpp,stamps]"</span>
+<span class="prompt">$ rosio init ~/ros2_ws</span>        <span class="note"># one profile per launch file, to edit</span>
+<span class="prompt">$ rosio extract ~/ros2_ws</span>
+<span class="prompt">$ rosio drift</span>                  <span class="note"># what is wrong, worst first</span></code></pre>
+    <p>Then the VS Code extension, which finds the atlas on its own. ROS 2 humble to lyrical, DDS and Zenoh, Python 3.10 and later.</p>
+  </div>
+  <p class="name">rosio</p>
+  <div class="meta">
+    <span><a href="https://github.com/sa1ntsinner/rosio">GitHub</a> · <a href="https://pypi.org/project/rosio/">PyPI</a> · <a href="https://marketplace.visualstudio.com/items?itemName=sa1ntsinner.rosio">VS Code</a> · Apache 2.0</span>
+    <span class="credits">Pictures: <a href="https://commons.wikimedia.org/wiki/File:TurtleBot3_Burger.jpg">TurtleBot3 Burger</a>, Kuscu0, CC BY-SA 4.0 · <a href="https://commons.wikimedia.org/wiki/File:Geology;_a_long_section_through_mountains,_and_a_volcano,_sh_Wellcome_V0025106.jpg">Geology: a long section through mountains, and a volcano</a>, CC BY 4.0</span>
+    <a href="#top">Back to top</a>
+  </div>
+</footer>
+<script src="site.js" defer></script>
+</body>
+</html>

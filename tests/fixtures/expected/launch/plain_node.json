@@ -1,0 +1,52 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/plain_node.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "lidar_driver",
+      "form": "node",
+      "fqn": "/sensors/lidar_driver",
+      "gates": [],
+      "name": "lidar_driver",
+      "name_source": "literal",
+      "namespace": "/sensors",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/lidar_driver.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": [
+        {
+          "from": "points",
+          "scope": "node",
+          "to": "/sensors/points_raw"
+        },
+        {
+          "from": "/tf",
+          "scope": "node",
+          "to": "tf"
+        }
+      ]
+    }
+  ],
+  "note": "Case 1. Literal name, one group free remap pair, one repository parameters file.",
+  "predicates": {},
+  "strategy": "executed"
+}

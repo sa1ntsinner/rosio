@@ -1,0 +1,102 @@
+{
+  "note": "The rclpy half of the wrapper case. There is no create_publisher and no create_subscription in this module, yet it publishes /diagnostics and subscribes to two point cloud topics. The executable is px_health while the module is wrappers_node, so the join key from a launch file is the console_scripts entry point and never the module name. line_hint is advisory and never compared.",
+  "package": "px_nodes",
+  "path": "src/px_nodes/px_nodes/wrappers_node.py",
+  "package_relative_path": "px_nodes/wrappers_node.py",
+  "language": "python",
+  "file_id": "file:px_nodes|px_nodes/wrappers_node.py",
+  "executables": ["px_health"],
+  "nodes": [
+    {
+      "name": "px_wrappers",
+      "name_source": "literal",
+      "node_id": null,
+      "node_id_reason": "the code states the name, the namespace comes from the declared layer, so no fqn is formed here",
+      "form": "node",
+      "base": "rclpy.node.Node",
+      "class": "px_nodes.wrappers_node.WrappersNode",
+      "symbol": "px_nodes.wrappers_node.WrappersNode.__init__",
+      "symbol_id": "sym:px_nodes|px_nodes/wrappers_node.py|px_nodes.wrappers_node.WrappersNode.__init__",
+      "line_hint": 12
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "Updater(self)",
+      "name": "/diagnostics",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "diagnostic_msgs/msg/DiagnosticArray",
+      "type_id": "type:diagnostic_msgs|msg|DiagnosticArray",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside diagnostic_updater, not in this source",
+      "via_known_wrapper": "diagnostic_updater.Updater",
+      "owner_symbol": "px_nodes.wrappers_node.WrappersNode.__init__",
+      "line_hint": 14
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/px/left/points\"",
+      "name": "/px/left/points",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": null,
+      "qos_reason": "message_filters.Subscriber was given no qos argument, so the source states none",
+      "via_known_wrapper": "message_filters.Subscriber",
+      "owner_symbol": "px_nodes.wrappers_node.WrappersNode.__init__",
+      "line_hint": 18
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/px/right/points\"",
+      "name": "/px/right/points",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": null,
+      "qos_reason": "message_filters.Subscriber was given no qos argument, so the source states none",
+      "via_known_wrapper": "message_filters.Subscriber",
+      "owner_symbol": "px_nodes.wrappers_node.WrappersNode.__init__",
+      "line_hint": 19
+    }
+  ],
+  "parameters": [],
+  "parameter_callbacks": [],
+  "plugin_parameters": [],
+  "wrappers": [
+    {
+      "symbol": "diagnostic_updater.Updater",
+      "kind": "known_wrapper",
+      "publishes": ["/diagnostics"],
+      "detail": "the updater owns the publisher and a periodic timer. The period is a constructor default that this source does not state, so no period is recorded",
+      "line_hint": 14
+    },
+    {
+      "symbol": "message_filters.Subscriber",
+      "kind": "known_wrapper",
+      "subscribes": ["/px/left/points", "/px/right/points"],
+      "detail": "message_filters.Subscriber(node, type, topic) creates a real subscription that no create_subscription call names",
+      "line_hint": 18
+    }
+  ],
+  "tf": {
+    "broadcasts": [],
+    "lookups": []
+  },
+  "unresolved": [],
+  "counts": {
+    "endpoints": 3,
+    "publishers": 1,
+    "subscribers": 2,
+    "service_servers": 0,
+    "service_clients": 0,
+    "timers": 0,
+    "parameters": 0,
+    "unresolved": 0,
+    "via_known_wrapper": 3
+  }
+}

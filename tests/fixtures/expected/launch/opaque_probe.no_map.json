@@ -1,0 +1,69 @@
+{
+  "arg_declarations": [
+    {
+      "default": "",
+      "name": "map_base"
+    }
+  ],
+  "args": [],
+  "case": "no_map",
+  "entry": "src/lx_bringup/launch/opaque_probe.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "async_slam",
+      "form": "node",
+      "fqn": "/slam_toolbox",
+      "gates": [],
+      "name": "slam_toolbox",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/slam.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        },
+        {
+          "kind": "inline_dict",
+          "note": "",
+          "order": 1,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "mode",
+              "mapping"
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": [
+        {
+          "from": "/map",
+          "scope": "node",
+          "to": "/slam_map"
+        }
+      ]
+    }
+  ],
+  "note": "Case 3, the branch a walk with no arguments takes. map_base is empty, the probe is false and the executable is the mapping one.",
+  "predicates": {
+    "map_base.posegraph": false
+  },
+  "strategy": "executed"
+}

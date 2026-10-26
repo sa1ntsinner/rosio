@@ -1,0 +1,184 @@
+{
+  "note": "The inventory of the code fixture workspace and the totals every per file expectation adds up to. A collector that drops one endpoint or invents one shows up here before any single file comparison runs. line_hint is advisory and never compared, and no absolute path appears anywhere in these files.",
+  "workspace": "tests/fixtures/ws_code",
+  "packages": [
+    {
+      "name": "cx_nodes",
+      "build_type": "ament_cmake",
+      "language": "cpp",
+      "executables": [
+        "cx_lifecycle_node",
+        "cx_literal_node",
+        "cx_marker_node",
+        "cx_param_node",
+        "cx_tf_node",
+        "cx_wrappers_node"
+      ],
+      "executable_notes": {
+        "cx_marker_node": "has no add_executable and no main, the name exists only in the EXECUTABLE clause of rclcpp_components_register_node"
+      },
+      "libraries": ["cx_component", "cx_nodes_layers"],
+      "plugin_manifests": ["src/cx_nodes/cx_layers_plugin.xml"]
+    },
+    {
+      "name": "px_nodes",
+      "build_type": "ament_python",
+      "language": "python",
+      "executables": ["px_health", "px_literal", "px_param", "px_tf"],
+      "executable_notes": {
+        "px_health": "entry point px_health maps to the module wrappers_node, so the executable name and the module name disagree on purpose"
+      }
+    }
+  ],
+  "files": [
+    {"path": "src/cx_nodes/src/cx_component_node.cpp", "expected": "cx_component_node.json"},
+    {"path": "src/cx_nodes/src/cx_layer_plugin.cpp", "expected": "cx_layer_plugin.json"},
+    {"path": "src/cx_nodes/src/cx_lifecycle_node.cpp", "expected": "cx_lifecycle_node.json"},
+    {"path": "src/cx_nodes/src/cx_literal_endpoints.cpp", "expected": "cx_literal_endpoints.json"},
+    {"path": "src/cx_nodes/src/cx_param_endpoints.cpp", "expected": "cx_param_endpoints.json"},
+    {"path": "src/cx_nodes/src/cx_tf_node.cpp", "expected": "cx_tf_node.json"},
+    {"path": "src/cx_nodes/src/cx_wrappers.cpp", "expected": "cx_wrappers.json"},
+    {"path": "src/px_nodes/px_nodes/literal_node.py", "expected": "px_literal_node.json"},
+    {"path": "src/px_nodes/px_nodes/param_node.py", "expected": "px_param_node.json"},
+    {"path": "src/px_nodes/px_nodes/tf_node.py", "expected": "px_tf_node.json"},
+    {"path": "src/px_nodes/px_nodes/wrappers_node.py", "expected": "px_wrappers_node.json"}
+  ],
+  "files_without_ros_content": [
+    {
+      "path": "src/cx_nodes/include/cx_nodes/cx_lifecycle_node.hpp",
+      "reason": "declares cx_nodes::BridgeLifecycle and its publisher members, no call site. The endpoints belong to the .cpp"
+    },
+    {
+      "path": "src/px_nodes/px_nodes/tuning.py",
+      "reason": "no rclpy import and no node. It exists so that the gain parameter default is a runtime attribute from another module"
+    },
+    {
+      "path": "src/px_nodes/px_nodes/__init__.py",
+      "reason": "empty"
+    }
+  ],
+  "totals": {
+    "nodes": 10,
+    "nodes_named_literal": 8,
+    "nodes_name_from_argv": 2,
+    "endpoints": 55,
+    "publishers": 25,
+    "subscribers": 21,
+    "service_servers": 2,
+    "service_clients": 2,
+    "timers": 5,
+    "endpoints_via_known_wrapper": 14,
+    "parameters": 34,
+    "plugin_parameters": 3,
+    "parameter_callbacks": 2,
+    "tf_broadcasts": 4,
+    "tf_lookups": 8,
+    "unresolved": 9
+  },
+  "per_language": {
+    "cpp": {
+      "files": 7,
+      "nodes": 6,
+      "endpoints": 30,
+      "publishers": 13,
+      "subscribers": 12,
+      "service_servers": 1,
+      "service_clients": 1,
+      "timers": 3,
+      "parameters": 17,
+      "plugin_parameters": 3,
+      "unresolved": 5
+    },
+    "python": {
+      "files": 4,
+      "nodes": 4,
+      "endpoints": 25,
+      "publishers": 12,
+      "subscribers": 9,
+      "service_servers": 1,
+      "service_clients": 1,
+      "timers": 2,
+      "parameters": 17,
+      "plugin_parameters": 0,
+      "unresolved": 4
+    }
+  },
+  "resolution": {
+    "note": "The denominator of a want is every site where that kind of value was asked for. A timer has no name, so timers are outside topic_name. A parameter declared with a type and no default is absent, which is a resolved answer, not an unresolved one.",
+    "topic_name": {"resolved": 44, "unresolved": 2},
+    "service_name": {"resolved": 4, "unresolved": 0},
+    "node_name": {"resolved": 8, "unresolved": 2},
+    "param_value": {"resolved": 35, "unresolved": 2},
+    "frame_id": {"resolved": 22, "unresolved": 2},
+    "other": {"resolved": 0, "unresolved": 1}
+  },
+  "unresolved_inventory": [
+    {
+      "file": "src/cx_nodes/src/cx_layer_plugin.cpp",
+      "want": "other",
+      "expr": "name_ + \".\"",
+      "reason": "plugin_instance_prefix"
+    },
+    {
+      "file": "src/cx_nodes/src/cx_param_endpoints.cpp",
+      "want": "param_value",
+      "expr": "tuning_.gain",
+      "reason": "runtime_attribute_default"
+    },
+    {
+      "file": "src/cx_nodes/src/cx_param_endpoints.cpp",
+      "want": "topic_name",
+      "expr": "name",
+      "reason": "external_descriptor_file"
+    },
+    {
+      "file": "src/cx_nodes/src/cx_tf_node.cpp",
+      "want": "frame_id",
+      "expr": "msg->header.frame_id",
+      "reason": "message_field"
+    },
+    {
+      "file": "src/cx_nodes/src/cx_tf_node.cpp",
+      "want": "node_name",
+      "expr": "node_name",
+      "reason": "argv_value"
+    },
+    {
+      "file": "src/px_nodes/px_nodes/param_node.py",
+      "want": "param_value",
+      "expr": "self._tuning.gain",
+      "reason": "runtime_attribute_default"
+    },
+    {
+      "file": "src/px_nodes/px_nodes/param_node.py",
+      "want": "topic_name",
+      "expr": "env_topic",
+      "reason": "environment_variable"
+    },
+    {
+      "file": "src/px_nodes/px_nodes/tf_node.py",
+      "want": "frame_id",
+      "expr": "msg.header.frame_id",
+      "reason": "message_field"
+    },
+    {
+      "file": "src/px_nodes/px_nodes/tf_node.py",
+      "want": "node_name",
+      "expr": "node_name",
+      "reason": "argv_value"
+    }
+  ],
+  "frames": ["base_footprint", "base_link", "cx_lidar", "map", "odom", "px_lidar"],
+  "known_wrappers_exercised": [
+    "diagnostic_updater.Updater",
+    "diagnostic_updater::Updater",
+    "message_filters.Subscriber",
+    "message_filters::Subscriber",
+    "tf2_ros.StaticTransformBroadcaster",
+    "tf2_ros.TransformBroadcaster",
+    "tf2_ros.TransformListener",
+    "tf2_ros::StaticTransformBroadcaster",
+    "tf2_ros::TransformBroadcaster",
+    "tf2_ros::TransformListener"
+  ]
+}

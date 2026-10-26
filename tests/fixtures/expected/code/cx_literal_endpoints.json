@@ -1,0 +1,210 @@
+{
+  "note": "Every topic here is a string literal, so the only variable is the QoS form. A qos field that is null means the source did not state it, which is not the same as the rmw default: defaulting reliability to reliable or depth to 10 manufactures drift. line_hint is advisory and never compared.",
+  "package": "cx_nodes",
+  "path": "src/cx_nodes/src/cx_literal_endpoints.cpp",
+  "package_relative_path": "src/cx_literal_endpoints.cpp",
+  "language": "cpp",
+  "file_id": "file:cx_nodes|src/cx_literal_endpoints.cpp",
+  "nodes": [
+    {
+      "name": "cx_literal",
+      "name_source": "literal",
+      "node_id": null,
+      "node_id_reason": "the code states the name, the namespace comes from the declared layer, so no fqn is formed here",
+      "form": "node",
+      "base": "rclcpp::Node",
+      "class": "cx_nodes::LiteralEndpoints",
+      "symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "symbol_id": "sym:cx_nodes|src/cx_literal_endpoints.cpp|cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 22
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "\"/cx/odom\"",
+      "name": "/cx/odom",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "nav_msgs/msg/Odometry",
+      "type_id": "type:nav_msgs|msg|Odometry",
+      "qos": {
+        "raw": "rclcpp::QoS(rclcpp::KeepLast(5))",
+        "form": "qos_object",
+        "history": "keep_last",
+        "depth": 5,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 28
+    },
+    {
+      "kind": "publisher",
+      "raw": "\"/cx/ready\"",
+      "name": "/cx/ready",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "std_msgs/msg/Bool",
+      "type_id": "type:std_msgs|msg|Bool",
+      "qos": {
+        "raw": "rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local()",
+        "form": "qos_object",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": "reliable",
+        "durability": "transient_local",
+        "preset": null
+      },
+      "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 33
+    },
+    {
+      "kind": "publisher",
+      "raw": "\"cmd_vel\"",
+      "name": "cmd_vel",
+      "name_state": "literal_relative",
+      "absolute": false,
+      "topic_id": null,
+      "topic_id_reason": "a relative name mints no topic id, it stays raw until a remap or a namespace binds it",
+      "type": "geometry_msgs/msg/Twist",
+      "type_id": "type:geometry_msgs|msg|Twist",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 31
+    },
+    {
+      "kind": "service_client",
+      "raw": "\"/cx/enable_motion\"",
+      "name": "/cx/enable_motion",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "std_srvs/srv/SetBool",
+      "type_id": "type:std_srvs|srv|SetBool",
+      "qos": null,
+      "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 56
+    },
+    {
+      "kind": "service_server",
+      "raw": "\"/cx/reset\"",
+      "name": "/cx/reset",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "std_srvs/srv/Trigger",
+      "type_id": "type:std_srvs|srv|Trigger",
+      "qos": null,
+      "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 50
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/cx/estop\"",
+      "name": "/cx/estop",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "std_msgs/msg/Bool",
+      "type_id": "type:std_msgs|msg|Bool",
+      "qos": {
+        "raw": "latched_qos",
+        "form": "variable",
+        "variable": "latched_qos",
+        "mutated": true,
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": "transient_local",
+        "preset": null
+      },
+      "options_argument": "estop_options",
+      "options_position": 4,
+      "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 45
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/cx/points\"",
+      "name": "/cx/points",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "rclcpp::SensorDataQoS()",
+        "form": "preset",
+        "preset": "sensor_data",
+        "history": null,
+        "depth": null,
+        "reliability": null,
+        "durability": null
+      },
+      "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 24
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/cx/scan\"",
+      "name": "/cx/scan",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/LaserScan",
+      "type_id": "type:sensor_msgs|msg|LaserScan",
+      "qos": {
+        "raw": "scan_qos",
+        "form": "variable",
+        "variable": "scan_qos",
+        "mutated": false,
+        "preset": "sensor_data",
+        "history": null,
+        "depth": null,
+        "reliability": null,
+        "durability": null
+      },
+      "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 37
+    },
+    {
+      "kind": "timer",
+      "raw": "std::chrono::milliseconds(50)",
+      "name": null,
+      "name_state": "not_applicable",
+      "period_s": 0.05,
+      "period_state": "literal",
+      "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
+      "line_hint": 58
+    }
+  ],
+  "parameters": [],
+  "parameter_callbacks": [],
+  "plugin_parameters": [],
+  "tf": {
+    "broadcasts": [],
+    "lookups": []
+  },
+  "unresolved": [],
+  "counts": {
+    "endpoints": 9,
+    "publishers": 3,
+    "subscribers": 3,
+    "service_servers": 1,
+    "service_clients": 1,
+    "timers": 1,
+    "parameters": 0,
+    "unresolved": 0
+  },
+  "constructions": [
+    {
+      "class": "cx_nodes::LiteralEndpoints",
+      "owner_symbol": "main"
+    }
+  ]
+}

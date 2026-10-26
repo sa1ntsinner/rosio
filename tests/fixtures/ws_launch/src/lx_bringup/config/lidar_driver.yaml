@@ -1,0 +1,5 @@
+lidar_driver:
+  ros__parameters:
+    rate_hz: 20.0
+    frame_id: os_sensor
+    azimuth_window: [0, 360000]

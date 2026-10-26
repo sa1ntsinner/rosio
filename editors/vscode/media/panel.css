@@ -1,0 +1,454 @@
+/* The atlas panel. Every colour is a VS Code theme token, so the panel is at home in any theme. */
+
+:root {
+  --ground: var(--vscode-editor-background);
+  --ink: var(--vscode-foreground);
+  --muted: var(--vscode-descriptionForeground);
+  --step: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
+  --line: var(--vscode-widget-border, var(--vscode-panel-border, transparent));
+  --hover: var(--vscode-list-hoverBackground);
+  --focus: var(--vscode-focusBorder);
+  --link: var(--vscode-textLink-foreground);
+  --error: var(--vscode-errorForeground);
+  --warn: var(--vscode-editorWarning-foreground);
+  --info: var(--vscode-editorInfo-foreground);
+  --conflict: var(--vscode-diffEditor-removedTextBackground, rgba(255, 80, 80, 0.15));
+  --agree: var(--vscode-diffEditor-insertedTextBackground, rgba(80, 200, 120, 0.12));
+  --button: var(--vscode-button-background);
+  --button-ink: var(--vscode-button-foreground);
+  --button-hover: var(--vscode-button-hoverBackground);
+  --quiet-button: var(--vscode-button-secondaryBackground);
+  --quiet-button-ink: var(--vscode-button-secondaryForeground);
+  --text: var(--vscode-font-family);
+  --code: var(--vscode-editor-font-family);
+  --size: var(--vscode-font-size, 13px);
+  /* the four layer colours of the rosio brand kit, one set per kind of theme */
+  --declared: #ad6800;
+  --coded: #00a1c6;
+  --observed: #00915d;
+  --recorded: #ce5b8c;
+  --gutter: 24px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--text);
+  font-size: var(--size);
+  line-height: 1.5;
+}
+
+main {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px var(--gutter) 56px;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+p {
+  margin: 0;
+}
+
+.num,
+td.num,
+th.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+code,
+.id {
+  font-family: var(--code);
+}
+
+/* the title row: what this is, the one finding, and the one thing to do */
+
+.title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+}
+
+.title .finding {
+  margin-top: 6px;
+  max-width: 70ch;
+}
+
+.title .kind {
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+button {
+  font: inherit;
+  border: 1px solid var(--vscode-button-border, var(--line));
+  border-radius: 2px;
+  padding: 5px 12px;
+  cursor: pointer;
+  background: var(--quiet-button);
+  color: var(--quiet-button-ink);
+}
+
+button.primary {
+  background: var(--button);
+  color: var(--button-ink);
+}
+
+button:hover {
+  filter: brightness(1.08);
+}
+
+button.primary:hover {
+  background: var(--button-hover);
+  filter: none;
+}
+
+button:focus-visible,
+.row:focus-visible,
+a:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* the four layers, the one element only rosio has */
+
+body.vscode-light {
+  --declared: #a66000;
+  --coded: #0090af;
+  --observed: #008648;
+  --recorded: #c65690;
+}
+
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+  --declared: var(--ink);
+  --coded: var(--ink);
+  --observed: var(--ink);
+  --recorded: var(--ink);
+}
+
+[data-layer="declared"] { --layer: var(--declared); }
+[data-layer="coded"] { --layer: var(--coded); }
+[data-layer="observed"] { --layer: var(--observed); }
+[data-layer="recorded"] { --layer: var(--recorded); }
+
+.layer.present {
+  box-shadow: inset 0 3px 0 var(--layer);
+}
+
+.layer-head::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+  background: var(--layer);
+}
+
+.layers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  margin-bottom: 28px;
+}
+
+.layer {
+  background: var(--step);
+  padding: 10px 12px;
+  min-height: 58px;
+}
+
+.layer .name {
+  font-weight: 600;
+}
+
+.layer.absent {
+  background: transparent;
+  outline: 1px dashed var(--line);
+  outline-offset: -1px;
+}
+
+.layer.absent .name {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.layer .note {
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.layer.present .note {
+  color: var(--ink);
+}
+
+/* two columns: findings carry the question, the ledger beside them answers what was read */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+  .layers {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .title {
+    flex-direction: column;
+  }
+}
+
+.group + .group {
+  margin-top: 22px;
+}
+
+.group h2 .count {
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 7px 8px;
+  margin: 0 -8px;
+  border-radius: 2px;
+  cursor: pointer;
+  align-items: baseline;
+}
+
+.row:hover {
+  background: var(--hover);
+}
+
+.row .sev {
+  font-weight: 600;
+}
+
+.sev.error {
+  color: var(--error);
+}
+
+.sev.warn {
+  color: var(--warn);
+}
+
+.sev.info {
+  color: var(--info);
+}
+
+.row .what .rule {
+  color: var(--muted);
+  margin-left: 8px;
+}
+
+.row .say {
+  color: var(--muted);
+  margin-top: 2px;
+  display: none;
+}
+
+.row[aria-expanded="true"] .say {
+  display: block;
+}
+
+.row .where {
+  color: var(--link);
+  white-space: nowrap;
+  font-family: var(--code);
+}
+
+.more {
+  margin-top: 6px;
+}
+
+/* tables: rules and alignment, nothing else */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th {
+  text-align: left;
+  font-weight: 400;
+  color: var(--muted);
+  padding: 0 10px 6px 0;
+}
+
+td {
+  padding: 6px 10px 6px 0;
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+}
+
+td.value {
+  font-family: var(--code);
+  word-break: break-word;
+}
+
+td.conflict {
+  background: var(--conflict);
+}
+
+td.dash {
+  color: var(--muted);
+}
+
+tr.loses td {
+  color: var(--muted);
+}
+
+.ledger + .ledger {
+  margin-top: 26px;
+}
+
+/* the entity card */
+
+.figure {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+
+.figure .value {
+  font-size: 26px;
+  line-height: 1.2;
+  font-family: var(--code);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.figure .label {
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+section + section,
+.ledger,
+.ledger + section {
+  margin-top: 30px;
+}
+
+.sites a {
+  display: block;
+  font-family: var(--code);
+  padding: 2px 0;
+}
+
+.empty {
+  padding: 40px 0;
+  max-width: 60ch;
+}
+
+.empty h1 {
+  margin-bottom: 8px;
+}
+
+.empty p + p {
+  margin-top: 8px;
+}
+
+.empty .actions {
+  margin-top: 18px;
+}
+
+/* relations of one entity: a heading per kind, the names as links that wrap */
+
+.relations {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 22px 32px;
+}
+
+.relation h2 .count {
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chips a {
+  font-family: var(--code);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parameters h2 .count {
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.parameters table td:first-child {
+  width: 55%;
+}
+
+.endpoint {
+  font-family: var(--code);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

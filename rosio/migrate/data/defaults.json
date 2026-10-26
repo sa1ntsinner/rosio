@@ -1,0 +1,620 @@
+{
+  "checked": [
+    "humble",
+    "jazzy",
+    "kilted",
+    "lyrical"
+  ],
+  "commits": {
+    "humble": "3c3db59d6969d8ecee8e68468693d006397f4a0c",
+    "jazzy": "426682ff88405a99617294f5cc8401a61aa5fa50",
+    "kilted": "85e4954a5ca921e4ae2012da45e809456bd8b003",
+    "lyrical": "009a99ee29d040045dac4af6e86e3ea44603c3ae"
+  },
+  "helpers": [
+    "declare_or_get_parameter",
+    "declare_parameter",
+    "declare_parameter_if_not_declared"
+  ],
+  "parameters": [
+    {
+      "class": "behavior_server::BehaviorServer",
+      "name": "costmap_topic",
+      "node": "behavior_server",
+      "package": "nav2_behaviors",
+      "releases": {
+        "humble": {
+          "declared": true,
+          "default": "local_costmap/costmap_raw",
+          "default_state": "known",
+          "source": {
+            "branch": "humble",
+            "line": 34,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": false,
+          "source": {
+            "branch": "jazzy",
+            "line": 26,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 26,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 26,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "behavior_server::BehaviorServer",
+      "name": "footprint_topic",
+      "node": "behavior_server",
+      "package": "nav2_behaviors",
+      "releases": {
+        "humble": {
+          "declared": true,
+          "default": "local_costmap/published_footprint",
+          "default_state": "known",
+          "source": {
+            "branch": "humble",
+            "line": 37,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": false,
+          "source": {
+            "branch": "jazzy",
+            "line": 26,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 26,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 26,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "behavior_server::BehaviorServer",
+      "name": "global_frame",
+      "node": "behavior_server",
+      "package": "nav2_behaviors",
+      "releases": {
+        "humble": {
+          "declared": true,
+          "default": "odom",
+          "default_state": "known",
+          "source": {
+            "branch": "humble",
+            "line": 50,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": "map",
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 63,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        },
+        "kilted": {
+          "declared": true,
+          "default": "map",
+          "default_state": "known",
+          "source": {
+            "branch": "kilted",
+            "line": 63,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": true,
+          "default": "map",
+          "default_state": "known",
+          "source": {
+            "branch": "lyrical",
+            "line": 45,
+            "path": "nav2_behaviors/src/behavior_server.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_collision_monitor::CollisionMonitor",
+      "name": "cmd_vel_in_topic",
+      "node": "collision_monitor",
+      "package": "nav2_collision_monitor",
+      "releases": {
+        "humble": {
+          "declared": true,
+          "default": "cmd_vel_raw",
+          "default_state": "known",
+          "source": {
+            "branch": "humble",
+            "line": 193,
+            "path": "nav2_collision_monitor/src/collision_monitor_node.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": "cmd_vel_smoothed",
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 248,
+            "path": "nav2_collision_monitor/src/collision_monitor_node.cpp"
+          }
+        },
+        "kilted": {
+          "declared": true,
+          "default": "cmd_vel_smoothed",
+          "default_state": "known",
+          "source": {
+            "branch": "kilted",
+            "line": 241,
+            "path": "nav2_collision_monitor/src/collision_monitor_node.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": true,
+          "default": "cmd_vel_smoothed",
+          "default_state": "known",
+          "source": {
+            "branch": "lyrical",
+            "line": 266,
+            "path": "nav2_collision_monitor/src/collision_monitor_node.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_controller::ControllerServer",
+      "name": "action_server_result_timeout",
+      "node": "controller_server",
+      "package": "nav2_controller",
+      "releases": {
+        "humble": {
+          "declared": false,
+          "source": {
+            "branch": "humble",
+            "line": 38,
+            "path": "nav2_controller/src/controller_server.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": 10.0,
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 54,
+            "path": "nav2_controller/src/controller_server.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 38,
+            "path": "nav2_controller/src/controller_server.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 39,
+            "path": "nav2_controller/src/controller_server.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_controller::ControllerServer",
+      "name": "progress_checker_plugin",
+      "node": "controller_server",
+      "package": "nav2_controller",
+      "releases": {
+        "humble": {
+          "declared": true,
+          "default": null,
+          "default_state": "unknown",
+          "source": {
+            "branch": "humble",
+            "line": 53,
+            "path": "nav2_controller/src/controller_server.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": false,
+          "source": {
+            "branch": "jazzy",
+            "line": 38,
+            "path": "nav2_controller/src/controller_server.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 38,
+            "path": "nav2_controller/src/controller_server.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 39,
+            "path": "nav2_controller/src/controller_server.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_costmap_2d::Costmap2DROS",
+      "name": "observation_sources",
+      "node": "costmap",
+      "package": "nav2_costmap_2d",
+      "releases": {
+        "humble": {
+          "declared": true,
+          "default": "",
+          "default_state": "known",
+          "source": {
+            "branch": "humble",
+            "line": 87,
+            "path": "nav2_costmap_2d/src/costmap_2d_ros.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": "",
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 120,
+            "path": "nav2_costmap_2d/src/costmap_2d_ros.cpp"
+          }
+        },
+        "kilted": {
+          "declared": true,
+          "default": "",
+          "default_state": "known",
+          "source": {
+            "branch": "kilted",
+            "line": 111,
+            "path": "nav2_costmap_2d/src/costmap_2d_ros.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 66,
+            "path": "nav2_costmap_2d/src/costmap_2d_ros.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_planner::PlannerServer",
+      "name": "action_server_result_timeout",
+      "node": "planner_server",
+      "package": "nav2_planner",
+      "releases": {
+        "humble": {
+          "declared": false,
+          "source": {
+            "branch": "humble",
+            "line": 45,
+            "path": "nav2_planner/src/planner_server.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": 10.0,
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 56,
+            "path": "nav2_planner/src/planner_server.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 43,
+            "path": "nav2_planner/src/planner_server.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 47,
+            "path": "nav2_planner/src/planner_server.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_route::RouteServer",
+      "name": "action_server_result_timeout",
+      "node": "route_server",
+      "package": "nav2_route",
+      "releases": {
+        "humble": {
+          "declared": false,
+          "source": {
+            "branch": "humble",
+            "line": 25,
+            "path": "nav2_route/src/route_server.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": 10.0,
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 45,
+            "path": "nav2_route/src/route_server.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 25,
+            "path": "nav2_route/src/route_server.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 24,
+            "path": "nav2_route/src/route_server.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_route::RouteServer",
+      "name": "global_frame",
+      "node": "route_server",
+      "package": "nav2_route",
+      "releases": {
+        "humble": {
+          "declared": true,
+          "default": "map",
+          "default_state": "known",
+          "source": {
+            "branch": "humble",
+            "line": 63,
+            "path": "nav2_route/src/route_server.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": "map",
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 78,
+            "path": "nav2_route/src/route_server.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 25,
+            "path": "nav2_route/src/route_server.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 24,
+            "path": "nav2_route/src/route_server.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_smoother::SmootherServer",
+      "name": "action_server_result_timeout",
+      "node": "smoother_server",
+      "package": "nav2_smoother",
+      "releases": {
+        "humble": {
+          "declared": false,
+          "source": {
+            "branch": "humble",
+            "line": 38,
+            "path": "nav2_smoother/src/nav2_smoother.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": 10.0,
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 57,
+            "path": "nav2_smoother/src/nav2_smoother.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 36,
+            "path": "nav2_smoother/src/nav2_smoother.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 34,
+            "path": "nav2_smoother/src/nav2_smoother.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_velocity_smoother::VelocitySmoother",
+      "name": "stamp_smoothed_velocity_with_smoothing_time",
+      "node": "velocity_smoother",
+      "package": "nav2_velocity_smoother",
+      "releases": {
+        "humble": {
+          "declared": false,
+          "source": {
+            "branch": "humble",
+            "line": 33,
+            "path": "nav2_velocity_smoother/src/velocity_smoother.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": false,
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 149,
+            "path": "nav2_velocity_smoother/src/velocity_smoother.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 33,
+            "path": "nav2_velocity_smoother/src/velocity_smoother.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 32,
+            "path": "nav2_velocity_smoother/src/velocity_smoother.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "nav2_waypoint_follower::WaypointFollower",
+      "name": "action_server_result_timeout",
+      "node": "waypoint_follower",
+      "package": "nav2_waypoint_follower",
+      "releases": {
+        "humble": {
+          "declared": false,
+          "source": {
+            "branch": "humble",
+            "line": 31,
+            "path": "nav2_waypoint_follower/src/waypoint_follower.cpp"
+          }
+        },
+        "jazzy": {
+          "declared": true,
+          "default": 900.0,
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 40,
+            "path": "nav2_waypoint_follower/src/waypoint_follower.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 31,
+            "path": "nav2_waypoint_follower/src/waypoint_follower.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 33,
+            "path": "nav2_waypoint_follower/src/waypoint_follower.cpp"
+          }
+        }
+      }
+    },
+    {
+      "class": "opennav_docking::DockingServer",
+      "name": "action_server_result_timeout",
+      "node": "docking_server",
+      "package": "opennav_docking",
+      "releases": {
+        "jazzy": {
+          "declared": true,
+          "default": 10.0,
+          "default_state": "known",
+          "source": {
+            "branch": "jazzy",
+            "line": 68,
+            "path": "nav2_docking/opennav_docking/src/docking_server.cpp"
+          }
+        },
+        "kilted": {
+          "declared": false,
+          "source": {
+            "branch": "kilted",
+            "line": 28,
+            "path": "nav2_docking/opennav_docking/src/docking_server.cpp"
+          }
+        },
+        "lyrical": {
+          "declared": false,
+          "source": {
+            "branch": "lyrical",
+            "line": 29,
+            "path": "nav2_docking/opennav_docking/src/docking_server.cpp"
+          }
+        }
+      }
+    }
+  ],
+  "repository": "https://github.com/ros-navigation/navigation2"
+}

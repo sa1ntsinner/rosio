@@ -1,0 +1,164 @@
+{
+  "schema_version": "1.3",
+  "entities": {
+    "node:/listener": {
+      "kind": "node",
+      "label": "/listener"
+    },
+    "node:/scan_filter": {
+      "kind": "node",
+      "label": "/scan_filter"
+    },
+    "node:/fake_scan": {
+      "kind": "node",
+      "label": "/fake_scan"
+    },
+    "topic:/scan": {
+      "kind": "topic",
+      "label": "/scan"
+    },
+    "topic:/output": {
+      "kind": "topic",
+      "label": "/output"
+    }
+  },
+  "edges": {
+    "edge:subscribes|node:/listener|topic:/scan|scan": {
+      "kind": "subscribes",
+      "src": "node:/listener",
+      "dst": "topic:/scan",
+      "key": "scan",
+      "facts": [
+        {
+          "layer": "coded",
+          "profile": "profile:demo",
+          "evidence": [
+            {
+              "file": "file:@repo|crates/rosio-lsp/tests/fixtures/endpoints.cpp",
+              "line_hint": 1
+            }
+          ],
+          "confidence": "certain"
+        },
+        {
+          "layer": "coded",
+          "profile": "profile:other",
+          "evidence": [
+            {
+              "file": "file:@repo|crates/rosio-lsp/tests/fixtures/endpoints.cpp",
+              "line_hint": 1
+            }
+          ],
+          "confidence": "certain"
+        }
+      ]
+    },
+    "edge:publishes|node:/scan_filter|topic:/scan|filter": {
+      "kind": "publishes",
+      "src": "node:/scan_filter",
+      "dst": "topic:/scan",
+      "key": "filter",
+      "facts": [
+        {
+          "layer": "coded",
+          "profile": "*",
+          "confidence": "certain"
+        }
+      ]
+    },
+    "edge:publishes|node:/scan_filter|topic:/scan|filter_other": {
+      "kind": "publishes",
+      "src": "node:/scan_filter",
+      "dst": "topic:/scan",
+      "key": "filter_other",
+      "facts": [
+        {
+          "layer": "coded",
+          "profile": "*",
+          "confidence": "certain"
+        }
+      ]
+    },
+    "edge:publishes|node:/fake_scan|topic:/scan|fake": {
+      "kind": "publishes",
+      "src": "node:/fake_scan",
+      "dst": "topic:/scan",
+      "key": "fake",
+      "facts": [
+        {
+          "layer": "coded",
+          "profile": "*",
+          "confidence": "certain"
+        }
+      ]
+    },
+    "edge:publishes|node:/listener|topic:/output|output": {
+      "kind": "publishes",
+      "src": "node:/listener",
+      "dst": "topic:/output",
+      "key": "output",
+      "facts": [
+        {
+          "layer": "coded",
+          "profile": "profile:demo",
+          "evidence": [
+            {
+              "file": "file:@repo|crates/rosio-lsp/tests/fixtures/endpoints.cpp",
+              "line_hint": 2
+            }
+          ],
+          "confidence": "certain"
+        }
+      ]
+    },
+    "edge:subscribes|node:/listener|topic:/scan|shared_a": {
+      "kind": "subscribes",
+      "src": "node:/listener",
+      "dst": "topic:/scan",
+      "key": "shared_a",
+      "facts": [
+        {
+          "layer": "coded",
+          "profile": "profile:demo",
+          "evidence": [
+            {
+              "file": "file:@repo|crates/rosio-lsp/tests/fixtures/endpoints.cpp",
+              "line_hint": 3
+            }
+          ],
+          "confidence": "certain"
+        }
+      ]
+    },
+    "edge:publishes|node:/listener|topic:/output|shared_b": {
+      "kind": "publishes",
+      "src": "node:/listener",
+      "dst": "topic:/output",
+      "key": "shared_b",
+      "facts": [
+        {
+          "layer": "coded",
+          "profile": "profile:demo",
+          "evidence": [
+            {
+              "file": "file:@repo|crates/rosio-lsp/tests/fixtures/endpoints.cpp",
+              "line_hint": 3
+            }
+          ],
+          "confidence": "certain"
+        }
+      ]
+    }
+  },
+  "findings": [
+    {
+      "id": "find:qos.incompatible|topic:/scan|-",
+      "rule": "qos.incompatible",
+      "about": {
+        "entity": "topic:/scan"
+      },
+      "title": "/listener never receives /scan",
+      "say": "/scan_filter publishes best effort while /listener requests reliable."
+    }
+  ]
+}

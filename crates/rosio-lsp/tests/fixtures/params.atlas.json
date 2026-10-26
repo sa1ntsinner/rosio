@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.2",
+  "entities": {
+    "profile:demo": {"kind": "profile", "label": "demo"},
+    "param:/example|speed": {
+      "kind": "param", "label": "speed", "state": "effective",
+      "candidates": [
+        {"rank": 0, "wins": true, "value": 1, "mechanism": "yaml_base", "profile": "profile:demo",
+         "source": {"file": "file:@repo|crates/rosio-lsp/tests/fixtures/params.yaml", "line_hint": 3}}
+      ]
+    },
+    "param:/example|rewritten": {
+      "kind": "param", "label": "rewritten", "state": "effective",
+      "candidates": [
+        {"rank": 0, "wins": true, "value": 2, "mechanism": "python_override", "profile": "profile:demo",
+         "source": {"file": "file:@repo|crates/rosio-lsp/tests/fixtures/params.yaml", "line_hint": 4}}
+      ]
+    },
+    "param:/example|old": {
+      "kind": "param", "label": "old", "state": "effective",
+      "candidates": [
+        {"rank": 1, "wins": false, "value": 3, "mechanism": "yaml_base", "profile": "profile:demo", "shadow_kind": "overridden",
+         "source": {"file": "file:@repo|crates/rosio-lsp/tests/fixtures/params.yaml", "line_hint": 5}},
+        {"rank": 0, "wins": true, "value": 4, "mechanism": "yaml_base", "profile": "profile:demo",
+         "source": {"file": "file:@repo|crates/rosio-lsp/tests/fixtures/params.yaml", "line_hint": 6}}
+      ]
+    },
+    "param:/absent|missing": {
+      "kind": "param", "label": "missing", "state": "owner_name_mismatch",
+      "candidates": [
+        {"rank": 0, "wins": false, "value": true, "mechanism": "yaml_base", "profile": "profile:demo",
+         "source": {"file": "file:@repo|crates/rosio-lsp/tests/fixtures/params.yaml", "line_hint": 7}}
+      ]
+    },
+    "param:/example|unused": {
+      "kind": "param", "label": "unused", "state": "inert_by_design",
+      "candidates": [
+        {"rank": 0, "wins": false, "value": false, "mechanism": "yaml_base", "profile": "profile:demo",
+         "source": {"file": "file:@repo|crates/rosio-lsp/tests/fixtures/params.yaml", "line_hint": 8}}
+      ]
+    }
+  }
+}

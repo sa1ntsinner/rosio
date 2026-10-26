@@ -1,0 +1,10 @@
+# Source of the RewrittenYaml stand in. autostart exists, so its rewrite lands. There is
+# no use_sim_time key anywhere, so that rewrite is a silent no op. anchor_tag is a string,
+# and rewriting it with a value containing a dot changes its type under convert_types.
+rewritten_node:
+  ros__parameters:
+    autostart: true
+    anchor_tag: "v1"
+    controller_frequency: 20.0
+    nested:
+      autostart: true

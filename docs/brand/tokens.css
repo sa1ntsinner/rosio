@@ -1,0 +1,38 @@
+/* rosio brand tokens. tokens.json holds the same values for tools that are not CSS. */
+:root {
+  /* the two grounds alternate as whole fields; neither is a tint of the other */
+  --rosio-night: #0d1017;
+  --rosio-chalk: #f6f7f5;
+
+  /* ink is the other ground's partner, never pure black or white */
+  --rosio-ink-on-night: #dfe4ec;
+  --rosio-ink-on-chalk: #11151c;
+  --rosio-quiet-on-night: #98a1b0;
+  --rosio-quiet-on-chalk: #565e6b;
+
+  /* one step of tone separates a surface from its ground */
+  --rosio-night-raised: #161b24;
+  --rosio-chalk-sunk: #eceeea;
+
+  /* drift: the one accent, for the slid bar of the mark and the one action on a screen */
+  --rosio-drift: #6aa3f8;
+  --rosio-drift-on-chalk: #2f6bd3;
+
+  /* the four layers, one set per ground at even lightness; a layer colour always travels with its name */
+  --rosio-declared-on-night: #ad6800;
+  --rosio-coded-on-night: #00a1c6;
+  --rosio-observed-on-night: #00915d;
+  --rosio-recorded-on-night: #ce5b8c;
+  --rosio-declared-on-chalk: #a66000;
+  --rosio-coded-on-chalk: #0090af;
+  --rosio-observed-on-chalk: #008648;
+  --rosio-recorded-on-chalk: #c65690;
+
+  /* severity always travels with its word or icon, never colour alone */
+  --rosio-error: #d03b3b;
+  --rosio-warn: #e0a019;
+  --rosio-info: #8a93a3;
+
+  --rosio-face: "Bricolage Grotesque", system-ui, sans-serif;
+  --rosio-code: "JetBrains Mono", ui-monospace, monospace; /* taste-skill-ignore: code only */
+}

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rosio brand kit</title>
+<meta name="description" content="The rosio mark, wordmark, colour, type and voice, and how they show in the editor, the terminal and the atlas.">
+<link rel="icon" href="app-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet"><!-- taste-skill-ignore: JetBrains Mono sets the real code block only -->
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="brand.css">
+</head>
+<body>
+<header class="bar" data-ink="night">
+  <a class="home" href="#top" aria-label="rosio brand kit, top"><img src="lockup-on-dark.svg" alt="rosio" class="on-night"><img src="lockup.svg" alt="rosio" class="on-chalk"></a>
+  <nav>
+    <a href="#mark">Mark</a>
+    <a href="#colour">Colour</a>
+    <a href="#type">Type</a>
+    <a href="#voice">Voice</a>
+    <a class="action" href="#files">Files</a>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero night" data-ink="night">
+    <h1 class="sentence">
+      <span>Your robot, in</span>
+      <button class="inline-mark" type="button" aria-pressed="false" aria-label="Four layers. Press to line the third one up.">
+        <svg viewBox="3 4 26 24" aria-hidden="true"><rect x="3.5" y="4.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="10.5" width="19" height="5" rx="1.3"/><rect class="slid" x="9.5" y="16.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="22.5" width="19" height="5" rx="1.3"/></svg>
+      </button>
+      <span>layers.</span>
+    </h1>
+    <div class="hero-strata" aria-hidden="true">
+      <span style="--c: var(--rosio-declared-on-night)">declared</span>
+      <span style="--c: var(--rosio-coded-on-night)">coded</span>
+      <span class="moved" style="--c: var(--rosio-observed-on-night)">observed</span>
+      <span style="--c: var(--rosio-recorded-on-night)">recorded</span>
+    </div>
+    <div class="hero-foot">
+      <p class="lead">The rosio brand kit: the mark, the wordmark, colour, type and voice, and how they look in the editor, the terminal and the atlas.</p>
+      <p class="state" aria-live="polite">The third layer is out of line: what runs is not what the launch file says.</p>
+    </div>
+  </section>
+
+  <section class="chalk split" id="mark" data-ink="chalk">
+    <div class="say">
+      <h2>The mark</h2>
+      <p>Four layers of one system, top to bottom: what the repository declares, what the code does, what a running robot reports and what a recording holds. The third one sits out of line. That offset is the whole product: rosio finds the layer that disagrees.</p>
+      <ul class="facts">
+        <li>Drawn on a 32 unit square: bars 19 by 5, corner 1.3, one unit apart, the third moved six units right.</li>
+        <li>Only the moved bar takes the drift colour. The other three are ink.</li>
+        <li>Clear space on every side is one bar height. Smallest size is 16 pixels, where it stays legible as four bars.</li>
+        <li>Never rotate it, outline it, recolour the other bars or move a different one.</li>
+      </ul>
+    </div>
+    <figure class="mark-sizes">
+      <div class="big"><img src="mark.svg" alt="The rosio mark at 256 pixels"></div>
+      <div class="row">
+        <img src="mark.svg" alt="" width="64" height="64">
+        <img src="mark.svg" alt="" width="32" height="32">
+        <img src="mark.svg" alt="" width="16" height="16">
+        <img src="app-icon.svg" alt="" width="64" height="64">
+      </div>
+      <figcaption>256, 64, 32 and 16 pixels, and the app icon on its night tile.</figcaption>
+    </figure>
+  </section>
+
+  <section class="night lockups" data-ink="night">
+    <h2>Wordmark and lockup</h2>
+    <p class="wide-lock"><img src="lockup-on-dark.svg" alt="The rosio lockup on night"></p>
+    <div class="cols">
+      <p>The name is always lower case: rosio. It is set in Bricolage Grotesque at weight 600 with tracking pulled in by three hundredths of an em, and drawn as outlines so it never depends on an installed font.</p>
+      <p>In the lockup the mark is exactly as tall as a capital letter, stands on the baseline and keeps a gap of four tenths of that height from the r. Use the wordmark alone where the mark is already on screen, for example beside the activity bar icon.</p>
+      <p><img src="lockup.svg" alt="The rosio lockup on chalk" class="lock-chalk"></p>
+    </div>
+  </section>
+
+  <section class="chalk colour" id="colour" data-ink="chalk">
+    <h2>Two grounds and one drift</h2>
+    <div class="fields">
+      <div class="field f-night"><b>Night</b><span>#0d1017, ink #dfe4ec</span></div>
+      <div class="field f-chalk"><b>Chalk</b><span>#f6f7f5, ink #11151c</span></div>
+      <div class="field f-drift"><b>Drift</b><span>#6aa3f8 on night, #2f6bd3 on chalk</span></div>
+    </div>
+    <p class="note">Night and chalk take turns as whole fields and serve as each other's ink. Drift appears twice at most on a screen: the moved bar of the mark and the one action. A surface steps one tone away from its ground; nothing is separated by a line or a shadow.</p>
+  </section>
+
+  <section class="night strata" data-ink="night">
+    <div class="say">
+      <h2>The four layers</h2>
+      <p>Wherever rosio draws a layer, in the atlas, the graph or a legend, it uses these colours, and the name always travels with the colour. The four share one lightness so no layer looks louder than another; every pair stays apart for red and green colour blindness when labelled, and each clears 3:1 against its ground.</p>
+    </div>
+    <div class="stack">
+      <div class="on-night-set">
+        <span style="--c: var(--rosio-declared-on-night)">declared</span>
+        <span style="--c: var(--rosio-coded-on-night)">coded</span>
+        <span class="moved" style="--c: var(--rosio-observed-on-night)">observed</span>
+        <span style="--c: var(--rosio-recorded-on-night)">recorded</span>
+      </div>
+      <div class="on-chalk-set">
+        <span style="--c: var(--rosio-declared-on-chalk)">declared</span>
+        <span style="--c: var(--rosio-coded-on-chalk)">coded</span>
+        <span class="moved" style="--c: var(--rosio-observed-on-chalk)">observed</span>
+        <span style="--c: var(--rosio-recorded-on-chalk)">recorded</span>
+      </div>
+    </div>
+    <dl class="severity">
+      <div><dt style="--c: var(--rosio-error)">error</dt><dd>fails the gate. Always with its word or icon.</dd></div>
+      <div><dt style="--c: var(--rosio-warn)">warn</dt><dd>worth a look before a release.</dd></div>
+      <div><dt style="--c: var(--rosio-info)">info</dt><dd>context, never a colour of alarm.</dd></div>
+    </dl>
+  </section>
+
+  <section class="chalk type" id="type" data-ink="chalk">
+    <h2>One face, and code</h2>
+    <p class="specimen">Declared, coded, observed, recorded.</p>
+    <div class="cols">
+      <p>Bricolage Grotesque does every visible job: headings at weight 600 with tight tracking, text at 400 with leading of one and a half. Its slightly drawn curves keep a technical page from reading like a spec sheet.</p>
+      <p><!-- taste-skill-ignore: names the code face --> JetBrains Mono appears only inside real code, commands and ids. A label, a caption or a number in running text is set in the face, with tabular figures where columns align.</p>
+<pre><code>rosio drift --fail-on error
+rosio param /controller_server use_sim_time</code></pre>
+    </div>
+  </section>
+
+  <section class="night use" data-ink="night">
+    <h2>In the editor and the atlas</h2>
+    <div class="shots">
+      <figure class="wide"><img src="../media/vscode-graph.jpg" alt="The system graph in VS Code: nodes, topics and the QoS of each link"><figcaption>The system graph. Library chrome stays the editor's own; rosio brings the layer colours and the drift accent.</figcaption></figure>
+      <figure><img src="../media/vscode-parameters.jpg" alt="The parameters view in VS Code with the winning value and every line it overrides"><figcaption>Parameters, each with the line that wins.</figcaption></figure>
+      <figure><img src="../media/node-card.jpg" alt="A node card in the atlas panel"><figcaption>A node card in the atlas panel.</figcaption></figure>
+      <figure><img src="../media/vscode-qos.jpg" alt="A QoS mismatch shown on the line that creates the subscription"><figcaption>A finding on the line that causes it.</figcaption></figure>
+    </div>
+    <p class="note">Inside VS Code the extension takes the editor's theme colours for text and surfaces and adds only the layer colours, severity and the mark. The terminal gets the same meanings from the plain ANSI set: yellow declared, cyan coded, green observed, magenta recorded, blue for drift, red and yellow for error and warn.</p>
+  </section>
+
+  <section class="chalk voice" id="voice" data-ink="chalk">
+    <h2>How rosio talks</h2>
+    <div class="rules">
+      <div><h3>Name the value and the file</h3><p class="was">Parameter configuration may be inconsistent.</p><p class="now">max_range is 8.0 in rover.yaml:4 and 12.0 in bringup.launch.py:31. The launch file wins.</p></div>
+      <div><h3>Say what to edit</h3><p class="was">Consider reviewing your remappings.</p><p class="now">Rename stop_distnce in rover.yaml:9 to stop_distance; no node declares the misspelt key.</p></div>
+      <div><h3>Admit what it cannot see</h3><p class="was">No publisher found.</p><p class="now">The topic name is built at run time in scan_filter.cpp:24, so rosio cannot tell who reads it.</p></div>
+    </div>
+    <p class="note">Short sentences, plain words, no exclamation marks, no hype. Every finding is one sentence a person or a small model can repeat as it stands.</p>
+  </section>
+</main>
+
+<footer class="night end" id="files" data-ink="night">
+  <div class="files">
+    <h2>Files</h2>
+    <ul>
+      <li><a href="mark.svg" download>mark.svg</a> and <a href="mark-on-dark.svg" download>mark-on-dark.svg</a></li>
+      <li><a href="mark-mono.svg" download>mark-mono.svg</a>, takes the current text colour</li>
+      <li><a href="app-icon.svg" download>app-icon.svg</a></li>
+      <li><a href="lockup.svg" download>lockup.svg</a> and <a href="lockup-on-dark.svg" download>lockup-on-dark.svg</a></li>
+      <li><a href="wordmark.svg" download>wordmark.svg</a> and <a href="wordmark-on-dark.svg" download>wordmark-on-dark.svg</a></li>
+      <li><a href="tokens.css" download>tokens.css</a> and <a href="tokens.json" download>tokens.json</a></li>
+    </ul>
+  </div>
+  <p class="name">rosio</p>
+  <p class="meta"><span>Apache 2.0</span><span>Fonts: Bricolage Grotesque and JetBrains Mono, SIL Open Font License<!-- taste-skill-ignore --></span><a href="#top">Back to top</a></p>
+</footer>
+<script src="brand.js" defer></script>
+</body>
+</html>

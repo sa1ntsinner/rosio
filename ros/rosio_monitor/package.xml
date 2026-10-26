@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rosio_monitor</name>
+  <version>0.1.0</version>
+  <description>Live header stamp and time source monitor for ROS 2, part of rosio</description>
+  <maintainer email="77459575+sa1ntsinner@users.noreply.github.com">Elmir</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
+  <!-- rosio has no rosdep key yet, install it with: pip install "rosio[stamps]" -->
+
+  <test_depend>sensor_msgs</test_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

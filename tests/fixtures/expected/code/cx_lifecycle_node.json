@@ -1,0 +1,155 @@
+{
+  "note": "A lifecycle node with an empty constructor body. Publishers and the subscription are created in on_configure, the timer in on_activate, so an extractor that walks only constructors finds nothing here. The publishers are LifecyclePublisher only because of the base class, not because of the call. cmd_vel_topic is declared through a user written wrapper, declareOrGetParameter, which is not part of the rclcpp API. line_hint is advisory and never compared.",
+  "package": "cx_nodes",
+  "path": "src/cx_nodes/src/cx_lifecycle_node.cpp",
+  "package_relative_path": "src/cx_lifecycle_node.cpp",
+  "language": "cpp",
+  "file_id": "file:cx_nodes|src/cx_lifecycle_node.cpp",
+  "declared_in_header": "src/cx_nodes/include/cx_nodes/cx_lifecycle_node.hpp",
+  "nodes": [
+    {
+      "name": "cx_bridge",
+      "name_source": "literal",
+      "node_id": null,
+      "node_id_reason": "the code states the name, the namespace comes from the declared layer, so no fqn is formed here",
+      "form": "lifecycle_node",
+      "base": "rclcpp_lifecycle::LifecycleNode",
+      "class": "cx_nodes::BridgeLifecycle",
+      "symbol": "cx_nodes::BridgeLifecycle::BridgeLifecycle",
+      "symbol_id": "sym:cx_nodes|src/cx_lifecycle_node.cpp|cx_nodes::BridgeLifecycle::BridgeLifecycle",
+      "line_hint": 26
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "\"/cx/bridge_odom\"",
+      "name": "/cx/bridge_odom",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "nav_msgs/msg/Odometry",
+      "type_id": "type:nav_msgs|msg|Odometry",
+      "qos": {
+        "raw": "10",
+        "form": "depth",
+        "history": "keep_last",
+        "depth": 10,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "publisher_kind": "lifecycle",
+      "owner_symbol": "cx_nodes::BridgeLifecycle::on_configure",
+      "line_hint": 34
+    },
+    {
+      "kind": "publisher",
+      "raw": "\"/cx/bridge_state\"",
+      "name": "/cx/bridge_state",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "std_msgs/msg/Bool",
+      "type_id": "type:std_msgs|msg|Bool",
+      "qos": {
+        "raw": "rclcpp::QoS(rclcpp::KeepLast(1)).transient_local()",
+        "form": "qos_object",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": "transient_local",
+        "preset": null
+      },
+      "publisher_kind": "lifecycle",
+      "owner_symbol": "cx_nodes::BridgeLifecycle::on_configure",
+      "line_hint": 35
+    },
+    {
+      "kind": "subscriber",
+      "raw": "cmd_vel_topic_",
+      "name": "/cx/cmd_vel",
+      "name_state": "resolved_from_parameter",
+      "absolute": true,
+      "from_parameter": "cmd_vel_topic",
+      "binding": "member",
+      "type": "geometry_msgs/msg/Twist",
+      "type_id": "type:geometry_msgs|msg|Twist",
+      "qos": {
+        "raw": "rclcpp::QoS(1)",
+        "form": "qos_object",
+        "history": "keep_last",
+        "depth": 1,
+        "reliability": null,
+        "durability": null,
+        "preset": null
+      },
+      "options_argument": "cmd_options",
+      "options_position": 4,
+      "owner_symbol": "cx_nodes::BridgeLifecycle::on_configure",
+      "line_hint": 40
+    },
+    {
+      "kind": "timer",
+      "raw": "std::chrono::milliseconds(50)",
+      "name": null,
+      "name_state": "not_applicable",
+      "period_s": 0.05,
+      "period_state": "literal",
+      "owner_symbol": "cx_nodes::BridgeLifecycle::on_activate",
+      "line_hint": 52
+    }
+  ],
+  "parameters": [
+    {
+      "name": "cmd_vel_topic",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "/cx/cmd_vel",
+      "api": "declare_parameter",
+      "via_wrapper": "cx_nodes::declareOrGetParameter",
+      "wrapper_kind": "user_declare_wrapper",
+      "owner_symbol": "cx_nodes::BridgeLifecycle::on_configure",
+      "reads": [],
+      "line_hint": 32
+    }
+  ],
+  "parameter_callbacks": [],
+  "plugin_parameters": [],
+  "lifecycle": {
+    "transitions_implemented": ["on_activate", "on_cleanup", "on_configure", "on_deactivate"],
+    "endpoints_created_in": {
+      "on_configure": ["/cx/bridge_odom", "/cx/bridge_state", "/cx/cmd_vel"],
+      "on_activate": ["timer"]
+    },
+    "constructor_body_empty": true
+  },
+  "wrappers": [
+    {
+      "symbol": "cx_nodes::declareOrGetParameter",
+      "kind": "user_declare_wrapper",
+      "detail": "a file local template whose body branches on has_parameter and calls declare_parameter or get_parameter. Calls to it are parameter declarations, and an extractor that knows only the rclcpp API loses the topic name that follows from it",
+      "line_hint": 16
+    }
+  ],
+  "tf": {
+    "broadcasts": [],
+    "lookups": []
+  },
+  "unresolved": [],
+  "counts": {
+    "endpoints": 4,
+    "publishers": 2,
+    "subscribers": 1,
+    "service_servers": 0,
+    "service_clients": 0,
+    "timers": 1,
+    "parameters": 1,
+    "unresolved": 0
+  },
+  "constructions": [
+    {
+      "class": "cx_nodes::BridgeLifecycle",
+      "owner_symbol": "main"
+    }
+  ]
+}

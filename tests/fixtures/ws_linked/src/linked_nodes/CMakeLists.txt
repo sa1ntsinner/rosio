@@ -1,0 +1,7 @@
+project(linked_nodes)
+set(library_name node_library)
+add_library(${library_name} src/filter.cpp src/navigation.cpp)
+add_executable(filter_node src/filter_main.cpp)
+add_executable(navigation_node src/navigation_main.cpp)
+target_link_libraries(filter_node ${library_name})
+target_link_libraries(navigation_node ${library_name})

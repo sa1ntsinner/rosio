@@ -1,0 +1,20 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "missing",
+  "entry": "src/lx_bringup/launch/env_required.launch.py",
+  "env": [],
+  "exceptions": [
+    {
+      "exc_type": "RuntimeError",
+      "message": "LX_ROOT must point at the fixture workspace root",
+      "path": "src/lx_bringup/launch/env_required.launch.py",
+      "phase": "describe"
+    }
+  ],
+  "loadable": true,
+  "nodes": [],
+  "note": "Case 11 without the environment variable. The exception is recorded against the file and the layer carries on. loadable stays true: the file is loadable, this run of it raised.",
+  "predicates": {},
+  "strategy": "executed"
+}

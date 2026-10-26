@@ -1,0 +1,101 @@
+{
+  "note": "Expected pluginlib table. A manifest is exported by package.xml, by CMake, or by both, and neither source alone is complete. When the <class> element has no name attribute the lookup name falls back to the type. line_hint is advisory and never compared.",
+  "package": "fx_plugins",
+  "manifests": [
+    {
+      "path": "src/fx_plugins/fx_absent_plugin.xml",
+      "exists": false,
+      "library": null,
+      "exported_by": ["package.xml"],
+      "export_tags": ["fx_core"],
+      "classes": []
+    },
+    {
+      "path": "src/fx_plugins/fx_layers_plugin.xml",
+      "exists": true,
+      "library": "fx_plugin_layers",
+      "library_built_here": true,
+      "exported_by": ["cmake", "package.xml"],
+      "export_tags": ["fx_core"],
+      "classes": [
+        {
+          "lookup_name": "fx_plugins/DecayLayer",
+          "type": "fx_plugins::DecayLayer",
+          "base_class": "fx_core::Layer",
+          "name_attribute_present": true,
+          "plugin_id": "plugin:fx_core::Layer|fx_plugins/DecayLayer"
+        },
+        {
+          "lookup_name": "fx_plugins::StaticLayer",
+          "type": "fx_plugins::StaticLayer",
+          "base_class": "fx_core::Layer",
+          "name_attribute_present": false,
+          "plugin_id": "plugin:fx_core::Layer|fx_plugins::StaticLayer"
+        }
+      ]
+    },
+    {
+      "path": "src/fx_plugins/fx_tools_plugin.xml",
+      "exists": true,
+      "library": "fx_missing_library",
+      "library_built_here": false,
+      "exported_by": ["cmake"],
+      "export_tags": ["fx_tools"],
+      "classes": [
+        {
+          "lookup_name": "fx_plugins/GoalTool",
+          "type": "fx_plugins::GoalTool",
+          "base_class": "fx_tools::Tool",
+          "name_attribute_present": true,
+          "plugin_id": "plugin:fx_tools::Tool|fx_plugins/GoalTool"
+        }
+      ]
+    }
+  ],
+  "package_xml_exports": [
+    {"tag": "fx_core", "attribute": "plugin", "value": "${prefix}/fx_layers_plugin.xml"},
+    {"tag": "fx_core", "attribute": "plugin", "value": "${prefix}/fx_absent_plugin.xml"}
+  ],
+  "cmake_exports": [
+    {"base_package": "fx_core", "file": "fx_layers_plugin.xml", "line_hint": 13},
+    {"base_package": "fx_tools", "file": "fx_tools_plugin.xml", "line_hint": 15}
+  ],
+  "source_export_macros": [
+    {
+      "type": "fx_plugins::DecayLayer",
+      "base_class": "fx_core::Layer",
+      "file": "src/fx_plugins/src/decay_layer.cpp",
+      "line_hint": 12,
+      "wrapped": false
+    },
+    {
+      "type": "fx_plugins::StaticLayer",
+      "base_class": "fx_core::Layer",
+      "file": "src/fx_plugins/src/static_layer.cpp",
+      "line_hint": 13,
+      "wrapped": true
+    }
+  ],
+  "expected_problems": [
+    {
+      "kind": "manifest_missing_on_disk",
+      "subject": "src/fx_plugins/fx_absent_plugin.xml",
+      "detail": "package.xml exports the file, nothing writes it"
+    },
+    {
+      "kind": "library_not_built",
+      "subject": "fx_missing_library",
+      "detail": "fx_tools_plugin.xml names a library no target in this workspace produces"
+    },
+    {
+      "kind": "manifest_not_in_package_xml",
+      "subject": "src/fx_plugins/fx_tools_plugin.xml",
+      "detail": "exported only by pluginlib_export_plugin_description_file, so a package.xml only scan misses it"
+    },
+    {
+      "kind": "lookup_name_defaulted_to_type",
+      "subject": "plugin:fx_core::Layer|fx_plugins::StaticLayer",
+      "detail": "the class element carries no name attribute"
+    }
+  ]
+}

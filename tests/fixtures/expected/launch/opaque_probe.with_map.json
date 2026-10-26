@@ -1,0 +1,74 @@
+{
+  "arg_declarations": [
+    {
+      "default": "",
+      "name": "map_base"
+    }
+  ],
+  "args": [
+    [
+      "map_base",
+      "<tmp>/yard"
+    ]
+  ],
+  "case": "with_map",
+  "entry": "src/lx_bringup/launch/opaque_probe.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "localization_slam",
+      "form": "node",
+      "fqn": "/slam_toolbox",
+      "gates": [],
+      "name": "slam_toolbox",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/slam.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        },
+        {
+          "kind": "inline_dict",
+          "note": "",
+          "order": 1,
+          "path": null,
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": [
+            [
+              "mode",
+              "localization"
+            ]
+          ]
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": null,
+      "remaps": [
+        {
+          "from": "/map",
+          "scope": "node",
+          "to": "/slam_map"
+        }
+      ]
+    }
+  ],
+  "note": "Case 3, the other branch. The test creates <map_base>.posegraph and passes map_base, so the executable and the override dict both change. Identity depends on a file on disk, which is why the predicate belongs in the run record.",
+  "predicates": {
+    "map_base.posegraph": true
+  },
+  "strategy": "executed"
+}

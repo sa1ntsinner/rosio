@@ -1,0 +1,79 @@
+{
+  "arg_declarations": [],
+  "args": [],
+  "case": "default",
+  "entry": "src/lx_bringup/launch/composition.launch.py",
+  "env": [],
+  "exceptions": [],
+  "loadable": true,
+  "nodes": [
+    {
+      "argv": [],
+      "conditions": [],
+      "container": "/sensor_container",
+      "executable": "",
+      "form": "composable_node",
+      "fqn": "/cloud_filter",
+      "gates": [],
+      "name": "cloud_filter",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [
+        {
+          "kind": "repo_file",
+          "note": "",
+          "order": 0,
+          "path": "src/lx_bringup/config/filter.yaml",
+          "rewrites": [],
+          "root_key": null,
+          "source_path": null,
+          "values": []
+        }
+      ],
+      "pkg": "lx_sensors",
+      "plugin_class": "lx_sensors::CloudFilter",
+      "remaps": [
+        {
+          "from": "input",
+          "scope": "node",
+          "to": "/points"
+        }
+      ]
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": null,
+      "executable": "component_container",
+      "form": "node",
+      "fqn": "/sensor_container",
+      "gates": [],
+      "name": "sensor_container",
+      "name_source": "literal",
+      "namespace": "/",
+      "params": [],
+      "pkg": "rclcpp_components",
+      "plugin_class": null,
+      "remaps": []
+    },
+    {
+      "argv": [],
+      "conditions": [],
+      "container": "/sensor_container",
+      "executable": "",
+      "form": "composable_node",
+      "fqn": "/scan/scan_maker",
+      "gates": [],
+      "name": "scan_maker",
+      "name_source": "literal",
+      "namespace": "/scan",
+      "params": [],
+      "pkg": "lx_sensors",
+      "plugin_class": "lx_sensors::ScanMaker",
+      "remaps": []
+    }
+  ],
+  "note": "Case 8. The container namespace is stated as the empty string, which resolves to root. The components take their namespace from launch_ros and not from the container, so the namespaced one is a sibling of the container. A component has no executable, and its path to code is the plugin lookup name.",
+  "predicates": {},
+  "strategy": "executed"
+}

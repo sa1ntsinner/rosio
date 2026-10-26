@@ -1,0 +1,12 @@
+# SHAPE 5: dotted names written directly under ros__parameters, next to the nested dict
+# form. Both must normalise to the same dotted parameter name.
+scan_relay:
+  ros__parameters:
+    ground.bins: 360
+    ground.max_slope: 8.0
+    obstacle:
+      voxel: 0.12
+      cluster_tolerance: 0.35
+    # A bare key with no value. yaml resolves it to null, which is not the same as an
+    # empty string and not the same as an absent key.
+    ground.ceiling_m:

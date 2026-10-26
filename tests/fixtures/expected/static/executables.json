@@ -1,0 +1,115 @@
+{
+  "note": "Expected executable to source mapping. `mechanism` says which declaration produced the name: add_executable, the EXECUTABLE clause of rclcpp_components_register_node, or a setup.py console_scripts entry. fx_gamma_node has no main() anywhere, its name exists only in CMakeLists, so an inventory built from files with main() misses it. fx_watch shows that the executable name need not match the module name.",
+  "executables": {
+    "exe:fx_cpp_nodes|fx_alpha_node": {
+      "package": "fx_cpp_nodes",
+      "name": "fx_alpha_node",
+      "mechanism": "add_executable",
+      "declared_in": "src/fx_cpp_nodes/CMakeLists.txt",
+      "line_hint": 12,
+      "target": "fx_alpha_node",
+      "sources": ["src/fx_cpp_nodes/src/fx_alpha_main.cpp"],
+      "has_main": true,
+      "installed": true,
+      "dependencies": ["fx_msgs", "rclcpp", "rclcpp_components", "std_msgs"]
+    },
+    "exe:fx_cpp_nodes|fx_beta_node": {
+      "package": "fx_cpp_nodes",
+      "name": "fx_beta_node",
+      "mechanism": "add_executable",
+      "declared_in": "src/fx_cpp_nodes/CMakeLists.txt",
+      "line_hint": 19,
+      "target": "fx_beta_node",
+      "sources": ["src/fx_cpp_nodes/src/fx_beta_main.cpp"],
+      "linked_targets": ["fx_beta_component"],
+      "has_main": true,
+      "installed": true,
+      "dependencies": ["fx_msgs", "rclcpp", "rclcpp_components", "std_msgs"]
+    },
+    "exe:fx_cpp_nodes|fx_gamma_node": {
+      "package": "fx_cpp_nodes",
+      "name": "fx_gamma_node",
+      "mechanism": "rclcpp_components_register_node",
+      "declared_in": "src/fx_cpp_nodes/CMakeLists.txt",
+      "line_hint": 25,
+      "target": "fx_gamma_component",
+      "sources": ["src/fx_cpp_nodes/src/fx_gamma_node.cpp"],
+      "has_main": false,
+      "installed": false,
+      "dependencies": ["rclcpp", "rclcpp_components"]
+    },
+    "exe:fx_py_nodes|fx_report": {
+      "package": "fx_py_nodes",
+      "name": "fx_report",
+      "mechanism": "console_scripts",
+      "declared_in": "src/fx_py_nodes/setup.py",
+      "module": "fx_py_nodes.report_node",
+      "entry": "main",
+      "sources": ["src/fx_py_nodes/fx_py_nodes/report_node.py"],
+      "has_main": true,
+      "installed": true
+    },
+    "exe:fx_py_nodes|fx_watch": {
+      "package": "fx_py_nodes",
+      "name": "fx_watch",
+      "mechanism": "console_scripts",
+      "declared_in": "src/fx_py_nodes/setup.py",
+      "module": "fx_py_nodes.watchdog",
+      "entry": "main",
+      "sources": ["src/fx_py_nodes/fx_py_nodes/watchdog.py"],
+      "has_main": true,
+      "installed": true
+    }
+  },
+  "components": {
+    "fx_cpp_nodes::BetaNode": {
+      "package": "fx_cpp_nodes",
+      "mechanism": "rclcpp_components_register_nodes",
+      "declared_in": "src/fx_cpp_nodes/CMakeLists.txt",
+      "line_hint": 17,
+      "target": "fx_beta_component",
+      "sources": ["src/fx_cpp_nodes/src/fx_beta_node.cpp"],
+      "macro_line_hint": 14,
+      "executable": null
+    },
+    "fx_cpp_nodes::GammaNode": {
+      "package": "fx_cpp_nodes",
+      "mechanism": "rclcpp_components_register_node",
+      "declared_in": "src/fx_cpp_nodes/CMakeLists.txt",
+      "line_hint": 25,
+      "target": "fx_gamma_component",
+      "sources": ["src/fx_cpp_nodes/src/fx_gamma_node.cpp"],
+      "macro_line_hint": 15,
+      "executable": "fx_gamma_node"
+    }
+  },
+  "libraries": {
+    "fx_plugin_layers": {
+      "package": "fx_plugins",
+      "declared_in": "src/fx_plugins/CMakeLists.txt",
+      "line_hint": 8,
+      "sources": [
+        "src/fx_plugins/src/decay_layer.cpp",
+        "src/fx_plugins/src/static_layer.cpp"
+      ],
+      "installed": true
+    },
+    "fx_beta_component": {
+      "package": "fx_cpp_nodes",
+      "declared_in": "src/fx_cpp_nodes/CMakeLists.txt",
+      "line_hint": 15,
+      "sources": ["src/fx_cpp_nodes/src/fx_beta_node.cpp"],
+      "installed": true
+    },
+    "fx_gamma_component": {
+      "package": "fx_cpp_nodes",
+      "declared_in": "src/fx_cpp_nodes/CMakeLists.txt",
+      "line_hint": 23,
+      "sources": ["src/fx_cpp_nodes/src/fx_gamma_node.cpp"],
+      "installed": true
+    }
+  },
+  "python_modules_without_executable": [
+    "src/fx_py_nodes/fx_py_nodes/tools.py"
+  ]
+}

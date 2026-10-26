@@ -1,0 +1,5 @@
+# Not a parameter file: the document root is a list.
+- ros1_package_name: lx_sensors
+  ros2_package_name: lx_sensors
+- ros1_package_name: lx_bringup
+  ros2_package_name: lx_bringup

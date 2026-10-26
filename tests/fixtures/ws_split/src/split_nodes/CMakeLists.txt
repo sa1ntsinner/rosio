@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.8)
+project(split_nodes)
+foreach(target stated default constant argv filter)
+  add_executable(${target}_node src/${target}_main.cpp src/nodes.cpp)
+  target_include_directories(${target}_node PUBLIC include)
+endforeach()

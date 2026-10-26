@@ -1,0 +1,8 @@
+# Fixture workspace. These modules have to look like real rclpy nodes, which means unused
+# callback arguments, os.environ reads and endpoints kept alive only as attributes. Rewriting
+# them to satisfy the repository lint would stop the fixture reproducing the thing under test.
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "W", "I", "N", "UP", "C4", "TID"]

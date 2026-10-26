@@ -1,0 +1,904 @@
+{
+  "entry": "src/lx_bringup/launch/nav_stack.launch.py",
+  "note": "Expected candidate chains for the parameter zoo. Every owner is a node from nav_stack.launch.py with an explicit name and namespace, so no chain depends on a name resolution table.",
+  "owners": [
+    {
+      "fqn": "/controller_server",
+      "sources": [
+        "src/lx_bringup/config/zoo_base.yaml",
+        "src/lx_bringup/config/zoo_overlay.yaml",
+        "<inline:use_sim_time>"
+      ]
+    },
+    {
+      "fqn": "/lifecycle_manager_navigation",
+      "sources": [
+        "<inline:lifecycle>"
+      ]
+    },
+    {
+      "fqn": "/local_costmap/local_costmap",
+      "sources": [
+        "src/lx_bringup/config/zoo_base.yaml",
+        "src/lx_bringup/config/zoo_overlay.yaml"
+      ]
+    },
+    {
+      "fqn": "/map_server",
+      "sources": [
+        "src/lx_bringup/config/zoo_base.yaml"
+      ]
+    },
+    {
+      "fqn": "/ouster/os_driver",
+      "sources": [
+        "src/lx_bringup/config/zoo_node_wildcard.yaml",
+        "src/lx_bringup/config/zoo_wildcard.yaml"
+      ]
+    },
+    {
+      "fqn": "/scan_relay",
+      "sources": [
+        "src/lx_bringup/config/zoo_dotted.yaml",
+        "src/lx_bringup/config/zoo_wildcard.yaml"
+      ]
+    }
+  ],
+  "parameters": [
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "controller_server.ros__parameters.FollowPath.desired_linear_vel",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 1.2,
+          "wins": true
+        }
+      ],
+      "effective": 1.2,
+      "id": "param:/controller_server|FollowPath.desired_linear_vel",
+      "name": "FollowPath.desired_linear_vel",
+      "note": "The overlay swapped FollowPath.plugin and left this key alone, so it survives the merge and is handed to a controller that may never declare it. Declared side it is effective. Whether the selected plugin reads it is a plugin instance question.",
+      "owner": "/controller_server",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_overlay.yaml",
+          "locator": "controller_server.ros__parameters.FollowPath.lookahead_dist",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 2.4,
+          "wins": true
+        },
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "controller_server.ros__parameters.FollowPath.lookahead_dist",
+          "mechanism": "yaml_file",
+          "rank": 1,
+          "shadow_kind": "restated_identical",
+          "shadowed_by": "src/lx_bringup/config/zoo_overlay.yaml",
+          "value": 2.4,
+          "wins": false
+        }
+      ],
+      "effective": 2.4,
+      "id": "param:/controller_server|FollowPath.lookahead_dist",
+      "name": "FollowPath.lookahead_dist",
+      "note": "Restated with the identical value. Not a value change, still a maintenance trap.",
+      "owner": "/controller_server",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_overlay.yaml",
+          "locator": "controller_server.ros__parameters.FollowPath.plugin",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "lx_bringup/OrbitFollower",
+          "wins": true
+        },
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "controller_server.ros__parameters.FollowPath.plugin",
+          "mechanism": "yaml_file",
+          "rank": 1,
+          "shadow_kind": "overridden",
+          "shadowed_by": "src/lx_bringup/config/zoo_overlay.yaml",
+          "value": "lx_bringup/PathFollower",
+          "wins": false
+        }
+      ],
+      "effective": "lx_bringup/OrbitFollower",
+      "id": "param:/controller_server|FollowPath.plugin",
+      "name": "FollowPath.plugin",
+      "note": "The plugin selector itself. Swapping it changes which sub keys of the block are live.",
+      "owner": "/controller_server",
+      "state": "effective",
+      "type": "str"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_overlay.yaml",
+          "locator": "controller_server.ros__parameters.FollowPath.state_timeout",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 0.4,
+          "wins": true
+        }
+      ],
+      "effective": 0.4,
+      "id": "param:/controller_server|FollowPath.state_timeout",
+      "name": "FollowPath.state_timeout",
+      "note": "A key the base never had. The merge inserts it rather than rejecting it.",
+      "owner": "/controller_server",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "controller_server.ros__parameters.FollowPath_DISABLED.plugin",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "lx_bringup/MppiFollower",
+          "wins": false
+        }
+      ],
+      "effective": null,
+      "id": "param:/controller_server|FollowPath_DISABLED.plugin",
+      "name": "FollowPath_DISABLED.plugin",
+      "note": "The block key is not in controller_plugins, so nothing reads it. It has a candidate and no effective value. Reporting it as configured is wrong, reporting it as an unknown key is also wrong.",
+      "owner": "/controller_server",
+      "state": "inert_by_design",
+      "type": "str"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_overlay.yaml",
+          "locator": "controller_server.ros__parameters.controller_frequency",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 20.0,
+          "wins": true
+        },
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "controller_server.ros__parameters.controller_frequency",
+          "mechanism": "yaml_file",
+          "rank": 1,
+          "shadow_kind": "restated_identical",
+          "shadowed_by": "src/lx_bringup/config/zoo_overlay.yaml",
+          "value": 20.0,
+          "wins": false
+        }
+      ],
+      "effective": 20.0,
+      "id": "param:/controller_server|controller_frequency",
+      "name": "controller_frequency",
+      "note": "The commented out 5.0 in the base file is not a candidate. A commented value has no candidate at all.",
+      "owner": "/controller_server",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "controller_server.ros__parameters.controller_plugins",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": [
+            "FollowPath"
+          ],
+          "wins": true
+        }
+      ],
+      "effective": [
+        "FollowPath"
+      ],
+      "id": "param:/controller_server|controller_plugins",
+      "name": "controller_plugins",
+      "note": "The selector list that gates the two FollowPath blocks.",
+      "owner": "/controller_server",
+      "state": "effective",
+      "type": "list"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "controller_server.ros__parameters.goal_checker.xy_goal_tolerance",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 0.25,
+          "wins": true
+        }
+      ],
+      "effective": 0.25,
+      "id": "param:/controller_server|goal_checker.xy_goal_tolerance",
+      "name": "goal_checker.xy_goal_tolerance",
+      "note": "Nested dict in yaml, one dotted name after normalisation.",
+      "owner": "/controller_server",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/launch/nav_stack.launch.py",
+          "locator": "Node(controller_server).parameters[2]",
+          "mechanism": "launch_inline",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": false,
+          "wins": true
+        }
+      ],
+      "effective": false,
+      "id": "param:/controller_server|use_sim_time",
+      "name": "use_sim_time",
+      "note": "Neither yaml file carries use_sim_time, so the inline dict is the only candidate. launch_ros inferred the boolean from the argument text.",
+      "owner": "/controller_server",
+      "state": "effective",
+      "type": "bool"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "local_costmap.local_costmap.ros__parameters.footprint",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "[[-0.48, -0.31], [0.48, -0.31], [0.48, 0.31], [-0.48, 0.31]]",
+          "wins": true
+        }
+      ],
+      "effective": "[[-0.48, -0.31], [0.48, -0.31], [0.48, 0.31], [-0.48, 0.31]]",
+      "id": "param:/local_costmap/local_costmap|footprint",
+      "name": "footprint",
+      "note": "A list delivered as a string. Type comparing it against a vector default is not drift.",
+      "owner": "/local_costmap/local_costmap",
+      "state": "effective",
+      "type": "str"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "local_costmap.local_costmap.ros__parameters.height",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 20,
+          "wins": true
+        }
+      ],
+      "effective": 20,
+      "id": "param:/local_costmap/local_costmap|height",
+      "name": "height",
+      "note": "An int stays an int. Turning 20 into 20.0 is a phantom drift on its own.",
+      "owner": "/local_costmap/local_costmap",
+      "state": "effective",
+      "type": "int"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "local_costmap.local_costmap.ros__parameters.obstacle_layer.max_obstacle_height",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 2.0,
+          "wins": true
+        }
+      ],
+      "effective": 2.0,
+      "id": "param:/local_costmap/local_costmap|obstacle_layer.max_obstacle_height",
+      "name": "obstacle_layer.max_obstacle_height",
+      "note": "",
+      "owner": "/local_costmap/local_costmap",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_overlay.yaml",
+          "locator": "local_costmap.local_costmap.ros__parameters.plugins",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": [
+            "obstacle_layer",
+            "static_layer",
+            "inflation_layer"
+          ],
+          "wins": true
+        },
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "local_costmap.local_costmap.ros__parameters.plugins",
+          "mechanism": "yaml_file",
+          "rank": 1,
+          "shadow_kind": "overridden",
+          "shadowed_by": "src/lx_bringup/config/zoo_overlay.yaml",
+          "value": [
+            "obstacle_layer",
+            "inflation_layer"
+          ],
+          "wins": false
+        }
+      ],
+      "effective": [
+        "obstacle_layer",
+        "static_layer",
+        "inflation_layer"
+      ],
+      "id": "param:/local_costmap/local_costmap|plugins",
+      "name": "plugins",
+      "note": "A list replaces the whole value. There is no element wise merge.",
+      "owner": "/local_costmap/local_costmap",
+      "state": "effective",
+      "type": "list"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "local_costmap.local_costmap.ros__parameters.update_frequency",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 5.0,
+          "wins": true
+        }
+      ],
+      "effective": 5.0,
+      "id": "param:/local_costmap/local_costmap|update_frequency",
+      "name": "update_frequency",
+      "note": "",
+      "owner": "/local_costmap/local_costmap",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_overlay.yaml",
+          "locator": "local_costmap.local_costmap.ros__parameters.width",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 40,
+          "wins": true
+        },
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "local_costmap.local_costmap.ros__parameters.width",
+          "mechanism": "yaml_file",
+          "rank": 1,
+          "shadow_kind": "overridden",
+          "shadowed_by": "src/lx_bringup/config/zoo_overlay.yaml",
+          "value": 20,
+          "wins": false
+        }
+      ],
+      "effective": 40,
+      "id": "param:/local_costmap/local_costmap|width",
+      "name": "width",
+      "note": "The depth three shape resolves to the same owner as any other node key.",
+      "owner": "/local_costmap/local_costmap",
+      "state": "effective",
+      "type": "int"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "map_server.ros__parameters.save_map_timeout",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 10.0,
+          "wins": true
+        }
+      ],
+      "effective": 10.0,
+      "id": "param:/map_server|save_map_timeout",
+      "name": "save_map_timeout",
+      "note": "",
+      "owner": "/map_server",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "map_server.ros__parameters.yaml_filename",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "",
+          "wins": true
+        }
+      ],
+      "effective": "",
+      "id": "param:/map_server|yaml_filename",
+      "name": "yaml_filename",
+      "note": "An explicit empty string is a value, not an absent key and not unset.",
+      "owner": "/map_server",
+      "state": "effective",
+      "type": "str"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_node_wildcard.yaml",
+          "locator": "/**/os_driver.ros__parameters.azimuth_window",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": [
+            0,
+            360000
+          ],
+          "wins": true
+        }
+      ],
+      "effective": [
+        0,
+        360000
+      ],
+      "id": "param:/ouster/os_driver|azimuth_window",
+      "name": "azimuth_window",
+      "note": "",
+      "owner": "/ouster/os_driver",
+      "state": "effective",
+      "type": "list"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_wildcard.yaml",
+          "locator": "/**.ros__parameters.diagnostics.publish_period",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 1.0,
+          "wins": true
+        }
+      ],
+      "effective": 1.0,
+      "id": "param:/ouster/os_driver|diagnostics.publish_period",
+      "name": "diagnostics.publish_period",
+      "note": "",
+      "owner": "/ouster/os_driver",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_wildcard.yaml",
+          "locator": "/**.ros__parameters.diagnostics.window_sec",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 5.0,
+          "wins": true
+        }
+      ],
+      "effective": 5.0,
+      "id": "param:/ouster/os_driver|diagnostics.window_sec",
+      "name": "diagnostics.window_sec",
+      "note": "One wildcard line owns this key for every node the file is handed to.",
+      "owner": "/ouster/os_driver",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_node_wildcard.yaml",
+          "locator": "/**/os_driver.ros__parameters.imu_frame",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "os_imu",
+          "wins": true
+        }
+      ],
+      "effective": "os_imu",
+      "id": "param:/ouster/os_driver|imu_frame",
+      "name": "imu_frame",
+      "note": "",
+      "owner": "/ouster/os_driver",
+      "state": "effective",
+      "type": "str"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_node_wildcard.yaml",
+          "locator": "/**/os_driver.ros__parameters.lidar_frame",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "os_lidar",
+          "wins": true
+        }
+      ],
+      "effective": "os_lidar",
+      "id": "param:/ouster/os_driver|lidar_frame",
+      "name": "lidar_frame",
+      "note": "",
+      "owner": "/ouster/os_driver",
+      "state": "effective",
+      "type": "str"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_node_wildcard.yaml",
+          "locator": "/**/os_driver.ros__parameters.lidar_mode",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "1024x10",
+          "wins": true
+        }
+      ],
+      "effective": "1024x10",
+      "id": "param:/ouster/os_driver|lidar_mode",
+      "name": "lidar_mode",
+      "note": "The wildcard prefixed key matches the node in the ouster namespace. The locator is the wildcard key itself, so one deletable line stays one finding.",
+      "owner": "/ouster/os_driver",
+      "state": "effective",
+      "type": "str"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_node_wildcard.yaml",
+          "locator": "/**/os_driver.ros__parameters.metadata",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": "",
+          "wins": true
+        }
+      ],
+      "effective": "",
+      "id": "param:/ouster/os_driver|metadata",
+      "name": "metadata",
+      "note": "",
+      "owner": "/ouster/os_driver",
+      "state": "effective",
+      "type": "str"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_wildcard.yaml",
+          "locator": "/**.ros__parameters.use_sim_time",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": false,
+          "wins": true
+        }
+      ],
+      "effective": false,
+      "id": "param:/ouster/os_driver|use_sim_time",
+      "name": "use_sim_time",
+      "note": "",
+      "owner": "/ouster/os_driver",
+      "state": "effective",
+      "type": "bool"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_wildcard.yaml",
+          "locator": "/**.ros__parameters.diagnostics.publish_period",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 1.0,
+          "wins": true
+        }
+      ],
+      "effective": 1.0,
+      "id": "param:/scan_relay|diagnostics.publish_period",
+      "name": "diagnostics.publish_period",
+      "note": "The same wildcard line owns one parameter per node, and both are real.",
+      "owner": "/scan_relay",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_wildcard.yaml",
+          "locator": "/**.ros__parameters.diagnostics.window_sec",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 5.0,
+          "wins": true
+        }
+      ],
+      "effective": 5.0,
+      "id": "param:/scan_relay|diagnostics.window_sec",
+      "name": "diagnostics.window_sec",
+      "note": "",
+      "owner": "/scan_relay",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_dotted.yaml",
+          "locator": "scan_relay.ros__parameters.ground.bins",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 360,
+          "wins": true
+        }
+      ],
+      "effective": 360,
+      "id": "param:/scan_relay|ground.bins",
+      "name": "ground.bins",
+      "note": "A dotted key written directly under ros__parameters.",
+      "owner": "/scan_relay",
+      "state": "effective",
+      "type": "int"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_dotted.yaml",
+          "locator": "scan_relay.ros__parameters.ground.ceiling_m",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": null,
+          "wins": true
+        }
+      ],
+      "effective": null,
+      "id": "param:/scan_relay|ground.ceiling_m",
+      "name": "ground.ceiling_m",
+      "note": "A bare key with no value. yaml resolves it to null, which is neither an empty string nor an absent key.",
+      "owner": "/scan_relay",
+      "state": "effective",
+      "type": "null"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_dotted.yaml",
+          "locator": "scan_relay.ros__parameters.ground.max_slope",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 8.0,
+          "wins": true
+        }
+      ],
+      "effective": 8.0,
+      "id": "param:/scan_relay|ground.max_slope",
+      "name": "ground.max_slope",
+      "note": "",
+      "owner": "/scan_relay",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_dotted.yaml",
+          "locator": "scan_relay.ros__parameters.obstacle.cluster_tolerance",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 0.35,
+          "wins": true
+        }
+      ],
+      "effective": 0.35,
+      "id": "param:/scan_relay|obstacle.cluster_tolerance",
+      "name": "obstacle.cluster_tolerance",
+      "note": "",
+      "owner": "/scan_relay",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_dotted.yaml",
+          "locator": "scan_relay.ros__parameters.obstacle.voxel",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": 0.12,
+          "wins": true
+        }
+      ],
+      "effective": 0.12,
+      "id": "param:/scan_relay|obstacle.voxel",
+      "name": "obstacle.voxel",
+      "note": "Nested dict form of the same dotted name space as ground.max_slope above.",
+      "owner": "/scan_relay",
+      "state": "effective",
+      "type": "float"
+    },
+    {
+      "block_key": null,
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_wildcard.yaml",
+          "locator": "/**.ros__parameters.use_sim_time",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": false,
+          "wins": true
+        }
+      ],
+      "effective": false,
+      "id": "param:/scan_relay|use_sim_time",
+      "name": "use_sim_time",
+      "note": "",
+      "owner": "/scan_relay",
+      "state": "effective",
+      "type": "bool"
+    },
+    {
+      "block_key": "lifecycle_manager",
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "lifecycle_manager.ros__parameters.autostart",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": true,
+          "wins": false
+        }
+      ],
+      "effective": null,
+      "id": null,
+      "name": "autostart",
+      "note": "No node is launched with the name lifecycle_manager. The block is parsed and dropped, so there is no owner node and no effective value. The launched lifecycle_manager_navigation gets an inline dict instead.",
+      "owner": null,
+      "state": "owner_name_mismatch",
+      "type": "bool"
+    },
+    {
+      "block_key": "lifecycle_manager",
+      "candidates": [
+        {
+          "file": "src/lx_bringup/config/zoo_base.yaml",
+          "locator": "lifecycle_manager.ros__parameters.node_names",
+          "mechanism": "yaml_file",
+          "rank": 0,
+          "shadow_kind": null,
+          "shadowed_by": null,
+          "value": [
+            "controller_server",
+            "velocity_smoother"
+          ],
+          "wins": false
+        }
+      ],
+      "effective": null,
+      "id": null,
+      "name": "node_names",
+      "note": "The dropped list names velocity_smoother, the inline list the launched manager really gets does not. Only the inline list has any effect.",
+      "owner": null,
+      "state": "owner_name_mismatch",
+      "type": "list"
+    }
+  ],
+  "profile": "navigation_zoo",
+  "rules": [
+    "A candidate is one (source, key) pair that supplies a value for one owner and name.",
+    "Rank 0 is the winner. Ranks follow the parameters list order, latest source first.",
+    "A later source in the list wins per leaf. A list value is replaced whole, never merged.",
+    "A key matches an owner by exact fully qualified name, by /**, or by /**/<node> where the wildcard covers zero or more namespace levels including the root namespace.",
+    "Dotted keys and nested dicts normalise to the same dotted name before any comparison.",
+    "A commented out value is not a candidate.",
+    "state is effective only when an owner node exists and the block is live.",
+    "Types are preserved exactly: an int stays an int and a float stays a float."
+  ]
+}

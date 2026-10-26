@@ -1,0 +1,273 @@
+{
+  "note": "TF in both directions and a node whose name is a constructor argument. The three tf2_ros wrapper types create real endpoints that no create_publisher or create_subscription call names, so they are recorded with via_known_wrapper and never as ordinary endpoints. Frame names are normalised without a leading slash. line_hint is advisory and never compared.",
+  "package": "cx_nodes",
+  "path": "src/cx_nodes/src/cx_tf_node.cpp",
+  "package_relative_path": "src/cx_tf_node.cpp",
+  "language": "cpp",
+  "file_id": "file:cx_nodes|src/cx_tf_node.cpp",
+  "nodes": [
+    {
+      "name": null,
+      "name_source": "argv",
+      "node_id": null,
+      "node_id_reason": "the base constructor is handed a constructor argument, so the code states no name",
+      "form": "node",
+      "base": "rclcpp::Node",
+      "class": "cx_nodes::TfNode",
+      "symbol": "cx_nodes::TfNode::TfNode",
+      "symbol_id": "sym:cx_nodes|src/cx_tf_node.cpp|cx_nodes::TfNode::TfNode",
+      "unresolved_ref": "node_name:node_name",
+      "line_hint": 21
+    }
+  ],
+  "endpoints": [
+    {
+      "kind": "publisher",
+      "raw": "tf2_ros::TransformBroadcaster(*this)",
+      "name": "/tf",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "tf2_msgs/msg/TFMessage",
+      "type_id": "type:tf2_msgs|msg|TFMessage",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside tf2_ros, not in this source",
+      "via_known_wrapper": "tf2_ros::TransformBroadcaster",
+      "condition": "publish_tf",
+      "guard_parameters": [{"name": "publish_tf", "value": true}],
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "line_hint": 29
+    },
+    {
+      "kind": "publisher",
+      "raw": "tf2_ros::StaticTransformBroadcaster(*this)",
+      "name": "/tf_static",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "tf2_msgs/msg/TFMessage",
+      "type_id": "type:tf2_msgs|msg|TFMessage",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside tf2_ros, not in this source",
+      "via_known_wrapper": "tf2_ros::StaticTransformBroadcaster",
+      "condition": null,
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "line_hint": 31
+    },
+    {
+      "kind": "subscriber",
+      "raw": "\"/cx/points\"",
+      "name": "/cx/points",
+      "name_state": "literal_absolute",
+      "absolute": true,
+      "type": "sensor_msgs/msg/PointCloud2",
+      "type_id": "type:sensor_msgs|msg|PointCloud2",
+      "qos": {
+        "raw": "rclcpp::SensorDataQoS()",
+        "form": "preset",
+        "preset": "sensor_data",
+        "history": null,
+        "depth": null,
+        "reliability": null,
+        "durability": null
+      },
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "line_hint": 36
+    },
+    {
+      "kind": "subscriber",
+      "raw": "tf2_ros::TransformListener(*buffer_)",
+      "name": "/tf",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "tf2_msgs/msg/TFMessage",
+      "type_id": "type:tf2_msgs|msg|TFMessage",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside tf2_ros, not in this source",
+      "via_known_wrapper": "tf2_ros::TransformListener",
+      "condition": null,
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "line_hint": 34
+    },
+    {
+      "kind": "subscriber",
+      "raw": "tf2_ros::TransformListener(*buffer_)",
+      "name": "/tf_static",
+      "name_state": "wrapper_constant",
+      "absolute": true,
+      "type": "tf2_msgs/msg/TFMessage",
+      "type_id": "type:tf2_msgs|msg|TFMessage",
+      "qos": null,
+      "qos_reason": "the profile is chosen inside tf2_ros, not in this source",
+      "via_known_wrapper": "tf2_ros::TransformListener",
+      "condition": null,
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "line_hint": 34
+    }
+  ],
+  "parameters": [
+    {
+      "name": "base_frame",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "base_footprint",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "reads": [],
+      "line_hint": 24
+    },
+    {
+      "name": "odom_frame",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "odom",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "reads": [],
+      "line_hint": 23
+    },
+    {
+      "name": "publish_tf",
+      "name_state": "literal",
+      "type": "bool",
+      "has_default": true,
+      "default": true,
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "reads": [],
+      "line_hint": 26
+    },
+    {
+      "name": "sensor_frame",
+      "name_state": "literal",
+      "type": "string",
+      "has_default": true,
+      "default": "cx_lidar",
+      "api": "declare_parameter",
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "reads": [],
+      "line_hint": 25
+    }
+  ],
+  "parameter_callbacks": [],
+  "plugin_parameters": [],
+  "tf": {
+    "broadcasts": [
+      {
+        "kind": "static",
+        "parent": "base_link",
+        "child": "cx_lidar",
+        "parent_state": "literal",
+        "child_state": "literal",
+        "broadcaster": "tf2_ros::StaticTransformBroadcaster",
+        "condition": null,
+        "owner_symbol": "cx_nodes::TfNode::sendMount",
+        "frame_ids": ["frame:base_link", "frame:cx_lidar"],
+        "line_hint": 56
+      },
+      {
+        "kind": "dynamic",
+        "parent": "odom",
+        "child": "base_footprint",
+        "parent_state": "resolved_from_parameter",
+        "child_state": "resolved_from_parameter",
+        "parent_from_parameter": "odom_frame",
+        "parent_expr": "odom_frame_",
+        "child_from_parameter": "base_frame",
+        "child_expr": "base_frame_",
+        "broadcaster": "tf2_ros::TransformBroadcaster",
+        "condition": "publish_tf",
+        "guard_parameters": [{"name": "publish_tf", "value": true}],
+        "owner_symbol": "cx_nodes::TfNode::sendOdom",
+        "frame_ids": ["frame:odom", "frame:base_footprint"],
+        "line_hint": 48
+      }
+    ],
+    "lookups": [
+      {
+        "api": "canTransform",
+        "target": "map",
+        "source": "odom",
+        "target_state": "literal",
+        "source_state": "resolved_from_parameter",
+        "source_from_parameter": "odom_frame",
+        "source_expr": "odom_frame_",
+        "owner_symbol": "cx_nodes::TfNode::onCloud",
+        "line_hint": 64
+      },
+      {
+        "api": "lookupTransform",
+        "target": "base_footprint",
+        "source": "cx_lidar",
+        "target_state": "resolved_from_parameter",
+        "source_state": "resolved_from_parameter",
+        "target_from_parameter": "base_frame",
+        "target_expr": "base_frame_",
+        "source_from_parameter": "sensor_frame",
+        "source_expr": "sensor_frame_",
+        "owner_symbol": "cx_nodes::TfNode::onCloud",
+        "line_hint": 62
+      },
+      {
+        "api": "lookupTransform",
+        "target": "base_footprint",
+        "source": null,
+        "target_state": "resolved_from_parameter",
+        "source_state": "unresolved",
+        "target_from_parameter": "base_frame",
+        "target_expr": "base_frame_",
+        "unresolved_ref": "frame_id:msg->header.frame_id",
+        "owner_symbol": "cx_nodes::TfNode::onCloud",
+        "line_hint": 63
+      },
+      {
+        "api": "lookupTransform",
+        "target": "map",
+        "source": "base_footprint",
+        "target_state": "literal",
+        "source_state": "literal",
+        "owner_symbol": "cx_nodes::TfNode::onCloud",
+        "line_hint": 61
+      }
+    ]
+  },
+  "unresolved": [
+    {
+      "want": "frame_id",
+      "expr": "msg->header.frame_id",
+      "reason": "message_field",
+      "detail": "the source frame is whatever arrived on the topic, so the code states no frame. Only a live system or the publisher of that topic can name it",
+      "resolvable_by": ["observed", "recorded"],
+      "owner_symbol": "cx_nodes::TfNode::onCloud",
+      "line_hint": 63
+    },
+    {
+      "want": "node_name",
+      "expr": "node_name",
+      "reason": "argv_value",
+      "detail": "the name is a constructor argument taken from argv in main, so it is not a property of the source. name_source is argv and the identity has to come from the declared or observed layer",
+      "resolvable_by": ["declared", "observed"],
+      "owner_symbol": "cx_nodes::TfNode::TfNode",
+      "line_hint": 21
+    }
+  ],
+  "counts": {
+    "endpoints": 5,
+    "publishers": 2,
+    "subscribers": 3,
+    "service_servers": 0,
+    "service_clients": 0,
+    "timers": 0,
+    "parameters": 4,
+    "tf_broadcasts": 2,
+    "tf_lookups": 4,
+    "unresolved": 2,
+    "via_known_wrapper": 4
+  },
+  "constructions": [
+    {
+      "class": "cx_nodes::TfNode",
+      "owner_symbol": "main"
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rosio"
+version = "0.1.0"
+description = "Four layer atlas of a ROS 2 system, with drift between the layers"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+readme = "README.md"
+keywords = ["ros2", "robotics", "static-analysis", "introspection", "atlas"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = ["pyyaml>=5.4"]
+
+[[project.authors]]
+name = "rosio contributors"
+
+[project.optional-dependencies]
+# The range stated by rosio.collect.cpp_code.TREE_SITTER_PIN, which is what the collector
+# tells a user to install. 0.21 wants a compiled library path the collector never builds.
+cpp = ["tree-sitter>=0.23,<0.27", "tree-sitter-cpp>=0.23,<0.24"]
+# The server is built by passing plain functions to the mcp tool registrar, and this
+# package uses postponed annotations, which mcp only resolves from 1.14 on. 1.13 and older
+# raise TypeError while registering the first tool.
+# uvicorn is imported directly by the http transport. mcp declares it too, so it arrives
+# either way today, and a transitive dependency is not a contract.
+mcp = ["mcp>=1.14,<3", "uvicorn>=0.31.1"]
+viz = []
+# The floor is the tested reader, the ceiling the next minor: reader behaviour is what the
+# stamp checks depend on, and it must not change under a deployed robot without a test run.
+stamps = ["rosbags>=0.11.4,<0.12"]
+dev = ["build>=1.0", "pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.5", "rosbags>=0.11.4,<0.12", "numpy"]
+
+[project.scripts]
+rosio = "rosio.cli:main"
+rosio-bagmutate = "rosio.stamps.mutate:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rosio"]
+# The installer reads these at run time and the html renderer vendors those, so a wheel
+# without them is an install that raises on every call. Declared rather than left to the
+# default, which drops anything a future ignore rule happens to cover.
+artifacts = [
+  "rosio/agent/templates/*.md",
+  "rosio/agent/templates/*.mdc",
+  "rosio/render/assets/*",
+  "rosio/migrate/data/*",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["/rosio", "/LICENSE", "/NOTICE", "/README.md", "/pyproject.toml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# The example workspaces are ROS packages written the way ROS packages are written.
+extend-exclude = ["examples"]
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "W",
+  "I",
+  "N",
+  "UP",
+  "B",
+  "A",
+  "C4",
+  "SIM",
+  "PTH",
+  "RET",
+  "ARG",
+  "TID",
+  "RUF",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ARG001", "ARG002", "ARG005"]
+"ros/*/test/*" = ["ARG001", "ARG002", "ARG005"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "ros: needs a sourced ROS 2 environment",
+  "cpp: needs the cpp extra (tree-sitter)",
+  "slow: takes more than a second",
+]
