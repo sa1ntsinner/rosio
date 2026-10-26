@@ -13,6 +13,7 @@ is, and every answer that hit a cap says how to narrow the next call.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1005,6 +1006,381 @@ def stamps(atlas: Atlas, *, bag: str | None = None, limit: int | None = None) ->
 
 
 # ---------------------------------------------------------------------------
+# transform
+
+
+MOVABLE_JOINTS = frozenset({"continuous", "floating", "planar", "prismatic", "revolute"})
+"""Joint types whose transform depends on the joint position, composed here at zero."""
+
+
+@dataclass
+class _Hop:
+    """One parent to child link: a joint a model states, or a broadcast that ends the walk."""
+
+    parent: str
+    child: str
+    values: dict
+    site: str
+    node: str = ""
+    layer: str = ""
+
+
+def _frame_ref(name: object) -> str:
+    text = str(name or "").strip()
+    if text.startswith("frame:"):
+        text = text[len("frame:") :]
+    try:
+        return ids.build_frame(text)
+    except ContractError:  # a value that is not a frame id names no frame
+        return ""
+
+
+def _first_site(evidence: Sequence) -> str:
+    return slices.site(evidence[0]) if evidence else ""
+
+
+def _model_joints(atlas: Atlas, wanted: str) -> dict[str, dict[str, _Hop]]:
+    """Model file id to child frame to the joint placing it. A urdf edge runs child first."""
+    out: dict[str, dict[str, _Hop]] = {}
+    for handle in sorted(atlas.edges):
+        edge = atlas.edges[handle]
+        if edge.kind != "tf_parent":
+            continue
+        for fact in edge.facts:
+            model_id = str(fact.values.get("model") or "")
+            if not model_id or fact.confidence == "unknown":
+                continue
+            if wanted and fact.profile not in (wanted, ANY_PROFILE):
+                continue
+            hop = _Hop(edge.dst, edge.src, fact.values, _first_site(fact.evidence))
+            out.setdefault(model_id, {}).setdefault(edge.src, hop)
+    return out
+
+
+def _broadcast_hops(atlas: Atlas, wanted: str) -> dict[str, list[_Hop]]:
+    """Child frame to the broadcasts that state its parent at run time."""
+    out: dict[str, list[_Hop]] = {}
+    for handle in sorted(atlas.edges):
+        edge = atlas.edges[handle]
+        if edge.kind != "broadcasts_tf":
+            continue
+        for fact in edge.facts:
+            if wanted and fact.profile not in (wanted, ANY_PROFILE):
+                continue
+            parent = _frame_ref(fact.values.get("parent"))
+            if parent and not any(
+                hop.node == edge.src and hop.parent == parent for hop in out.get(edge.dst, [])
+            ):
+                out.setdefault(edge.dst, []).append(
+                    _Hop(
+                        parent,
+                        edge.dst,
+                        fact.values,
+                        _first_site(fact.evidence),
+                        edge.src,
+                        fact.layer,
+                    )
+                )
+    return out
+
+
+def _model_profiles(atlas: Atlas) -> dict[str, set[str]]:
+    """Model file id to the profiles that load it, read the way the robot view reads it."""
+    out: dict[str, set[str]] = {}
+    for entity in atlas.by_kind("launchent"):
+        for fact in entity.facts:
+            for read in fact.values.get("file_reads") or []:
+                if isinstance(read, dict) and read.get("role") == "robot_model":
+                    out.setdefault(str(read.get("file")), set()).add(fact.profile)
+    for edge in atlas.edges.values():
+        if edge.kind == "tf_parent":
+            for fact in edge.facts:
+                if fact.values.get("model"):
+                    out.setdefault(str(fact.values["model"]), set()).add(fact.profile)
+    return {key: {p for p in value if p.startswith("profile:")} for key, value in out.items()}
+
+
+def _walk_up(frame: str, joints: dict[str, _Hop], casts: dict[str, list[_Hop]]) -> list[_Hop]:
+    hops: list[_Hop] = []
+    seen = {frame}
+    while True:
+        hop = joints.get(frame) or next(iter(casts.get(frame, [])), None)
+        if hop is None or hop.parent in seen:
+            return hops
+        hops.append(hop)
+        seen.add(hop.parent)
+        frame = hop.parent
+
+
+Matrix = list[list[float]]
+Pose = tuple[Matrix, list[float]]
+
+
+def _rotation(rpy: Sequence[float]) -> Matrix:
+    """URDF rpy, fixed axis: R = Rz(yaw) Ry(pitch) Rx(roll)."""
+    sr, cr = math.sin(rpy[0]), math.cos(rpy[0])
+    sp, cp = math.sin(rpy[1]), math.cos(rpy[1])
+    sy, cy = math.sin(rpy[2]), math.cos(rpy[2])
+    return [
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ]
+
+
+def _compose(a: Pose, b: Pose) -> Pose:
+    (ra, ta), (rb, tb) = a, b
+    rot = [[sum(ra[i][k] * rb[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    return rot, [sum(ra[i][k] * tb[k] for k in range(3)) + ta[i] for i in range(3)]
+
+
+def _invert(pose: Pose) -> Pose:
+    rot, t = pose
+    back = [[rot[j][i] for j in range(3)] for i in range(3)]
+    return back, [-sum(back[i][k] * t[k] for k in range(3)) for i in range(3)]
+
+
+def _rpy_of(r: Matrix) -> list[float]:
+    pitch = math.asin(max(-1.0, min(1.0, -r[2][0])))
+    if abs(math.cos(pitch)) > 1e-9:
+        return [math.atan2(r[2][1], r[2][2]), pitch, math.atan2(r[1][0], r[0][0])]
+    return [0.0, pitch, math.atan2(-r[0][1], r[1][1])]
+
+
+def _quaternion_of(r: Matrix) -> list[float]:
+    """x, y, z, w with w kept non negative so one rotation prints one way."""
+    trace = r[0][0] + r[1][1] + r[2][2]
+    if trace > 0:
+        s = 2 * math.sqrt(1 + trace)
+        q = [(r[2][1] - r[1][2]) / s, (r[0][2] - r[2][0]) / s, (r[1][0] - r[0][1]) / s, s / 4]
+    elif r[0][0] >= r[1][1] and r[0][0] >= r[2][2]:
+        s = 2 * math.sqrt(1 + r[0][0] - r[1][1] - r[2][2])
+        q = [s / 4, (r[0][1] + r[1][0]) / s, (r[0][2] + r[2][0]) / s, (r[2][1] - r[1][2]) / s]
+    elif r[1][1] >= r[2][2]:
+        s = 2 * math.sqrt(1 + r[1][1] - r[0][0] - r[2][2])
+        q = [(r[0][1] + r[1][0]) / s, s / 4, (r[1][2] + r[2][1]) / s, (r[0][2] - r[2][0]) / s]
+    else:
+        s = 2 * math.sqrt(1 + r[2][2] - r[0][0] - r[1][1])
+        q = [(r[0][2] + r[2][0]) / s, (r[1][2] + r[2][1]) / s, s / 4, (r[1][0] - r[0][1]) / s]
+    return [-item for item in q] if q[3] < 0 else q
+
+
+def _computed(values: Sequence[float]) -> str:
+    out = []
+    for item in values:
+        text = f"{item:.6f}".rstrip("0").rstrip(".")
+        out.append("0" if text in ("", "-0") else text)
+    return " ".join(out)
+
+
+def _stated(values: object) -> str:
+    if not isinstance(values, (list, tuple)):
+        return "unknown"
+    out = []
+    for item in values:
+        text = repr(item)
+        text = text[:-2] if text.endswith(".0") else text
+        out.append("0" if text == "-0" else text)
+    return " ".join(out)
+
+
+def _readable(hop: _Hop) -> bool:
+    return not hop.values.get("unreadable") and all(
+        isinstance(hop.values.get(key), (list, tuple))
+        and len(hop.values[key]) == 3
+        and all(isinstance(item, (int, float)) for item in hop.values[key])
+        for key in ("xyz", "rpy")
+    )
+
+
+def _hop_line(hop: _Hop) -> str:
+    frames = f"{ids.parse_frame(hop.parent)} -> {ids.parse_frame(hop.child)}"
+    if hop.node:
+        return f"    broadcast {frames} by {slices.label(hop.node)} ({hop.layer}) at {hop.site}"
+    kind = str(hop.values.get("joint_type") or "unknown type")
+    line = (
+        f"    joint {hop.values.get('joint', '?')} ({kind}) {frames}: "
+        f"xyz [{_stated(hop.values.get('xyz'))}] rpy [{_stated(hop.values.get('rpy'))}]"
+        f" at {hop.site}"
+    )
+    if kind in MOVABLE_JOINTS:
+        line += ", moves, taken at position zero"
+    return line
+
+
+def _chain_answer(
+    source: str, target: str, joints: dict[str, _Hop], casts: dict[str, list[_Hop]]
+) -> tuple[tuple, list[str]]:
+    """The answer one model gives, as a comparable key and the lines that state it."""
+    name_s, name_t = ids.parse_frame(source), ids.parse_frame(target)
+    up_s, up_t = _walk_up(source, joints, casts), _walk_up(target, joints, casts)
+    above_s = [source] + [hop.parent for hop in up_s]
+    above_t = [target] + [hop.parent for hop in up_t]
+    common = next((frame for frame in above_s if frame in above_t), "")
+    if not common:
+        roots = f"{ids.parse_frame(above_s[-1])} and {ids.parse_frame(above_t[-1])}"
+        return ("apart", above_s[-1], above_t[-1]), [
+            f"  {name_s} and {name_t} share no ancestor: their chains end at {roots}, "
+            "and no joint or broadcast in this atlas links the two"
+        ]
+    rise = up_t[: above_t.index(common)]
+    down = up_s[: above_s.index(common)]
+    hops = rise + list(reversed(down))
+    key = tuple(
+        (
+            hop.parent,
+            hop.child,
+            hop.node,
+            *(_stated(hop.values.get(k)) for k in ("joint", "joint_type", "xyz", "rpy")),
+        )
+        for hop in hops
+    )
+    legs = [f"up to {ids.parse_frame(common)}"] if rise else []
+    legs += [f"down to {name_s}"] if down else []
+    chain = [
+        f"  chain from {name_t} {' and '.join(legs) or 'to itself'}, {_many(len(hops), 'link')}:",
+        *(_hop_line(hop) for hop in hops),
+    ]
+    casted = [hop for hop in hops if hop.node]
+    if casted:
+        first = casted[0]
+        return ("stop", key), [
+            f"  not static: {ids.parse_frame(first.parent)} -> {ids.parse_frame(first.child)} "
+            f"is broadcast by {slices.label(first.node)} at {first.site}, so its value exists "
+            "only at run time and nothing is composed across it",
+            *chain,
+        ]
+    blind = [hop for hop in hops if not _readable(hop)]
+    if blind:
+        return ("unreadable", key), [
+            f"  joint {blind[0].values.get('joint', '?')} states an origin that is not numbers "
+            f"({', '.join(blind[0].values.get('unreadable') or ['origin'])}), so nothing is "
+            "composed; expand the model with xacro or write the numbers",
+            *chain,
+        ]
+
+    def placed(path: Sequence[_Hop]) -> Pose:
+        pose: Pose = ([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], [0.0, 0.0, 0.0])
+        for hop in reversed(path):
+            step = (_rotation(hop.values["rpy"]), [float(item) for item in hop.values["xyz"]])
+            pose = _compose(pose, step)
+        return pose
+
+    rot, xyz = _compose(_invert(placed(rise)), placed(down))
+    lines = [
+        f"  translation xyz [{_computed(xyz)}] m",
+        f"  rotation rpy [{_computed(_rpy_of(rot))}] rad, "
+        f"quaternion xyzw [{_computed(_quaternion_of(rot))}]",
+    ]
+    moving = [hop for hop in hops if hop.values.get("joint_type") in MOVABLE_JOINTS]
+    if moving:
+        lines.append(
+            f"  {_many(len(moving), 'movable joint')} on the chain, taken at position zero, "
+            "so the live value differs whenever a joint moves"
+        )
+    return ("pose", key), lines + chain
+
+
+def _model_choice(models: Iterable[str], wanted: str) -> list[str]:
+    return [
+        item
+        for item in models
+        if wanted in (item, slices.label(item), item.rpartition("|")[2])
+        or slices.label(item).endswith("/" + wanted)
+    ]
+
+
+def _loaded_text(profiles: Iterable[str]) -> str:
+    names = sorted(slices.profile_name(item) for item in profiles)
+    if not names:
+        return "loaded by no profile this atlas states"
+    return f"loaded by {'profile' if len(names) == 1 else 'profiles'} {', '.join(names)}"
+
+
+def transform(
+    atlas: Atlas,
+    source: str,
+    target: str,
+    *,
+    profile: str | None = None,
+    model: str | None = None,
+) -> str:
+    """Where `source` sits relative to `target`, composed from the robot model joints.
+
+    The pose of the source frame in the target frame, the transform lookupTransform(target,
+    source) returns. A broadcast on the chain stops the composition, movable joints are taken
+    at zero, and models that state the chain differently answer one each.
+    """
+    wanted = _profile_id(atlas, profile)
+    frames = []
+    for name in (source, target):
+        frame = _frame_ref(name)
+        if not frame or frame not in atlas.entities:
+            every = sorted(item.label for item in atlas.by_kind("frame"))
+            near = [item for item in every if _text(name).lower() in item.lower()]
+            return _fit(
+                [
+                    f"no frame named {_text(name)!r} in this atlas",
+                    f"  frames with that text: {_named(near)}"
+                    if near
+                    else f"  frames: {_named(every, more='more frames')}",
+                ],
+                "name a frame exactly, such as base_link",
+            )
+        frames.append(frame)
+    src, tgt = frames
+    joints = _model_joints(atlas, wanted)
+    casts = _broadcast_hops(atlas, wanted)
+    loads = _model_profiles(atlas)
+    models = sorted(joints)
+    if _text(model):
+        models = _model_choice(models, _text(model))
+        if not models:
+            return _fit(
+                [
+                    f"no robot model named {_text(model)!r} states a joint here",
+                    f"  models: {_named([slices.label(item) for item in sorted(joints)])}",
+                ],
+                "name a model by its file, such as urdf/robot.urdf",
+            )
+    elif wanted:
+        models = [item for item in models if wanted in loads.get(item, set())] or models
+
+    def touches(item: str) -> bool:
+        return any(
+            frame in (hop.child, hop.parent) for hop in joints[item].values() for frame in frames
+        )
+
+    models = [item for item in models if touches(item)]
+    name_s, name_t = ids.parse_frame(src), ids.parse_frame(tgt)
+    lines = [
+        f"{name_s} relative to {name_t}: the pose of {name_s} in the {name_t} frame, as "
+        f'lookupTransform("{name_t}", "{name_s}") returns it',
+        "  static robot model geometry, metres and radians, rpy fixed axis "
+        "R = Rz(yaw) Ry(pitch) Rx(roll), line numbers advisory",
+    ]
+    if not models:
+        key, body = _chain_answer(src, tgt, {}, casts)
+        if key[0] == "apart" and src != tgt:
+            body = [f"  no robot model in this atlas states a joint on {name_s} or {name_t}", *body]
+        return _fit(lines + body, "name the frames of one robot model")
+    groups: dict[tuple, tuple[list[str], list[str]]] = {}
+    for item in models:
+        key, body = _chain_answer(src, tgt, joints[item], casts)
+        groups.setdefault(key, ([], body))[0].append(item)
+    if len(groups) > 1:
+        lines.append(f"{len(groups)} robot models state this chain differently, one answer each")
+    for named, body in groups.values():
+        profiles = set().union(*(loads.get(item, set()) for item in named))
+        lines.append(
+            f"{'models' if len(named) > 1 else 'model'} "
+            f"{', '.join(slices.label(item) for item in named)}, {_loaded_text(profiles)}"
+        )
+        lines.extend(body)
+    return _fit(lines, "pass model=<file> or profile=<slug> for one answer")
+
+
+# ---------------------------------------------------------------------------
 # migrate
 
 
@@ -1077,5 +1453,6 @@ __all__ = [
     "path",
     "query",
     "stamps",
+    "transform",
     "unresolved",
 ]

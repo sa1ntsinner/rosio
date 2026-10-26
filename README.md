@@ -162,7 +162,7 @@ MCP server. `Ctrl+Alt+R` finds any node, topic, parameter or frame.
 | **Middleware** | Which `RMW_IMPLEMENTATION` every running process was started under, Fast DDS, Cyclone DDS or Zenoh, and whether a Zenoh router is there. Two middlewares in one system, or Zenoh nodes with no router, are errors with the process to fix. |
 | **Clocks and stamps** | Backward stamps, frozen and zero stamps, gaps, drift between clocks and offsets that match a known fault (TAI, GPS leap, an unset clock), in a recording and in a live system. |
 | **Honest blind spots** | A name built from a variable, a parameter read at runtime, a plugin loaded from a table: all recorded as unresolved with the raw expression, never invented. The resolution rate is a CI gate. |
-| **A surface an agent can use** | Eleven tools over MCP with the same answers on the command line, every response sized to fit a small context window. |
+| **A surface an agent can use** | Twelve tools over MCP, most with the same answer on the command line, every response sized to fit a small context window. |
 | **The editor** | Diagnostics, hover, definitions and references across launch, yaml, urdf, C++ and Python, and the atlas panel. |
 
 ## Why the answers can be trusted
@@ -203,8 +203,8 @@ rosio serve                                        # stdio
 rosio serve --http --host 0.0.0.0 --api-key "$KEY" # one server for a team
 ```
 
-Eleven tools: `overview`, `param_chain`, `drift`, `explain`, `query`, `path`, `neighbours`,
-`graph`, `unresolved`, `stamps`, `migrate`. Every response is capped and says when it truncated and how to narrow the question.
+Twelve tools: `overview`, `param_chain`, `drift`, `explain`, `query`, `path`, `neighbours`,
+`graph`, `unresolved`, `stamps`, `transform`, `migrate`. Every response is capped and says when it truncated and how to narrow the question.
 A worst case answer is under 4 KB. On very small models prefer the command
 line, where the skill file is 3.3 KB and carries six commands, the waiver file and a worked example.
 

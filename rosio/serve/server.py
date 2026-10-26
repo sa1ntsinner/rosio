@@ -103,7 +103,7 @@ class Options:
 
 
 def bindings(source: tools.AtlasSource) -> list[Any]:
-    """The eleven functions the server exposes. The signature is the tool schema and the
+    """The twelve functions the server exposes. The signature is the tool schema and the
     docstring is what a model reads before choosing, so both are part of the product."""
 
     def overview() -> str:
@@ -175,6 +175,16 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         clocks step backwards, freeze, jump or sit years off. bag narrows to one recording."""
         return tools.stamps(source.atlas(), bag=bag, limit=limit)
 
+    store = source
+
+    def transform(source: str, target: str, profile: str = "", model: str = "") -> str:
+        """Where one frame sits relative to another, composed from the robot model joints:
+        the pose of source in the target frame, xyz in metres, rpy and quaternion, then the
+        chain joint by joint with file and line. A frame such as laser_link or base_link.
+        It stops at a transform a node broadcasts at run time, and answers once per robot
+        model when models disagree; model names one model file."""
+        return tools.transform(store.atlas(), source, target, profile=profile, model=model)
+
     def migrate(to: str, start: str = "", package: str = "", workspace: str = ".") -> str:
         """Everything moving this workspace to another ROS 2 release asks, from measured
         release data and cited rules, never from memory of release notes. to is the target
@@ -193,6 +203,7 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         graph,
         unresolved,
         stamps,
+        transform,
         migrate,
     ]
 

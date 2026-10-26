@@ -499,7 +499,7 @@ def test_unresolved_narrows_by_want_and_by_owner(atlas):
 # the tool set as an interface
 
 
-def test_the_tool_set_is_eleven_named_tools_with_a_description_each(atlas_file: Path):
+def test_the_tool_set_is_twelve_named_tools_with_a_description_each(atlas_file: Path):
     functions = server.bindings(tools.AtlasSource(atlas_file))
 
     names = [function.__name__ for function in functions]
@@ -514,6 +514,7 @@ def test_the_tool_set_is_eleven_named_tools_with_a_description_each(atlas_file: 
         "graph",
         "unresolved",
         "stamps",
+        "transform",
         "migrate",
     ]
     for function in functions:
@@ -708,6 +709,7 @@ def test_the_server_registers_every_tool_when_mcp_is_installed(atlas_file: Path)
         "graph",
         "unresolved",
         "stamps",
+        "transform",
         "migrate",
     }
 

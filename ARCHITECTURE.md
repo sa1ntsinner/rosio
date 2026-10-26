@@ -156,7 +156,7 @@ install fails on a machine that never wanted the server.
 | `rosio/agent/platforms.py` | the table of assistants, one row per file, with the verified flag |
 | `rosio/agent/install.py` | the install and uninstall writers, idempotent, with no silent overwrite |
 | `rosio/serve/__init__.py` | the serve package surface |
-| `rosio/serve/tools.py` | the eleven tools as plain functions, ten over a loaded atlas and `migrate` over the sources, no mcp involved, every answer capped and every refusal capped with it |
+| `rosio/serve/tools.py` | the twelve tools as plain functions, eleven over a loaded atlas and `migrate` over the sources, no mcp involved, every answer capped and every refusal capped with it |
 | `rosio/serve/server.py` | the mcp server, both transports, the key check, and the one place each optional range is written |
 | `rosio/serve/__main__.py` | `python -m rosio.serve`, the same options as `rosio serve` |
 
@@ -203,7 +203,7 @@ rosbag2 dir  -> collect/{bag,stamps}                (recorded) ----+     (layer,
               drift/* rules      render/*         query.py        serve/tools.py    history.py,
                     |                |                |                |            mergetool.py
                     v                v                v                v                v
-            findings in         ATLAS_REPORT.md,  rosio get,   the eleven tools   rebuild on a
+            findings in         ATLAS_REPORT.md,  rosio get,   the twelve tools   rebuild on a
             atlas.json          DRIFT.md,         param, diff,   an assistant       hook, merge
                                 atlas.html        unresolved     calls              two atlases
 ```
