@@ -666,7 +666,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.16`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.17`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -760,6 +760,19 @@ What was added, in the order it arrived:
   named `.urdf` that holds xacro markup is now expanded as xacro, which ends the frame ids that
   spelled `${namespace}` and that no running system ever names.
 
+* in `1.17`, the node attribute `child_of`, the node that creates this one as it starts (a
+  costmap under the server that owns it), keyed by that node id with the package and the
+  executable or component class from the committed child table. `node.observed_only` stays
+  silent on a node whose parent the profile launches. An observed node fact may carry
+  `via_known_wrapper` from the node table of `rosio/resolve/wrappers.py`, for a whole node a
+  library creates beside its owner.
+
+One observed key was renamed in `1.17` without a major bump. The process table wrote the
+whole command line of a node under `argv`, the key under which the declared layer states only
+the arguments a launch file passes, so every launched node with arguments disagreed with
+itself. The process table now writes `command_line`. No release had shipped, so no reader of
+the observed key existed.
+
 One key went in `1.6` without a major bump, and it is named here rather than left for a reader
 to find. The declared `node` fact carried `conditions`, the conditions of the launch site that
 started the node. A node started from two sites with different conditions (nav2's
@@ -781,7 +794,7 @@ discriminator, so a failure inside one node is one finding per node rather than 
 message, which had folded two nodes failing on one missing package into a single finding
 that named neither. A row without `kept` keeps the id it had.
 
-A reader pinned to `1.0` still loads a `1.16` file: `Atlas.from_json` compares the major
+A reader pinned to `1.0` still loads a `1.17` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

@@ -10,7 +10,8 @@ The `/parameter_events` publisher rclpy gives every node is the one publisher it
 it never sends, because nothing sets a parameter on this node. Sampling is bounded by a
 window given in the request, and the counts it produces are volatile.
 
-Everything is read in one pass with a fixed order: settle, read the graph, subscribe, sample
+Everything is read in one pass with a fixed order: settle until the graph stops changing,
+read the graph, subscribe, sample
 for the window, then ask each node for its parameters and its lifecycle state. A read that
 raises is recorded against the thing it was about and the rest of the pass carries on, so one
 node that stopped answering does not empty the layer.
@@ -43,6 +44,15 @@ TF_TYPE = "tf2_msgs/msg/TFMessage"
 LIFECYCLE_GET_STATE = "lifecycle_msgs/srv/GetState"
 
 SPIN_SLICE = 0.05
+
+DISCOVERY_QUIET = 3.0
+"""Seconds the graph has to stay unchanged before it is read. Discovery pauses between
+bursts, so a shorter quiet time ends the wait inside a pause."""
+
+DISCOVERY_STEP = 0.25
+
+DISCOVERY_LIMIT = 30.0
+"""Seconds after the settle time a graph that keeps changing is waited for."""
 
 _HISTORY = {1: "keep_last", 2: "keep_all"}
 _RELIABILITY = {1: "reliable", 2: "best_effort"}
@@ -114,7 +124,7 @@ class Probe:
             start_parameter_services=False,
             enable_rosout=False,
         )
-        self._spin(self.settle)
+        self._discover()
         graph = self._graph()
         subscriptions = self._subscribe(graph)
         sampled = self._sample()
@@ -128,6 +138,52 @@ class Probe:
 
     # -----------------------------------------------------------------
     # graph
+
+    def _discover(self) -> None:
+        """Spin through the settle time, then until the graph stops growing.
+
+        Discovery arrives in bursts: a container holding many nodes is one participant, and
+        on a loaded machine it can answer a fresh probe after the settle time is over. A
+        fixed settle then read the graph before the burst, two probes of one unchanged system
+        described two different systems, and the second reported every node it missed as
+        launched and not running. A settle of zero still means no waiting at all.
+        """
+        self._spin(self.settle)
+        if self.settle <= 0:
+            return
+        deadline = time.monotonic() + DISCOVERY_LIMIT
+        last = self._census()
+        quiet_since = time.monotonic()
+        while time.monotonic() - quiet_since < DISCOVERY_QUIET:
+            if time.monotonic() >= deadline:
+                self.system.notes.append(
+                    f"the graph was still changing {DISCOVERY_LIMIT:g} seconds after the "
+                    "settle time, so it was read while it changed"
+                )
+                return
+            self._spin(DISCOVERY_STEP)
+            now = self._census()
+            if now != last:
+                last, quiet_since = now, time.monotonic()
+
+    def _census(self) -> tuple[Any, ...]:
+        """What discovery has delivered so far: node names, and every topic and service
+        with how many ends each has."""
+        try:
+            nodes = tuple(sorted(self.node.get_node_names_and_namespaces()))
+            topics = tuple(
+                (
+                    topic,
+                    self.node.count_publishers(topic),
+                    self.node.count_subscribers(topic),
+                )
+                for topic, _types in sorted(self.node.get_topic_names_and_types())
+            )
+            services = tuple(sorted(name for name, _ in self.node.get_service_names_and_types()))
+        except Exception as exc:
+            self._failed("graph", exc, "census")
+            return ()
+        return nodes, topics, services
 
     def _graph(self) -> dict[str, dict[str, Any]]:
         """Every node with its endpoints. One read, so one picture of one moment."""
@@ -254,11 +310,29 @@ class Probe:
         except Exception as exc:
             self._failed("graph", exc, "get_node_names_and_namespaces")
             return
-        late = sorted({_join(namespace, name) for name, namespace in found} - set(graph))
+        late = sorted(
+            {
+                (_join(namespace, name), name, namespace)
+                for name, namespace in found
+                if _join(namespace, name) not in graph
+            }
+        )
         if late:
             self.system.notes.append(
                 "these nodes answered after the graph was read, so their endpoints and "
-                "their parameters were not read: " + ", ".join(late)
+                "their parameters were not read: " + ", ".join(row[0] for row in late)
+            )
+        # A late node still runs. Leaving it out reported it as launched and not running.
+        for fqn, name, namespace in late:
+            self.system.nodes.append(
+                probe.ObservedNode(
+                    name=name,
+                    namespace=namespace,
+                    fqn=fqn,
+                    parameters_read=False,
+                    parameters_reason="the node answered after the graph was read",
+                    internal=probe.internal_name(name),
+                )
             )
 
     # -----------------------------------------------------------------
@@ -439,9 +513,15 @@ class Probe:
         got = self._call(GetParameters, f"{fqn}/get_parameters", request)
         if got is None:
             return [], False, "the node listed its parameters and did not answer get_parameters"
+        values = list(got.values)
+        if len(values) != len(names):
+            # rclcpp answers a request naming one declared and uninitialised parameter with no
+            # values at all, so one such parameter hid every other value of the node and the
+            # node read as one with no parameters. Asked one by one, only that one is unread.
+            values = [self._one_parameter(fqn, name) for name in names]
         out = []
-        for name, value in zip(names, list(got.values), strict=False):
-            typed, plain = _parameter_value(value)
+        for name, value in zip(names, values, strict=True):
+            typed, plain = ("", None) if value is None else _parameter_value(value)
             out.append(
                 probe.Parameter(
                     name=name,
@@ -451,6 +531,14 @@ class Probe:
                 )
             )
         return out, True, ""
+
+    def _one_parameter(self, fqn: str, name: str) -> Any:
+        from rcl_interfaces.srv import GetParameters
+
+        request = GetParameters.Request()
+        request.names = [name]
+        got = self._call(GetParameters, f"{fqn}/get_parameters", request)
+        return got.values[0] if got is not None and len(got.values) == 1 else None
 
     def _lifecycle(self, fqn: str, entry: dict[str, Any]) -> str | None:
         service = f"{fqn}/get_state"

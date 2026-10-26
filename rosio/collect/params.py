@@ -462,10 +462,10 @@ def child_nodes(node: records.ResolvedNode) -> list[records.ResolvedNode]:
     """
     table = identity.known_table()
     accessor = getattr(table, "child_nodes", None) if table is not None else None
-    if accessor is None or not node.pkg or not node.executable:
+    if accessor is None or not node.pkg or not (node.executable or node.plugin_class):
         return []
     try:
-        names = accessor(node.pkg, node.executable)
+        names = accessor(node.pkg, node.executable, node.plugin_class or "")
     except Exception:
         return []
     parent = node.namespace or "/"
@@ -486,7 +486,10 @@ def child_nodes(node: records.ResolvedNode) -> list[records.ResolvedNode]:
                 gates=node.gates,
                 conditions=node.conditions,
                 site=node.site,
-                attrs={"child_of": ids.join_namespace(parent, node.name or node.executable)},
+                attrs={
+                    "child_of": owner_node_id(node),
+                    "created_by": f"{node.pkg}/{node.executable or node.plugin_class}",
+                },
             )
         )
     return out
@@ -2578,12 +2581,16 @@ class ParamsCollector:
         """The owner entity, with the id and the name source `resolve.identity` decided."""
         decided = identity.identify(node)
         held = ctx.builder.atlas.entities.get(decided.node_id)
+        parent = node.attrs.get("child_of")
         # The strongest answer wins whoever wrote first, see `ids.NAME_SOURCE_ORDER`.
+        # A child names the node that creates it, so a probe that sees the child running
+        # can tell it apart from a node nothing in the repository starts.
         ctx.builder.node(
             decided.node_id,
             name_source=ids.strongest_name_source(
                 held.name_source if held is not None else None, decided.name_source
             ),
+            attrs={"child_of": {parent: node.attrs.get("created_by", "")}} if parent else None,
         )
 
     def _accumulate(

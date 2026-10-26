@@ -354,7 +354,11 @@ class ProcCollector:
             "name": str(item.fqn).rsplit("/", 1)[-1],
             "namespace": ids.normalise_namespace(item.namespace),
             "executable": item.executable,
-            "argv": _token_argv(ctx, item),
+            # Not `argv`: the declared layer states the arguments a launch file passes under
+            # that name, and the process holds those plus the program and everything launch
+            # appends. One name for both made every launched node with arguments disagree
+            # with itself.
+            "command_line": _token_argv(ctx, item),
             "rmw": item.rmw,
             "zenoh_environment": dict(item.zenoh_environment),
         }

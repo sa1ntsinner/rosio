@@ -80,12 +80,17 @@ class ChildNode:
     never states and whose parameters live in a yaml block of their own. Without this table
     those blocks match no launched node and read as owner_name_mismatch, which is 116 false
     positives on the reference stack.
+
+    `plugin_class` is the component the executable registers. The class constructor creates
+    the child, so a composed node of that class has it too, and a launch file that loads
+    the component into a container states the class and no executable.
     """
 
     pkg: str
     executable: str
     child: str
     rule: str = CHILD_NAMESPACE_RULE
+    plugin_class: str = ""
     verified: bool = True
     evidence: str = ""
     note: str = ""
@@ -382,6 +387,16 @@ TABLE: tuple[KnownName, ...] = (
         "in ros2 node list",
     ),
     KnownName(
+        pkg="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="ros_gz_bridge",
+        evidence="strings /opt/ros/jazzy/lib/ros_gz_bridge/parameter_bridge holds the exact "
+        "literal ros_gz_bridge and no parameter_bridge node literal; nav2_minimal_tb3_sim "
+        "starts it unnamed and ros2 node list on that simulation lists /ros_gz_bridge",
+        note="The executable and the node name differ, so a probe of a running simulation "
+        "reports a node the launch layer could otherwise only name by its executable.",
+    ),
+    KnownName(
         pkg="dummy_map_server",
         executable="dummy_map_server",
         name="dummy_map_server",
@@ -396,21 +411,26 @@ CHILD_TABLE: tuple[ChildNode, ...] = (
         pkg="nav2_controller",
         executable="controller_server",
         child="local_costmap",
+        plugin_class="nav2_controller::ControllerServer",
         evidence="strings /opt/ros/humble/lib/libcontroller_server_core.so holds the exact "
         "literal local_costmap and no other costmap literal; "
         "include/nav2_costmap_2d/nav2_costmap_2d/costmap_2d_ros.hpp:83 documents that the "
         "wrapper node is placed in a namespace equal to its own name",
         note="nav2_params.yaml keys it as local_costmap: local_costmap: ros__parameters:, "
-        "which is the two level shape this rule produces.",
+        "which is the two level shape this rule produces. The class is the one "
+        "share/ament_index/resource_index/rclcpp_components/nav2_controller registers.",
     ),
     ChildNode(
         pkg="nav2_planner",
         executable="planner_server",
         child="global_costmap",
+        plugin_class="nav2_planner::PlannerServer",
         evidence="strings /opt/ros/humble/lib/libplanner_server_core.so holds the exact "
         "literal global_costmap and no other costmap literal; costmap_2d_ros.hpp:83 gives "
         "the namespace rule",
-        note="nav2_params.yaml keys it as global_costmap: global_costmap: ros__parameters:.",
+        note="nav2_params.yaml keys it as global_costmap: global_costmap: ros__parameters:. "
+        "The class is the one share/ament_index/resource_index/rclcpp_components/nav2_planner "
+        "registers.",
     ),
     ChildNode(
         pkg="nav2_costmap_2d",
@@ -491,13 +511,21 @@ def child_rows(pkg: str, executable: str) -> tuple[ChildNode, ...]:
     return tuple(sorted(found, key=lambda row: row.child))
 
 
-def child_nodes(pkg: str, executable: str) -> tuple[str, ...]:
-    """The child node names this executable creates, or an empty tuple.
+def child_nodes(pkg: str, executable: str, plugin_class: str = "") -> tuple[str, ...]:
+    """The child node names this executable, or this composed class, creates.
 
     Only verified rows are returned, so a caller cannot bind a parameter block to a child
     that was never confirmed to exist.
     """
-    return tuple(row.child for row in child_rows(pkg, executable) if row.verified)
+    if executable:
+        found = child_rows(pkg, executable)
+    else:
+        found = tuple(
+            row
+            for row in sorted(CHILD_TABLE, key=lambda item: item.child)
+            if plugin_class and row.pkg == pkg and row.plugin_class == plugin_class
+        )
+    return tuple(row.child for row in found if row.verified)
 
 
 __all__ = [

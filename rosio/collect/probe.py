@@ -57,6 +57,7 @@ from typing import Any
 from rosio import ids, model
 from rosio.collect import CollectContext, proc, register
 from rosio.errors import CollectorError
+from rosio.resolve import wrappers, yaml_lines
 
 LAYER = model.Layer.OBSERVED.value
 NAME = "probe"
@@ -762,6 +763,9 @@ class ProbeCollector:
     ) -> dict[str, str]:
         builder = ctx.builder
         owners: dict[str, str] = {}
+        siblings: dict[str, list[str]] = {}
+        for item in system.nodes:
+            siblings.setdefault(item.namespace, []).append(item.name)
         for item in system.nodes:
             node_id = ids.build_node(item.fqn)
             existing = builder.atlas.entities.get(node_id)
@@ -784,6 +788,9 @@ class ProbeCollector:
             }
             if item.internal:
                 values["internal"] = True
+            wrapper = wrappers.node_wrapper(item.name, siblings[item.namespace])
+            if wrapper:
+                values["via_known_wrapper"] = wrapper
             if item.lifecycle_state is not None:
                 values["lifecycle_state"] = item.lifecycle_state
             builder.fact(
@@ -948,8 +955,10 @@ class ProbeCollector:
                 entity = builder.node(param_id)
                 if entity.state is None:
                     # Only when nothing has stated one: a candidate chain the declared layer
-                    # wrote owns the state, and the observed value never overrides it.
-                    builder.set_param(param_id, state=model.ParamState.EFFECTIVE.value)
+                    # wrote owns the state, and the observed value never overrides it. A
+                    # parameter the node holds no value for is a blind spot, not live.
+                    state = model.ParamState.EFFECTIVE if param.read else model.ParamState.OTHER
+                    builder.set_param(param_id, state=state.value)
                 if not param.read:
                     builder.unresolved(
                         model.Unresolved(
@@ -971,7 +980,10 @@ class ProbeCollector:
                         # The declared chain states a path by its root label, and the two
                         # layers must spell one value one way or they disagree about nothing.
                         "value": ctx.ws.stated_value(param.value),
-                        "value_type": param.type,
+                        # Spelled the way the candidate chain spells it. rcl says double where
+                        # the chain says float, and two spellings of one type are a conflict
+                        # on every parameter both layers state.
+                        "value_type": yaml_lines.type_name(param.value),
                         "name": param.name,
                     },
                     confidence=model.Confidence.CERTAIN.value,
@@ -1073,8 +1085,15 @@ def _absent_reason(system: ObservedSystem) -> str:
     return "the probe never attached to the middleware"
 
 
+LAUNCH_NODE_PREFIX = "launch_ros_"
+"""`launch_ros/ros_adapters.py:61` names the node a running `ros2 launch` holds
+`launch_ros_` plus its process id. It is the launcher itself, not a node it starts."""
+
+
 def internal_name(name: str) -> bool:
     """Whether a node name belongs to tooling that attached itself to the graph."""
+    if name.startswith(LAUNCH_NODE_PREFIX) and name[len(LAUNCH_NODE_PREFIX) :].isdigit():
+        return True
     return any(name.startswith(prefix) for prefix in INTERNAL_PREFIXES)
 
 

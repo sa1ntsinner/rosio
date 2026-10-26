@@ -34,9 +34,10 @@ from typing import Any
 from rosio import ATLAS_SCHEMA_VERSION, __version__, ids
 from rosio.errors import ContractError
 
-SCHEMA_MINOR = "16"
+SCHEMA_MINOR = "17"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the launch exception row `env`; launch entity `file_reads` rows and tf_parent
+stored id: the observed node `command_line`, which took the place of the observed `argv`,
+and node `child_of`; the launch exception row `env`; launch entity `file_reads` rows and tf_parent
 facts carrying `xacro_args`, with the frames and tf_parent edges of a model a profile expands
 with its own arguments stated in that profile's slot, and the `xacro_argument_unresolved`
 blind spot; the `model.mesh_missing` rule and the model file attributes

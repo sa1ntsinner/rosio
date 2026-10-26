@@ -347,6 +347,23 @@ def test_observed_only_is_silent_on_a_wrapper_node(bench: Bench) -> None:
     )
 
 
+def test_observed_only_is_silent_on_a_node_a_launched_parent_creates(bench: Bench) -> None:
+    parent = ids.build_node("/controller_server")
+    child = ids.build_node("/local_costmap/local_costmap")
+    bench.declared(parent, "controller_server")
+    bench.observed(child, "local_costmap", namespace="/local_costmap")
+    bench.builder.node(child, attrs={"child_of": {parent: "nav2_controller/controller_server"}})
+    assert child not in subjects(fired(bench.atlas, "node.observed_only"))
+
+
+def test_observed_only_still_fires_when_the_parent_is_not_launched(bench: Bench) -> None:
+    parent = ids.build_node("/controller_server")
+    child = ids.build_node("/local_costmap/local_costmap")
+    bench.observed(child, "local_costmap", namespace="/local_costmap")
+    bench.builder.node(child, attrs={"child_of": {parent: "nav2_controller/controller_server"}})
+    assert child in subjects(fired(bench.atlas, "node.observed_only"))
+
+
 def test_observed_only_has_a_stable_id() -> None:
     left = fired(Bench().atlas, "node.observed_only")[0]
     right = fired(Bench().atlas, "node.observed_only")[0]

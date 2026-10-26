@@ -178,7 +178,9 @@ def _static_pairs(atlas: Atlas) -> list[_Static]:
         for fact in node.facts:
             if not rules.usable(fact) or fact.values.get("executable") != STATIC_TF_EXECUTABLE:
                 continue
-            parent, child = _static_frames(fact.values.get("argv") or [])
+            parent, child = _static_frames(
+                fact.values.get("argv") or fact.values.get("command_line") or []
+            )
             if parent and child:
                 out.append(_Static(node.id, fact.profile, parent, child))
     return out

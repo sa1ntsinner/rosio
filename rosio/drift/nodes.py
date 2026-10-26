@@ -30,6 +30,8 @@ What is skipped, and why
   exactly the families that must join on the role digest and never on the name
 * an observed node the probe marked `via_known_wrapper` or `internal`, and the ros2cli
   private names, so tooling that attached itself to the graph is never reported as drift
+* an observed node whose `attrs.child_of` names a parent the profile launches, for
+  `node.observed_only`: the parent creates it, so a restart brings it back
 
 The observed contract this reads
 --------------------------------
@@ -293,6 +295,8 @@ def node_observed_only(atlas: model.Atlas) -> list[model.Finding]:
                 continue
             if says_anything(entity, DECLARED, profile) or says_anything(entity, CODED, profile):
                 continue
+            if started_by_parent(atlas, entity, profile):
+                continue
             namespace, name = runtime_name(entity, fact)
             if is_tooling(namespace, name):
                 continue
@@ -323,6 +327,23 @@ def node_observed_only(atlas: model.Atlas) -> list[model.Finding]:
                 )
             )
     return out
+
+
+def started_by_parent(atlas: model.Atlas, entity: model.Node, profile: str) -> bool:
+    """Whether a node the profile launches creates this one for itself.
+
+    A costmap is a full node that no launch file names: the server that owns it constructs
+    it, so it comes back whenever that server does. `attrs.child_of` names the parents the
+    committed child table gave it, and one of them has to be launched in this profile.
+    """
+    parents = entity.attrs.get("child_of")
+    if not isinstance(parents, dict):
+        return False
+    for parent in sorted(parents):
+        held = atlas.entities.get(parent)
+        if held is not None and says_anything(held, DECLARED, profile):
+            return True
+    return False
 
 
 def is_tooling(namespace: str, name: str) -> bool:

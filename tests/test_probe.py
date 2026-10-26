@@ -439,6 +439,8 @@ def test_summary_counts_what_was_seen() -> None:
 def test_internal_names_are_tooling() -> None:
     assert probe_collect.internal_name("_ros2cli_daemon_0")
     assert probe_collect.internal_name("rosio_probe")
+    assert probe_collect.internal_name("launch_ros_291016")
+    assert not probe_collect.internal_name("launch_ros_bridge")
     assert not probe_collect.internal_name("controller_server")
 
 
@@ -660,8 +662,8 @@ def test_the_proc_collector_writes_argv_with_no_machine_path(ctx: CollectContext
         identity.relative_path("/tmp/launch_params_9f2c", [spec.path for spec in ctx.ws.roots])
     ]
     assert not values["params_files"][0].startswith("/")
-    assert not [item for item in values["argv"] if item.startswith("/opt/")]
-    assert not [item for item in values["argv"] if item.startswith("/tmp/")]
+    assert not [item for item in values["command_line"] if item.startswith("/opt/")]
+    assert not [item for item in values["command_line"] if item.startswith("/tmp/")]
 
 
 def test_a_parameter_assignment_never_carries_the_workspace_path(
@@ -673,7 +675,7 @@ def test_a_parameter_assignment_never_carries_the_workspace_path(
     atlas = ctx.builder.build()
     values = atlas.get(ids.build_node("/demo/talker")).fact(model.Layer.OBSERVED.value, PROFILE_ID)
     assert ["yaml_filename", "@src/fx_pkg/maps/map.yaml"] in values.values["assignments"]
-    assert "yaml_filename:=@src/fx_pkg/maps/map.yaml" in values.values["argv"]
+    assert "yaml_filename:=@src/fx_pkg/maps/map.yaml" in values.values["command_line"]
     assert ws.roots[0].path.encode() not in atlas.canonical_bytes()
 
 
@@ -981,3 +983,147 @@ def test_two_endpoints_of_one_node_on_one_topic_keep_no_order_dependent_qos() ->
     assert first[0].qos is None
     assert "2 publishers on this topic with different qos" in first[0].qos_reason
     assert observed([1, 1])[0].qos.reliability == "reliable"
+
+
+# ---------------------------------------------------------------------------
+# what a live nav2 simulation taught the probe
+
+
+def _child_with_clock(monkeypatch: pytest.MonkeyPatch, censuses: list) -> tuple:
+    from rosio.collect import _probe_child as child
+
+    clock = [0.0]
+    probe = child.Probe({})
+    probe.settle = 1.0
+    monkeypatch.setattr(child.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(probe, "_spin", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    reads = iter(censuses)
+    last = [None]
+
+    def census() -> tuple:
+        last[0] = next(reads, last[0])
+        return last[0]
+
+    monkeypatch.setattr(probe, "_census", census)
+    return probe, clock
+
+
+def test_discovery_waits_until_the_graph_stops_changing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rosio.collect import _probe_child as child
+
+    probe, clock = _child_with_clock(monkeypatch, [("a",), ("a",), ("a", "b")])
+    probe._discover()
+    # the third census grew the graph at 1.5 s, and quiet is counted from there
+    assert clock[0] == pytest.approx(1.0 + 2 * child.DISCOVERY_STEP + child.DISCOVERY_QUIET)
+    assert probe.system.notes == []
+
+
+def test_a_graph_that_never_settles_is_read_and_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rosio.collect import _probe_child as child
+
+    probe, clock = _child_with_clock(monkeypatch, [(n,) for n in range(1000)])
+    probe._discover()
+    assert clock[0] <= 1.0 + child.DISCOVERY_LIMIT + child.DISCOVERY_STEP
+    assert "still changing" in probe.system.notes[0]
+
+
+def test_a_settle_of_zero_waits_for_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    probe, clock = _child_with_clock(monkeypatch, [(n,) for n in range(1000)])
+    probe.settle = 0
+    probe._discover()
+    assert clock[0] == 0
+
+
+def test_a_node_found_after_the_graph_was_read_still_runs() -> None:
+    from types import SimpleNamespace
+
+    from rosio.collect import _probe_child as child
+
+    probe = child.Probe({})
+    probe.node = SimpleNamespace(
+        get_node_names_and_namespaces=lambda: [("amcl", "/"), ("map_server", "/")]
+    )
+    probe._late({"/amcl": {}})
+    [late] = probe.system.nodes
+    assert late.fqn == "/map_server"
+    assert not late.parameters_read
+    assert "/map_server" in probe.system.notes[0]
+
+
+def test_one_parameter_without_a_value_hides_no_other(monkeypatch: pytest.MonkeyPatch) -> None:
+    """rclcpp answers a request naming an uninitialised parameter with no values at all."""
+    msg = pytest.importorskip("rcl_interfaces.msg")
+    from types import SimpleNamespace
+
+    from rosio.collect import _probe_child as child
+
+    value = {"gain": msg.ParameterValue(type=3, double_value=0.5), "plugin": None}
+
+    def call(_type, service, request):
+        if service.endswith("list_parameters"):
+            return SimpleNamespace(result=SimpleNamespace(names=["plugin", "gain"]))
+        found = [value[name] for name in request.names]
+        return SimpleNamespace(values=[] if None in found else found)
+
+    probe = child.Probe({})
+    monkeypatch.setattr(probe, "_call", call)
+    rows, read, _reason = probe._parameters("/controller_server")
+    assert read
+    assert [(row.name, row.value, row.read) for row in rows] == [
+        ("gain", 0.5, True),
+        ("plugin", None, False),
+    ]
+
+
+def test_an_unread_parameter_is_a_blind_spot_and_never_effective(ctx: CollectContext) -> None:
+    system = probe_collect.ObservedSystem(
+        nodes=[
+            probe_collect.ObservedNode(
+                name="talker",
+                namespace="/",
+                fqn="/talker",
+                parameters=(probe_collect.Parameter(name="plugin", read=False),),
+            )
+        ],
+        domain_id="77",
+    ).sort()
+    atlas = _collect(ctx, system)
+    param = atlas.get(ids.build_param(ids.build_node("/talker"), "plugin"))
+    assert param.state == model.ParamState.OTHER.value
+    assert param.effective == {}
+
+
+def test_an_observed_value_type_is_spelled_the_way_the_chain_spells_it(
+    ctx: CollectContext,
+) -> None:
+    atlas = _collect(ctx, _system())
+    param = atlas.get(ids.build_param(ids.build_node("/talker"), "loop_period"))
+    assert param.fact(model.Layer.OBSERVED.value, PROFILE_ID).values["value_type"] == "int"
+
+
+def test_a_node_a_library_creates_is_marked_with_its_wrapper(ctx: CollectContext) -> None:
+    names = [
+        ("/", "bt_navigator"),
+        ("/", "bt_navigator_navigate_to_pose_rclcpp_node"),
+        ("/", "transform_listener_impl_5d3a90"),
+        ("/", "planner_rclcpp_node"),
+    ]
+    system = probe_collect.ObservedSystem(
+        nodes=[
+            probe_collect.ObservedNode(name=name, namespace=ns, fqn=ns + name) for ns, name in names
+        ],
+        domain_id="77",
+    ).sort()
+    atlas = _collect(ctx, system)
+
+    def wrapper(fqn: str) -> str | None:
+        fact = atlas.get(ids.build_node(fqn)).fact(model.Layer.OBSERVED.value, PROFILE_ID)
+        return fact.values.get("via_known_wrapper")
+
+    assert wrapper("/bt_navigator_navigate_to_pose_rclcpp_node") == (
+        "nav2_behavior_tree::BtActionServer"
+    )
+    assert wrapper("/transform_listener_impl_5d3a90") == "tf2_ros::TransformListener"
+    # a name that only ends the same way, with no parent beside it, is not a child node
+    assert wrapper("/planner_rclcpp_node") is None
+    assert wrapper("/bt_navigator") is None

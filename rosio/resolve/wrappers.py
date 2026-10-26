@@ -38,6 +38,7 @@ depends on a constructor argument says so.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -608,6 +609,56 @@ def libraries() -> tuple[str, ...]:
     return tuple(sorted({row.library for row in TABLE}))
 
 
+@dataclass(frozen=True)
+class WrapperNode:
+    """A whole node a library creates on behalf of the node that constructed it.
+
+    `pattern` is matched against the full node name. `{parent}` in it stands for the name of
+    another running node in the same namespace, so a row that needs one cannot match a node
+    that merely ends the same way.
+    """
+
+    symbol: str
+    pattern: str
+    evidence: str = ""
+
+    def matches(self, name: str, siblings: Iterable[str]) -> bool:
+        if "{parent}" not in self.pattern:
+            return re.fullmatch(self.pattern, name) is not None
+        return any(
+            re.fullmatch(self.pattern.replace("{parent}", re.escape(parent)), name) is not None
+            for parent in siblings
+            if parent != name
+        )
+
+
+NODES: tuple[WrapperNode, ...] = (
+    WrapperNode(
+        symbol="tf2_ros::TransformListener",
+        pattern="transform_listener_impl_[0-9a-f]+",
+        evidence="/opt/ros/jazzy/lib/libtf2_ros.so holds the format transform_listener_impl_%zx, "
+        "the node a listener with its own spin thread creates; lib/python3.12/site-packages/"
+        "tf2_ros/transform_listener.py:87 formats the python one the same way",
+    ),
+    WrapperNode(
+        symbol="nav2_behavior_tree::BtActionServer",
+        pattern="{parent}_[A-Za-z0-9_]+_rclcpp_node",
+        evidence="/opt/ros/jazzy/include/nav2_behavior_tree/bt_action_server_impl.hpp:121-129 "
+        "names the client node it creates <node name>_<action name>_rclcpp_node",
+    ),
+)
+"""Nodes a library creates beside the one that constructed it. Checked against ROS jazzy.
+A probe sees them as running nodes that no launch file starts, and without this table each
+one reads as a node that will not come back after a restart, which is false: the node that
+created it brings it back."""
+
+
+def node_wrapper(name: str, siblings: Iterable[str] = ()) -> str:
+    """The symbol of the library that created a node of this name, or an empty string."""
+    peers = tuple(siblings)
+    return next((row.symbol for row in NODES if row.matches(name, peers)), "")
+
+
 __all__ = [
     "ACTION_SERVICE_SUFFIXES",
     "ACTION_TOPIC_SUFFIXES",
@@ -616,11 +667,13 @@ __all__ = [
     "INDEX",
     "LANGUAGES",
     "NAME_SOURCES",
+    "NODES",
     "NODE_ARGUMENT_NAMES",
     "TABLE",
     "Candidate",
     "Wrapper",
     "WrapperEndpoint",
+    "WrapperNode",
     "canonical",
     "discover",
     "endpoints_for",
@@ -629,6 +682,7 @@ __all__ = [
     "is_known",
     "libraries",
     "lookup",
+    "node_wrapper",
     "rows",
     "symbols",
 ]

@@ -3833,3 +3833,28 @@ def test_an_argv_value_this_parser_does_not_model_names_no_value(ws: Workspace):
         blinds = [blind for blind in row.unresolved if blind.reason == ros_args.VALUE_UNMODELLED]
         assert blinds, name
         assert blinds[0].expr == f"-p {name}:={text}", name
+
+
+def test_a_composed_server_creates_its_costmap_too(ws: Workspace):
+    """A launch file loading the component into a container states the class and no
+    executable, and the class constructor is what creates the costmap."""
+    composed = records.ResolvedNode(
+        pkg="nav2_controller",
+        executable="",
+        name="controller_server",
+        namespace="/",
+        plugin_class="nav2_controller::ControllerServer",
+        name_source="literal",
+    )
+    [child] = params_collect.child_nodes(composed)
+    assert params_collect.owner_name(child) == "/local_costmap/local_costmap"
+    assert child.attrs["child_of"] == "node:/controller_server"
+    assert child.attrs["created_by"] == "nav2_controller/nav2_controller::ControllerServer"
+    other = records.ResolvedNode(
+        pkg="nav2_controller",
+        executable="",
+        name="x",
+        namespace="/",
+        plugin_class="nav2_controller::Other",
+    )
+    assert params_collect.child_nodes(other) == []

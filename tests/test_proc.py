@@ -167,7 +167,7 @@ def test_the_named_process_fact_keeps_the_order_argv_states(context):
     values = builder.atlas.entities[ids.build_node("/talker")].facts[0].values
     assert [item.rsplit("/", 1)[-1] for item in values["params_files"]] == ["z.yaml", "a.yaml"]
     assert [pair[0] for pair in values["assignments"]] == ["gain"]
-    assert values["argv"][0] != TALKER
+    assert values["command_line"][0] != TALKER
 
 
 def test_the_node_carries_argv_as_its_name_source(context):
