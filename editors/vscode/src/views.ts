@@ -314,6 +314,7 @@ export class FramesView implements vscode.TreeDataProvider<FrameNode> {
     item.iconPath = worst ? SEVERITY_ICON[worst] : new vscode.ThemeIcon("circle-small");
     const lines = findings.map((f) => `**${f.title}**\n\n${f.say}`);
     if (frame.xyz) lines.push(`xyz ${frame.xyz.join(" ")}, rpy ${(frame.rpy ?? []).join(" ")}`);
+    if (frame.model) item.contextValue = "rosio.inModel";
     if (frame.model) lines.push(`Model: ${frame.model.replace(/^file:/, "").replace("|", "/")}`);
     if (lines.length) item.tooltip = new vscode.MarkdownString(lines.join("\n\n"));
     const at = frame.location ?? frame.broadcasters[0]?.location ?? frame.listeners[0]?.location;

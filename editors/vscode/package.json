@@ -271,6 +271,11 @@
       ],
       "view/item/context": [
         {
+          "command": "rosio.showRobot",
+          "when": "viewItem == rosio.inModel",
+          "group": "navigation"
+        },
+        {
           "command": "rosio.showGraph",
           "when": "viewItem == rosio.graphable",
           "group": "navigation"

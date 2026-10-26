@@ -7,6 +7,8 @@ export type ToRobot = {
   profiles: string[];
   /** Every mesh the model's shapes name, by file id. */
   meshes: Record<string, MeshData>;
+  /** A frame to select, when the view was opened from one. */
+  select?: string;
 };
 
 export type ToRobotHost =

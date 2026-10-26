@@ -110,7 +110,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
     server.onDidChange(() => void refresh()),
     vscode.commands.registerCommand("rosio.openAtlas", () => panel.showAtlas()),
     vscode.commands.registerCommand("rosio.showGraph", (focus?: unknown) => graph.show(graphFocus(focus))),
-    vscode.commands.registerCommand("rosio.showRobot", () => robot.show()),
+    vscode.commands.registerCommand("rosio.showRobot", (from?: unknown) => robot.show(robotFocus(from))),
     vscode.commands.registerCommand("rosio.showEntity", (id: string) => panel.showEntity(id)),
     vscode.commands.registerCommand("rosio.extract", () => extract(server)),
     vscode.commands.registerCommand("rosio.find", () => find(server, panel)),
@@ -135,6 +135,12 @@ async function atlasAge(atlasPath: string): Promise<string> {
   } catch {
     return "not found";
   }
+}
+
+/** A frame row of the Frames view that a model places: show that model with the frame selected. */
+function robotFocus(from: unknown): { frame: string; model: string } | undefined {
+  const row = (from as { frame?: { id?: unknown; model?: unknown } } | undefined)?.frame;
+  return typeof row?.id === "string" && typeof row.model === "string" ? { frame: row.id, model: row.model } : undefined;
 }
 
 /** A graph command reaches here from the palette, from code, or from a row of a side bar view. */

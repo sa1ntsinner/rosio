@@ -2,7 +2,7 @@
 // Text from the workspace is set with textContent only, never parsed as markup.
 import type { GraphSite, MeshData, RobotModel, UrdfShape } from "../src/protocol";
 import type { ToRobot, ToRobotHost } from "../src/robotMessages";
-import { apply, degrees, meshCorners, outline, place, project, rotate, VIEWS, type Pose, type Vec, type View } from "./robotModel";
+import { apply, degrees, meshCorners, outline, place, project, quaternion, relative, rotate, rpyOf, VIEWS, type Pose, type Vec, type View } from "./robotModel";
 
 declare function acquireVsCodeApi(): {
   postMessage(message: ToRobotHost): void;
@@ -19,6 +19,7 @@ type Joint = RobotModel["joints"][number];
 
 let current: ToRobot | undefined;
 let selected: string | null = null;
+let reference: string | null = null;
 let labels = vscode.getState()?.labels ?? true;
 let shapes: Shapes = vscode.getState()?.shapes ?? "visuals";
 const save = () => vscode.setState({ labels, shapes });
@@ -437,9 +438,9 @@ function inspector(robot: RobotModel, poses: Map<string, Pose>): HTMLElement {
     for (const cast of above) panel.append(broadcast(cast));
   }
   const pose = poses.get(link.id);
-  if (pose && parent) {
-    panel.append(h("p", { class: "muted small" }, `From ${plain(rootOf(robot, link.id))}: ${numbers(pose.t)} m`));
-  }
+  const root = rootOf(robot, link.id);
+  const others = robot.links.filter((item) => item.id !== link.id && poses.has(item.id) && rootOf(robot, item.id) === root);
+  if (pose && others.length) panel.append(poseBlock(link.id, pose, others, poses, root));
 
   for (const [title, list] of [["Visual", link.visuals], ["Collision", link.collisions]] as const) {
     if (!list?.length) continue;
@@ -512,6 +513,31 @@ function rootOf(robot: RobotModel, frame: string): string {
   return at;
 }
 
+function poseBlock(id: string, pose: Pose, others: RobotModel["links"], poses: Map<string, Pose>, root: string): HTMLElement {
+  if (!reference || reference === id || !others.some((item) => item.id === reference)) reference = others.some((item) => item.id === root) ? root : others[0].id;
+  const wrap = h("div", { class: "pose" });
+  const choose = h("select", { "aria-label": "Relative to" }) as HTMLSelectElement;
+  for (const item of [...others].sort((a, b) => a.label.localeCompare(b.label))) {
+    const option = h("option", { value: item.id }, item.label) as HTMLOptionElement;
+    option.selected = item.id === reference;
+    choose.append(option);
+  }
+  choose.addEventListener("change", () => {
+    reference = choose.value;
+    render();
+  });
+  const at = relative(poses.get(reference)!, pose);
+  const rpy = rpyOf(at.r);
+  const block = h("dl", { class: "joint-facts" });
+  const row = (term: string, value: string) => block.append(h("dt", {}, term), h("dd", {}, value));
+  row("xyz", `${numbers(at.t)} m`);
+  row("rpy", `${numbers(rpy)} rad (${rpy.map(degrees).join("  ")})`);
+  row("xyzw", numbers(quaternion(at.r)));
+  wrap.append(h("h3", {}, "Pose relative to ", choose), block);
+  wrap.append(h("p", { class: "muted small" }, `What lookupTransform("${plain(reference)}", "${plain(id)}") returns, movable joints at zero.`));
+  return wrap;
+}
+
 function jointBlock(joint: Joint, parentLabel: string, parentId: string): HTMLElement {
   const block = h("dl", { class: "joint-facts" });
   const row = (term: string, value: string | Node) => block.append(h("dt", {}, term), h("dd", {}, value));
@@ -556,6 +582,7 @@ window.addEventListener("message", (event: MessageEvent<ToRobot>) => {
     pan = { x: 0, y: 0, k: 0 };
   }
   current = event.data;
+  if (event.data.select) selected = event.data.select;
   render();
 });
 window.addEventListener("resize", () => current && render());

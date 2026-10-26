@@ -36,6 +36,39 @@ function compose(parent: Pose, xyz: Vec, rpy: Vec): Pose {
   return { r: multiply(parent.r, rpyRotation(rpy)), t: [parent.t[0] + offset[0], parent.t[1] + offset[1], parent.t[2] + offset[2]] };
 }
 
+/** The pose of `b` in the frame of `a`, what lookupTransform(a, b) returns. */
+export function relative(a: Pose, b: Pose): Pose {
+  const inverse = [a.r[0], a.r[3], a.r[6], a.r[1], a.r[4], a.r[7], a.r[2], a.r[5], a.r[8]];
+  return { r: multiply(inverse, b.r), t: rotate(inverse, [b.t[0] - a.t[0], b.t[1] - a.t[1], b.t[2] - a.t[2]]) };
+}
+
+/** Roll, pitch and yaw of a rotation built as Rz(yaw) Ry(pitch) Rx(roll). At a pitch of a quarter turn, roll is taken as zero. */
+export function rpyOf(r: number[]): Vec {
+  const pitch = Math.asin(Math.max(-1, Math.min(1, -r[6])));
+  if (Math.abs(Math.cos(pitch)) < 1e-9) return [0, pitch, Math.atan2(-r[1], r[4])];
+  return [Math.atan2(r[7], r[8]), pitch, Math.atan2(r[3], r[0])];
+}
+
+/** x, y, z, w with w never negative, so one rotation prints one way. */
+export function quaternion(r: number[]): [number, number, number, number] {
+  const trace = r[0] + r[4] + r[8];
+  let q: [number, number, number, number];
+  if (trace > 0) {
+    const k = Math.sqrt(trace + 1) * 2;
+    q = [(r[7] - r[5]) / k, (r[2] - r[6]) / k, (r[3] - r[1]) / k, k / 4];
+  } else if (r[0] > r[4] && r[0] > r[8]) {
+    const k = Math.sqrt(1 + r[0] - r[4] - r[8]) * 2;
+    q = [k / 4, (r[1] + r[3]) / k, (r[2] + r[6]) / k, (r[7] - r[5]) / k];
+  } else if (r[4] > r[8]) {
+    const k = Math.sqrt(1 + r[4] - r[0] - r[8]) * 2;
+    q = [(r[1] + r[3]) / k, k / 4, (r[5] + r[7]) / k, (r[2] - r[6]) / k];
+  } else {
+    const k = Math.sqrt(1 + r[8] - r[0] - r[4]) * 2;
+    q = [(r[2] + r[6]) / k, (r[5] + r[7]) / k, k / 4, (r[3] - r[1]) / k];
+  }
+  return q[3] < 0 ? [-q[0], -q[1], -q[2], -q[3]] : q;
+}
+
 export type Placement = {
   poses: Map<string, Pose>;
   /** Links below a joint whose origin the model does not state readably: drawn nowhere, listed instead. */

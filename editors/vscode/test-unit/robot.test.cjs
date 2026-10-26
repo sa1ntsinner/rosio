@@ -11,7 +11,7 @@ function load(file) {
   return context.module.exports;
 }
 
-const { place, project, rpyRotation, rotate, outline } = load("robotModel.ts");
+const { place, project, rpyRotation, rotate, outline, relative, rpyOf, quaternion } = load("robotModel.ts");
 
 const close = (actual, expected) => actual.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) < 1e-9, `${actual} vs ${expected}`));
 const joint = (parent, child, xyz, rpy) => ({ id: `j:${child}`, name: child, type: "fixed", parent, child, xyz, rpy });
@@ -32,6 +32,25 @@ test("a child origin is taken in its parent's rotated frame", () => {
   close(poses.get("frame:arm").t, [1, 0, 0]);
   close(poses.get("frame:tool").t, [1, 1, 0]);
   assert.deepEqual([...unplaced], []);
+});
+
+test("a pose relative to another frame is taken in that frame's axes", () => {
+  const arm = { r: rpyRotation([0, 0, Math.PI / 2]), t: [1, 0, 0] };
+  const tool = { r: rpyRotation([0, 0, Math.PI / 2]), t: [1, 1, 0] };
+  const pose = relative(arm, tool);
+  close(pose.t, [1, 0, 0]);
+  close(rpyOf(pose.r), [0, 0, 0]);
+  close(relative(tool, arm).t, [-1, 0, 0]);
+});
+
+test("rpy read back from a rotation is the rpy it was built from", () => {
+  for (const rpy of [[0.3, -0.4, 2.1], [-1.2, 0.7, -3], [Math.PI / 2, 0, -Math.PI / 2]]) close(rpyOf(rpyRotation(rpy)), rpy);
+});
+
+test("a quaternion never has a negative w", () => {
+  close(quaternion(rpyRotation([0, 0, Math.PI / 2])), [0, 0, Math.SQRT1_2, Math.SQRT1_2]);
+  assert.ok(quaternion(rpyRotation([Math.PI, 0, 0]))[3] >= 0);
+  close(quaternion(rpyRotation([-Math.PI / 2, 0, -Math.PI / 2])), [-0.5, 0.5, -0.5, 0.5]);
 });
 
 test("a joint without a readable origin leaves its child unplaced instead of at zero", () => {

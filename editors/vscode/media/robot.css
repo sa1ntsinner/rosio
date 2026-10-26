@@ -161,6 +161,17 @@ svg.robot.dragging {
   stroke-width: 2;
   opacity: 1;
 }
+.pose h3 select {
+  margin-left: 4px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 4px;
+  max-width: 60%;
+}
+
 .shape-row { margin: 0 0 4px; font-family: var(--code); font-size: 12px; word-break: break-word; }
 
 .stage canvas.solids {

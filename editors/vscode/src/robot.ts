@@ -17,7 +17,13 @@ export class RobotPanel implements vscode.Disposable {
     private readonly server: Server,
   ) {}
 
-  async show(): Promise<void> {
+  private select: string | undefined;
+
+  async show(focus?: { frame: string; model: string }): Promise<void> {
+    if (focus) {
+      this.model = focus.model;
+      this.select = focus.frame;
+    }
     this.reveal();
     await this.update();
   }
@@ -52,7 +58,8 @@ export class RobotPanel implements vscode.Disposable {
       if (!this.meshes.has(file)) this.meshes.set(file, await this.server.mesh(file));
     }
     const meshes = Object.fromEntries([...files].sort().map((file) => [file, this.meshes.get(file)!]));
-    const message: ToRobot = { type: "robot", robot, profiles, meshes };
+    const message: ToRobot = { type: "robot", robot, profiles, meshes, select: this.select };
+    this.select = undefined;
     await this.panel.webview.postMessage(message);
   }
 
