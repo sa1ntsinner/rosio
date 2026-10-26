@@ -367,7 +367,9 @@ class ProcCollector:
         if item.remaps:
             values["remaps"] = [list(pair) for pair in item.remaps]
         if item.assignments:
-            values["assignments"] = [list(pair) for pair in item.assignments]
+            values["assignments"] = [
+                [key, ctx.ws.stated_value(value)] for key, value in item.assignments
+            ]
         # One slot per layer and profile, written by one run. When the probe already filled
         # it, these keys are added to it and the run that owns the slot stays the probe's:
         # the two halves describe one running node and must not become two facts.
@@ -431,7 +433,7 @@ def _token(ctx: CollectContext, value: str) -> str:
     """
     text = str(value)
     if not text.startswith("/"):
-        return text
+        return ctx.ws.stated_value(text)
     if identity.under_temp(text, [spec.path for spec in ctx.ws.roots]) or _looks_like_path(text):
         return _path_token(ctx, text)
     try:

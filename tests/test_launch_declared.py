@@ -2143,3 +2143,48 @@ def test_a_walk_that_timed_out_beside_others_is_walked_again_alone(
     finally:
         ctx.close()
     assert ctx.builder.build().canonical_bytes() == build(ws, cases).canonical_bytes()
+
+
+def test_the_walk_taken_again_runs_after_every_queued_walk_finished(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rosio.resolve import launch_exec
+
+    cases = {"first": ["plain_node"], "second": ["param_order"]}
+    by_path = {
+        _abs(json.loads((EXPECTED / f"{case}.json").read_text())["entry"]): (slug, case)
+        for slug, names in cases.items()
+        for case in names
+    }
+    running: list[str] = []
+    beside: list[list[str]] = []
+    second_started = threading.Event()
+
+    def walk(path: str, **_options: object) -> records.LaunchWalk:
+        slug, case = by_path[path]
+        if threading.current_thread() is threading.main_thread():
+            beside.append(list(running))
+            return walk_for(case, slug)
+        if slug == "first":
+            second_started.wait(5)
+            timed_out = records.LaunchWalk(entry_path=path, strategy="refused", loadable=False)
+            timed_out.exceptions.append(
+                records.WalkException(
+                    path=path, phase="visit", exc_type="TimeoutExpired", message="slow"
+                )
+            )
+            return timed_out
+        running.append(slug)
+        second_started.set()
+        time.sleep(0.5)
+        running.remove(slug)
+        return walk_for(case, slug)
+
+    _ready(monkeypatch)
+    monkeypatch.setattr(launch_exec, "walk", walk)
+    ctx = _context(ws, cases)
+    try:
+        get(launch_declared.NAME).collect(ctx)
+    finally:
+        ctx.close()
+    assert beside == [[]]

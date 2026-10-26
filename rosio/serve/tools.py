@@ -1148,7 +1148,8 @@ def _rpy_of(r: Matrix) -> list[float]:
 
 
 def _quaternion_of(r: Matrix) -> list[float]:
-    """x, y, z, w with w kept non negative so one rotation prints one way."""
+    """x, y, z, w in one form per rotation: w is kept non negative, and when w is zero (a half
+    turn) the first non zero of x, y and z is kept positive, since q and -q are one rotation."""
     trace = r[0][0] + r[1][1] + r[2][2]
     if trace > 0:
         s = 2 * math.sqrt(1 + trace)
@@ -1162,7 +1163,8 @@ def _quaternion_of(r: Matrix) -> list[float]:
     else:
         s = 2 * math.sqrt(1 + r[2][2] - r[0][0] - r[1][1])
         q = [(r[0][2] + r[2][0]) / s, (r[1][2] + r[2][1]) / s, s / 4, (r[1][0] - r[0][1]) / s]
-    return [-item for item in q] if q[3] < 0 else q
+    lead = next((item for item in (q[3], *q[:3]) if abs(item) > 1e-9), 0.0)
+    return [-item for item in q] if lead < 0 else q
 
 
 def _computed(values: Sequence[float]) -> str:
@@ -1184,8 +1186,16 @@ def _stated(values: object) -> str:
     return " ".join(out)
 
 
+ORIGIN_FIELDS = ("origin.xyz", "origin.rpy")
+
+
+def _unread_origin(hop: _Hop) -> list[str]:
+    """What of the origin did not read. A limit, a mimic or an axis does not place a frame."""
+    return [item for item in hop.values.get("unreadable") or () if item in ORIGIN_FIELDS]
+
+
 def _readable(hop: _Hop) -> bool:
-    return not hop.values.get("unreadable") and all(
+    return not _unread_origin(hop) and all(
         isinstance(hop.values.get(key), (list, tuple))
         and len(hop.values[key]) == 3
         and all(isinstance(item, (int, float)) for item in hop.values[key])
@@ -1231,7 +1241,9 @@ def _chain_answer(
             hop.parent,
             hop.child,
             hop.node,
-            *(_stated(hop.values.get(k)) for k in ("joint", "joint_type", "xyz", "rpy")),
+            str(hop.values.get("joint") or ""),
+            str(hop.values.get("joint_type") or ""),
+            *(_stated(hop.values.get(k)) for k in ("xyz", "rpy")),
         )
         for hop in hops
     )
@@ -1254,7 +1266,7 @@ def _chain_answer(
     if blind:
         return ("unreadable", key), [
             f"  joint {blind[0].values.get('joint', '?')} states an origin that is not numbers "
-            f"({', '.join(blind[0].values.get('unreadable') or ['origin'])}), so nothing is "
+            f"({', '.join(_unread_origin(blind[0]) or ['origin'])}), so nothing is "
             "composed; expand the model with xacro or write the numbers",
             *chain,
         ]

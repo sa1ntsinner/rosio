@@ -31,7 +31,7 @@ from __future__ import annotations
 import dataclasses
 import os
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -484,6 +484,10 @@ class LaunchDeclaredCollector:
             started = ctx.launch_walks.pop(_started_key(spec, entry, path), None)
             walk = started.result() if state.ok and started is not None else None
             if state.ok and (walk is None or _timed_out(walk)):
+                if walk is not None:
+                    # Alone: the child's timeout is wall time, so the walks still queued
+                    # finish first and only this one competes for the box.
+                    wait([item for item in ctx.launch_walks.values() if isinstance(item, Future)])
                 walk = walker.walk(path, **_walk_options(ctx, spec, entry))
             elif not state.ok:
                 # Nothing on this box can build a launch description, so the source reader

@@ -304,6 +304,41 @@ def test_a_declared_chain_keeps_its_state_when_the_probe_speaks(ctx: CollectCont
     assert param.fact(model.Layer.OBSERVED.value, PROFILE_ID).values["value"] == 20
 
 
+def test_a_path_value_reads_the_same_in_the_declared_and_the_observed_layer(
+    ctx: CollectContext, ws: Workspace
+) -> None:
+    """The declared chain names a root by its label, so the probe has to as well, or every
+    path valued parameter disagrees with itself and no absolute path reaches the slot."""
+    path = f"{ws.roots[0].path}/fx_pkg/maps/map.yaml"
+    node_id = ids.build_node("/map_server")
+    param_id = ids.build_param(node_id, "yaml_filename")
+    ctx.builder.fact(
+        param_id,
+        model.Layer.DECLARED.value,
+        profile=PROFILE_ID,
+        values={"value": ws.stated_value(path)},
+        confidence=model.Confidence.CERTAIN.value,
+    )
+    system = probe_collect.ObservedSystem(
+        nodes=[
+            probe_collect.ObservedNode(
+                name="map_server",
+                namespace="/",
+                fqn="/map_server",
+                parameters=(
+                    probe_collect.Parameter(name="yaml_filename", value=path, type="string"),
+                ),
+            )
+        ],
+    ).sort()
+    param = _collect(ctx, system).get(param_id)
+    assert param.fact(model.Layer.OBSERVED.value, PROFILE_ID).values["value"] == (
+        "@src/fx_pkg/maps/map.yaml"
+    )
+    assert param.conflicts == []
+    assert param.agreement == "agree"
+
+
 def test_a_node_that_did_not_answer_is_unread_and_never_empty(ctx: CollectContext) -> None:
     atlas = _collect(ctx, _system())
     owner = ids.build_node("/robot_state_publisher")
@@ -627,6 +662,19 @@ def test_the_proc_collector_writes_argv_with_no_machine_path(ctx: CollectContext
     assert not values["params_files"][0].startswith("/")
     assert not [item for item in values["argv"] if item.startswith("/opt/")]
     assert not [item for item in values["argv"] if item.startswith("/tmp/")]
+
+
+def test_a_parameter_assignment_never_carries_the_workspace_path(
+    ctx: CollectContext, ws: Workspace
+) -> None:
+    path = f"{ws.roots[0].path}/fx_pkg/maps/map.yaml"
+    argv = (*TALKER_ARGV, "-p", f"yaml_filename:={path}")
+    proc_collect.ProcCollector(processes=[proc_collect.parse(argv)]).collect(ctx)
+    atlas = ctx.builder.build()
+    values = atlas.get(ids.build_node("/demo/talker")).fact(model.Layer.OBSERVED.value, PROFILE_ID)
+    assert ["yaml_filename", "@src/fx_pkg/maps/map.yaml"] in values.values["assignments"]
+    assert "yaml_filename:=@src/fx_pkg/maps/map.yaml" in values.values["argv"]
+    assert ws.roots[0].path.encode() not in atlas.canonical_bytes()
 
 
 def test_the_proc_collector_records_an_unnamed_process_as_a_blind_spot(

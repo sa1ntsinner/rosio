@@ -967,7 +967,13 @@ class ProbeCollector:
                     LAYER,
                     profile=profile,
                     run=run,
-                    values={"value": param.value, "value_type": param.type, "name": param.name},
+                    values={
+                        # The declared chain states a path by its root label, and the two
+                        # layers must spell one value one way or they disagree about nothing.
+                        "value": ctx.ws.stated_value(param.value),
+                        "value_type": param.type,
+                        "name": param.name,
+                    },
                     confidence=model.Confidence.CERTAIN.value,
                 )
                 builder.count_resolved(model.Want.PARAM_VALUE.value)

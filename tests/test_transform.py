@@ -170,3 +170,45 @@ def test_the_answer_is_the_same_twice(atlas):
     assert tools.transform(atlas, "laser_link", "base_link") == tools.transform(
         atlas, "laser_link", "base_link"
     )
+
+
+def _joint(atlas: model.Atlas, joint: str, file_id: str = MODEL_A) -> dict:
+    return next(
+        item.facts[0].values
+        for item in atlas.edges.values()
+        if item.kind == "tf_parent"
+        and item.facts[0].values["joint"] == joint
+        and item.facts[0].values["model"] == file_id
+    )
+
+
+def test_an_unreadable_limit_does_not_stop_a_readable_origin():
+    atlas = build(second_model=False)
+    _joint(atlas, "pan_joint")["unreadable"] = ["limit.lower", "mimic.multiplier"]
+
+    answer = tools.transform(atlas, "laser_link", "base_link")
+
+    assert "not numbers" not in answer
+    assert "translation xyz [0.1 0.2 0.6] m" in answer
+
+
+def test_two_models_with_one_pose_through_different_joints_are_two_answers(atlas):
+    _joint(atlas, "mast_joint", MODEL_B)["xyz"] = [0.1, 0.0, 0.5]
+    pan = _joint(atlas, "pan_joint", MODEL_B)
+    pan["joint"], pan["joint_type"] = "pan_mount", "fixed"
+
+    answer = tools.transform(atlas, "laser_link", "base_link")
+
+    assert "2 robot models state this chain differently" in answer
+    assert "joint pan_mount (fixed) mast -> pan" in answer
+    assert "bot/urdf/b.urdf:30" in answer
+
+
+def test_a_half_turn_prints_one_quaternion_whichever_way_it_was_written():
+    answers = []
+    for yaw in (math.pi, -math.pi):
+        atlas = build(second_model=False)
+        _joint(atlas, "mast_joint")["rpy"] = [0.0, 0.0, yaw]
+        answers.append(tools.transform(atlas, "mast", "base_link"))
+
+    assert all("quaternion xyzw [0 0 1 0]" in answer for answer in answers)

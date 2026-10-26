@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -1099,10 +1100,14 @@ def _prefix_marks(prefix: str) -> list[tuple[bytes, bytes]]:
     )
 
 
+# A root ends where a name ends, so `/ws/src` never rewrites `/ws/src_backup`.
+_NAME_ENDS = r"(?![\w.+~@-])"
+
+
 def _replaced(value: Any, rows: Sequence[tuple[str, str]]) -> Any:
     if isinstance(value, str):
         for path, mark in rows:
-            value = value.replace(path, mark)
+            value = re.sub(re.escape(path) + _NAME_ENDS, lambda _, mark=mark: mark, value)
         return value
     if isinstance(value, list):
         return [_replaced(item, rows) for item in value]
