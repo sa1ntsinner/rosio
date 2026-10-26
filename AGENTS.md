@@ -666,7 +666,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.15`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.16`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -748,6 +748,18 @@ What was added, in the order it arrived:
   and `meshes_absent`, added in `1.15`: the `package://` meshes the urdf collector looked for
   and did not find, split by whether the package source holds the same package relative path.
 
+* in `1.16`, the launch exception row `env`, the environment variable a launch file read with
+  `os.environ[...]` and the profile did not set, which `launch.raised` names in its fix. A
+  launch entity `file_reads` row of role `robot_model` gained `xacro_args`, the arguments the
+  `xacro` command of that node passes, sorted by name because xacro folds them into a map. A
+  profile whose arguments change the links or joints of the model states that expansion in
+  its own `(declared, profile)` slot: the frames, and tf_parent edges keyed by model, joint and
+  profile whose values carry the same `xacro_args`. The expansion with the defaults stays the
+  urdf collector's `*` statement. An argument the walk could not perform is the blind spot
+  `xacro_argument_unresolved` under the frame want, and no frame is named for it. A model file
+  named `.urdf` that holds xacro markup is now expanded as xacro, which ends the frame ids that
+  spelled `${namespace}` and that no running system ever names.
+
 One key went in `1.6` without a major bump, and it is named here rather than left for a reader
 to find. The declared `node` fact carried `conditions`, the conditions of the launch site that
 started the node. A node started from two sites with different conditions (nav2's
@@ -769,7 +781,7 @@ discriminator, so a failure inside one node is one finding per node rather than 
 message, which had folded two nodes failing on one missing package into a single finding
 that named neither. A row without `kept` keeps the id it had.
 
-A reader pinned to `1.0` still loads a `1.15` file: `Atlas.from_json` compares the major
+A reader pinned to `1.0` still loads a `1.16` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

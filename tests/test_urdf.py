@@ -811,3 +811,109 @@ def test_a_missing_package_mesh_says_whether_the_source_holds_it(tmp_path: Path)
     assert attrs["meshes_not_installed"] == ["package://bot/meshes/body.stl"]
     assert attrs["meshes_absent"] == ["package://bot/meshes/gone.stl"]
     assert atlas.entities[ids.build_pkg("bot")].attrs["build_type"] == "ament_python"
+
+
+# ---------------------------------------------------------------------------
+# a model named .urdf that holds xacro, and the profile that loads it with arguments
+
+PREFIXED = (
+    '<robot name="bot" xmlns:xacro="http://ros.org/wiki/xacro">'
+    '<xacro:arg name="namespace" default=""/>'
+    '<xacro:property name="namespace" value="$(arg namespace)"/>'
+    '<link name="${namespace}base_link"/><link name="${namespace}base_scan"/>'
+    '<joint name="${namespace}scan_joint" type="fixed">'
+    '<parent link="${namespace}base_link"/><child link="${namespace}base_scan"/>'
+    '<origin xyz="0.1 0 0.2" rpy="0 0 0"/></joint></robot>'
+)
+
+
+def _prefixed(tmp_path: Path) -> tuple[Workspace, Config, Path]:
+    package = tmp_path / "src" / "bot"
+    (package / "urdf").mkdir(parents=True)
+    (package / "package.xml").write_text(
+        "<package format='3'><name>bot</name><version>0.0.0</version>"
+        "<description>d</description><maintainer email='a@b.c'>a</maintainer>"
+        "<license>Apache-2.0</license></package>",
+        encoding="utf-8",
+    )
+    path = package / "urdf" / "bot.urdf"
+    path.write_text(PREFIXED, encoding="utf-8")
+    roots = (RootSpec("src", str(tmp_path / "src")),)
+    return Workspace.discover(list(roots)), Config(roots=roots, profiles=()), path
+
+
+def test_xacro_markup_is_told_apart_from_a_namespace_declaration(tmp_path: Path) -> None:
+    plain = tmp_path / "plain.urdf"
+    plain.write_text(
+        '<robot name="bot" xmlns:xacro="http://ros.org/wiki/xacro">'
+        '<!-- <xacro:property name="r" value="${1}"/> --><link name="base_link"/></robot>',
+        encoding="utf-8",
+    )
+    marked = tmp_path / "marked.urdf"
+    marked.write_text(PREFIXED, encoding="utf-8")
+    assert not urdf_collect.uses_xacro(str(plain))
+    assert urdf_collect.uses_xacro(str(marked))
+
+
+@pytest.mark.ros
+def test_a_urdf_holding_xacro_is_expanded_and_never_names_the_expression(tmp_path: Path) -> None:
+    ws, cfg, _path = _prefixed(tmp_path)
+    builder = model.AtlasBuilder()
+    urdf_collect.UrdfCollector().collect(CollectContext(ws=ws, cfg=cfg, builder=builder))
+    atlas = builder.build()
+    frames = sorted(item.id for item in atlas.by_kind("frame"))
+    assert frames == [ids.build_frame("base_link"), ids.build_frame("base_scan")]
+    edge = next(item for item in atlas.edges.values() if item.kind == "tf_parent")
+    assert edge.facts[0].values["strategy"] == "xacro"
+    assert "xacro_args" not in edge.facts[0].values
+
+
+def _loaded(tmp_path: Path, args: tuple[tuple[str, str], ...]) -> tuple[model.Atlas, bool]:
+    ws, cfg, path = _prefixed(tmp_path)
+    builder = model.AtlasBuilder()
+    urdf_collect.UrdfCollector().collect(CollectContext(ws=ws, cfg=cfg, builder=builder))
+    builder.add_profile("tb3")
+    run = builder.add_run("declared", profile="profile:tb3", input_digest="d", roots={})
+    ctx = CollectContext(ws=ws, cfg=cfg, builder=builder)
+    wrote = urdf_collect.emit_loaded(ctx, run, "profile:tb3", str(path), args)
+    return builder.build(), wrote
+
+
+@pytest.mark.ros
+def test_a_profile_loading_the_model_with_arguments_states_the_frames_it_runs(
+    tmp_path: Path,
+) -> None:
+    atlas, wrote = _loaded(tmp_path, (("namespace", "tb3/"),))
+    assert wrote
+    scan = atlas.entities[ids.build_frame("tb3/base_scan")]
+    assert [fact.profile for fact in scan.facts] == ["profile:tb3"]
+    assert scan.attrs["urdf_models"] == [ids.build_file("bot", "urdf/bot.urdf")]
+    edge = next(
+        item
+        for item in atlas.edges.values()
+        if item.kind == "tf_parent" and item.src == ids.build_frame("tb3/base_scan")
+    )
+    assert edge.dst == ids.build_frame("tb3/base_link")
+    assert edge.facts[0].profile == "profile:tb3"
+    assert edge.facts[0].values["xacro_args"] == [["namespace", "tb3/"]]
+    assert edge.facts[0].values["xyz"] == [0.1, 0.0, 0.2]
+    # the expansion with the defaults still stands for every profile
+    assert ids.build_frame("base_scan") in atlas.entities
+    assert schema.validate(atlas.to_json()) == []
+
+
+@pytest.mark.ros
+def test_arguments_that_give_the_default_model_add_nothing(tmp_path: Path) -> None:
+    atlas, wrote = _loaded(tmp_path, (("namespace", ""),))
+    assert not wrote
+    assert sorted(item.id for item in atlas.by_kind("frame")) == [
+        ids.build_frame("base_link"),
+        ids.build_frame("base_scan"),
+    ]
+
+
+@pytest.mark.ros
+def test_a_profile_expansion_is_the_same_twice(tmp_path: Path) -> None:
+    first, _ = _loaded(tmp_path / "a", (("namespace", "tb3/"),))
+    second, _ = _loaded(tmp_path / "b", (("namespace", "tb3/"),))
+    assert first.canonical_bytes() == second.canonical_bytes()

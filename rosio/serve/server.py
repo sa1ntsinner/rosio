@@ -178,9 +178,10 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
     store = source
 
     def transform(source: str, target: str, profile: str = "", model: str = "") -> str:
-        """Where one frame sits relative to another, composed from the robot model joints:
-        the pose of source in the target frame, xyz in metres, rpy and quaternion, then the
-        chain joint by joint with file and line. A frame such as laser_link or base_link.
+        """Where one frame sits relative to another, composed from the robot model joints
+        and the static_transform_publisher nodes launch files start: the pose of source in
+        the target frame, xyz in metres, rpy and quaternion, then the chain link by link with
+        file and line. A frame such as laser_link or base_link.
         It stops at a transform a node broadcasts at run time, and answers once per robot
         model when models disagree; model names one model file."""
         return tools.transform(store.atlas(), source, target, profile=profile, model=model)

@@ -450,6 +450,33 @@ def test_orphan_root_still_fires_inside_one_model_beside_another_robot():
     assert [item.subject for item in found] == ["frame:laser_mount"]
 
 
+def _prefixed_atlas(*, broken_joint: bool) -> AtlasBuilder:
+    """One model expanded with its defaults for every profile, and with a namespace argument
+    for one profile, the way turtlebot3 passes `namespace:=tb3/` to xacro."""
+    builder = _builder()
+    robot = _model_file(builder, "fx_robot.urdf")
+    for frame in ("base_link", "os_sensor"):
+        _link(builder, frame, [robot])
+    _joint(builder, robot, "sensor_joint", "base_link", "os_sensor", [0.4, 0.0, 0.25])
+    for frame in ("tb3/base_link", "tb3/os_sensor", "tb3/laser"):
+        _link(builder, frame, [robot])
+    joint = ("tb3/sensor_joint", "tb3/base_link", "tb3/os_sensor", [0.4, 0.0, 0.25])
+    _joint(builder, robot, *joint, profile=NAV)
+    if broken_joint:
+        _link(builder, "tb3/laser_mount", [robot])
+        _joint(builder, robot, "tb3/laser_joint", "tb3/laser_mount", "tb3/laser", [0.1, 0, 0], NAV)
+    return builder
+
+
+def test_orphan_root_is_silent_on_a_model_one_profile_expands_with_its_own_arguments():
+    assert frame_rules.frame_orphan_root(_prefixed_atlas(broken_joint=False).build()) == []
+
+
+def test_orphan_root_still_fires_inside_the_expansion_one_profile_loads():
+    found = frame_rules.frame_orphan_root(_prefixed_atlas(broken_joint=True).build())
+    assert [item.subject for item in found] == ["frame:tb3/laser_mount"]
+
+
 def test_orphan_root_keeps_its_id_across_two_runs():
     first = _ids(frame_rules.frame_orphan_root(_orphan_atlas(tied=False).build()))
     second = _ids(frame_rules.frame_orphan_root(_orphan_atlas(tied=False).build()))

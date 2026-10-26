@@ -79,6 +79,7 @@ class _Row:
 
     __slots__ = (
         "because",
+        "env",
         "exc_type",
         "kept",
         "label",
@@ -97,6 +98,7 @@ class _Row:
         self.message = str(row.get("message", ""))
         self.because = str(row.get("refused_because", ""))
         self.kept = str(row.get("kept", ""))
+        self.env = str(row.get("env", ""))
 
     def key(self, rule: str) -> tuple[str, str]:
         if rule == RULE_UNLOADABLE:
@@ -199,6 +201,18 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
                 "file build its description without raising"
             )
         )
+        say = _raised_say(first.label, first.exc_type, first.phase, first.message, first.kept)
+        slugs = ", ".join(ids.parse_profile(item) for item in _profile_ids(rows))
+        if first.env and not first.kept and slugs:
+            fix = (
+                f"set {first.env} under env of profile {slugs} in rosio.yaml, to the value "
+                "the robot is started with"
+            )
+            say = (
+                f"{first.label} reads the environment variable {first.env}, which profile "
+                f"{slugs} does not set, so the nodes it starts are missing from this atlas: "
+                f"set {first.env} under env of that profile in rosio.yaml."
+            )
         findings.append(
             Finding(
                 rule=RULE_RAISED,
@@ -209,9 +223,7 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
                 ),
                 detail=_raised_detail(first.phase, first.message, first.kept),
                 fix=fix,
-                say=_raised_say(
-                    first.label, first.exc_type, first.phase, first.message, first.kept
-                ),
+                say=say,
                 discriminator=key[1],
                 profiles=_profile_ids(rows),
                 layers=[model.Layer.DECLARED.value],

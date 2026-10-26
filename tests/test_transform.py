@@ -8,6 +8,7 @@ import math
 import pytest
 
 from rosio import ids, model
+from rosio.model import ANY_PROFILE as ANY
 from rosio.model import Source
 from rosio.serve import tools
 
@@ -26,7 +27,7 @@ JOINTS = (
 )
 
 
-def build(second_model: bool = True) -> model.Atlas:
+def build(second_model: bool = True, static: list[str] | None = None) -> model.Atlas:
     builder = model.AtlasBuilder()
     builder.declare_layer("declared", present=True)
     builder.declare_layer("coded", present=True)
@@ -72,6 +73,8 @@ def build(second_model: bool = True) -> model.Atlas:
         evidence=[Source(file=ODOM_SRC, locator="sendTransform", line_hint=88)],
     )
     builder.node(ids.build_frame("camera_optical"))
+    if static is not None:
+        _static_tie(builder, static)
     return builder.build()
 
 
@@ -212,3 +215,111 @@ def test_a_half_turn_prints_one_quaternion_whichever_way_it_was_written():
         answers.append(tools.transform(atlas, "mast", "base_link"))
 
     assert all("quaternion xyzw [0 0 1 0]" in answer for answer in answers)
+
+
+LAUNCH = ids.build_file("bot_bringup", "launch/tie.launch.py")
+TIE = ids.build_node("/laser_tie")
+
+
+def with_static(argv: list[str]) -> model.Atlas:
+    """Model a, plus a static_transform_publisher a launch file starts on laser_link."""
+    return build(second_model=False, static=argv)
+
+
+def _static_tie(builder: model.AtlasBuilder, argv: list[str]) -> None:
+    # no collector mints the child frame a static publisher names, so `scan` has no entity
+    builder.node(LAUNCH)
+    builder.node(TIE, name_source="literal")
+    builder.fact(
+        TIE,
+        "declared",
+        profile=REAL,
+        values={"executable": "static_transform_publisher", "pkg": "tf2_ros", "argv": argv},
+        evidence=[
+            Source(file="file:@repo|rosio/resolve/known_names.py", locator="tf2_ros"),
+            Source(file=LAUNCH, locator="Node(static_transform_publisher)", line_hint=30),
+        ],
+    )
+
+
+FLAGS = ["--x", "0.1", "--yaw", "1.5707963267948966", "--frame-id", "laser_link"]
+
+
+def test_a_static_publisher_on_the_chain_composes_and_names_its_launch_line():
+    atlas = with_static([*FLAGS, "--child-frame-id", "scan", "--ros-args", "-r", "__node:=tie"])
+    answer = tools.transform(atlas, "scan", "base_link", profile="real")
+
+    assert "translation xyz [0.1 0.3 0.6] m" in answer
+    assert "static laser_link -> scan by /laser_tie (declared): xyz [0.1 0 0]" in answer
+    assert "bot_bringup/launch/tie.launch.py:30" in answer
+    assert "known_names" not in answer
+    assert "not static" not in answer
+
+
+def test_the_positional_quaternion_form_composes_the_same_pose():
+    half = "0.7071068"
+    atlas = with_static(["0.1", "0", "0", "0", "0", half, half, "laser_link", "scan"])
+    answer = tools.transform(atlas, "scan", "base_link", profile="real")
+
+    assert "translation xyz [0.1 0.3 0.6] m" in answer
+    assert "quaternion xyzw [0 0 0.7071068 0.7071068] at" in answer
+
+
+def test_a_static_argument_that_is_not_a_number_is_named_and_not_composed():
+    atlas = with_static(
+        ["--x", "$(var offset)", "--frame-id", "laser_link", "--child-frame-id", "scan"]
+    )
+    answer = tools.transform(atlas, "scan", "base_link", profile="real")
+
+    assert "/laser_tie starts with arguments that are not numbers (xyz)" in answer
+    assert "translation" not in answer
+
+
+def _expansion(builder: model.AtlasBuilder, profile: str, prefix: str, mast: float) -> None:
+    for joint, kind, parent, child, xyz, rpy, _line in JOINTS:
+        if joint == "mast_joint":
+            xyz = [0.1, 0.0, mast]
+        for frame in (parent, child):
+            builder.node(ids.build_frame(prefix + frame))
+        builder.edge(
+            "tf_parent",
+            ids.build_frame(prefix + child),
+            ids.build_frame(prefix + parent),
+            key=ids.edge_key(model=MODEL_A, joint=prefix + joint, profile=profile),
+            layer="declared",
+            profile=profile,
+            values={
+                "model": MODEL_A,
+                "joint": prefix + joint,
+                "joint_type": kind,
+                "strategy": "xacro",
+                "xyz": xyz,
+                "rpy": rpy,
+            },
+            confidence="certain",
+            evidence=[Source(file=MODEL_A, locator=f"joint[{prefix}{joint}]")],
+        )
+
+
+def test_a_profile_expansion_of_a_model_replaces_the_defaults_for_that_profile():
+    """A profile that hands xacro its own arguments runs that expansion. Asked for that
+    profile, the expansion answers. Asked for no profile, the defaults answer."""
+    builder = model.AtlasBuilder()
+    builder.declare_layer("declared", present=True)
+    builder.add_profile("sim")
+    builder.node(MODEL_A)
+    _expansion(builder, ANY, "", 0.5)
+    _expansion(builder, SIM, "", 0.7)
+    _expansion(builder, SIM, "tb3/", 0.9)
+    atlas = builder.build()
+
+    assert "translation xyz [0.1 0.2 0.8] m" in tools.transform(
+        atlas, "laser_link", "base_link", profile="sim"
+    )
+    assert "translation xyz [0.1 0.2 1] m" in tools.transform(
+        atlas, "tb3/laser_link", "tb3/base_link", profile="sim"
+    )
+    assert "translation xyz [0.1 0.2 0.6] m" in tools.transform(atlas, "laser_link", "base_link")
+    assert "translation xyz [0.1 0.2 1] m" in tools.transform(
+        atlas, "tb3/laser_link", "tb3/base_link"
+    )

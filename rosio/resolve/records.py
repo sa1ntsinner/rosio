@@ -133,9 +133,15 @@ class Gate:
 
 @dataclass(frozen=True)
 class FileRead:
+    """A file a node reads. A robot model a `xacro` command expands carries the arguments the
+    command passes, sorted by name, or `blind`, the command text, when one of them is a
+    substitution the walk could not perform."""
+
     path: str
     role: str
     site: Site | None = None
+    xacro_args: tuple[tuple[str, str], ...] = ()
+    blind: str = ""
 
 
 @dataclass(frozen=True)
@@ -190,13 +196,17 @@ class WalkException:
 
     `kept` names the action the walk still recorded without the part that failed, such as
     `Node(rviz2)` whose `-d` argument names an unbuilt package. Empty means the failure
-    dropped whatever the action would have started."""
+    dropped whatever the action would have started.
+
+    `env` names the environment variable the file read with `os.environ[...]` and the
+    profile did not set, which is the one thing the user has to add to the profile."""
 
     path: str
     phase: str
     exc_type: str
     message: str
     kept: str = ""
+    env: str = ""
 
     def __post_init__(self) -> None:
         _check(self.phase, WALK_PHASES, "walk phase")

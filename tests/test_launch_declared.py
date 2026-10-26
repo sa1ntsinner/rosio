@@ -1104,6 +1104,32 @@ def test_a_node_kept_after_its_expansion_raised_is_named_and_not_called_missing(
     assert [f.id for f in drift_build.launch_raised(again)] == [finding.id]
 
 
+def _environment_walk(env: str) -> records.LaunchWalk:
+    entry = WS / "src/lx_bringup/launch/plain_node.launch.py"
+    failure = records.WalkException(
+        path=str(entry), phase="describe", exc_type="KeyError", message="'ROBOT_MODEL'", env=env
+    )
+    return records.LaunchWalk(entry_path=str(entry), profile="robot", exceptions=[failure])
+
+
+def test_an_unset_environment_variable_tells_the_user_what_to_set(ws: Workspace) -> None:
+    """turtlebot3 reads `os.environ['TURTLEBOT3_MODEL']` before it builds anything, so a
+    profile without it loads no robot model at all."""
+    atlas = _run_walk(ws, _environment_walk("ROBOT_MODEL"), "robot", "plain_node.launch.py")
+    (finding,) = drift_build.launch_raised(atlas)
+    assert "environment variable ROBOT_MODEL" in finding.say
+    assert "profile robot" in finding.say
+    assert finding.fix.startswith("set ROBOT_MODEL under env of profile robot in rosio.yaml")
+    (row,) = atlas.by_kind("run")[0].attrs["exceptions"]
+    assert row["env"] == "ROBOT_MODEL"
+    plain = _run_walk(ws, _environment_walk(""), "robot", "plain_node.launch.py")
+    (near,) = drift_build.launch_raised(plain)
+    assert "environment variable" not in near.say
+    assert "env" not in plain.by_kind("run")[0].attrs["exceptions"][0]
+    # the subject, the discriminator and the detail are the ones the raise always had
+    assert (near.id, near.fingerprint) == (finding.id, finding.fingerprint)
+
+
 def test_a_raise_that_kept_no_action_still_reports_the_missing_nodes(ws: Workspace) -> None:
     atlas = _run_walk(ws, _expansion_walk(""), "kept", "plain_node.launch.py")
     (finding,) = drift_build.launch_raised(atlas)
@@ -2188,3 +2214,110 @@ def test_the_walk_taken_again_runs_after_every_queued_walk_finished(
     finally:
         ctx.close()
     assert beside == [[]]
+
+
+# ---------------------------------------------------------------------------
+# a robot model one profile loads with its own xacro arguments
+
+PREFIXED_MODEL = (
+    '<robot name="bot" xmlns:xacro="http://ros.org/wiki/xacro">'
+    '<xacro:arg name="namespace" default=""/>'
+    '<link name="$(arg namespace)base_link"/><link name="$(arg namespace)base_scan"/>'
+    '<joint name="$(arg namespace)scan_joint" type="fixed">'
+    '<parent link="$(arg namespace)base_link"/><child link="$(arg namespace)base_scan"/>'
+    '<origin xyz="0.1 0 0.2"/></joint></robot>'
+)
+
+
+TB3_READ = (((("namespace", "tb3/"),), ""),)
+
+
+def _model_profile(tmp_path: Path, reads: tuple, text: str = PREFIXED_MODEL, **node) -> model.Atlas:
+    package = tmp_path / "src" / "bot"
+    (package / "launch").mkdir(parents=True)
+    (package / "urdf").mkdir()
+    (package / "package.xml").write_text(
+        "<package format='3'><name>bot</name><version>0.0.0</version>"
+        "<description>d</description><maintainer email='a@b.c'>a</maintainer>"
+        "<license>Apache-2.0</license></package>",
+        encoding="utf-8",
+    )
+    (package / "urdf" / "bot.urdf").write_text(text, encoding="utf-8")
+    entry = package / "launch" / "bringup.launch.py"
+    entry.write_text("def generate_launch_description():\n    pass\n", encoding="utf-8")
+    roots = (RootSpec("src", str(tmp_path / "src")),)
+    ws = Workspace.discover(list(roots))
+    reads = tuple(
+        records.FileRead(str(package / "urdf" / "bot.urdf"), "robot_model", None, args, blind)
+        for args, blind in reads
+    )
+    walk = records.LaunchWalk(
+        entry_path=str(entry),
+        profile="tb3",
+        nodes=[
+            records.ResolvedNode(
+                pkg="robot_state_publisher",
+                executable="robot_state_publisher",
+                namespace="",
+                entity_path=("Node(robot_state_publisher)",),
+                file_reads=reads,
+                **node,
+            )
+        ],
+    )
+    cfg = Config(
+        roots=roots,
+        profiles=(
+            ProfileSpec(
+                slug="tb3",
+                entrypoints=(Entrypoint(verb="launch", pkg="bot", target="bringup.launch.py"),),
+            ),
+        ),
+    )
+    builder = model.AtlasBuilder()
+    ctx = CollectContext(ws=ws, cfg=cfg, builder=builder)
+    ctx.declared.walks.append(walk)
+    get(launch_declared.NAME).collect(ctx)
+    return builder.build()
+
+
+@pytest.mark.ros
+def test_a_profile_states_the_frames_its_xacro_arguments_make(tmp_path: Path) -> None:
+    atlas = _model_profile(tmp_path, TB3_READ)
+    scan = atlas.entities[ids.build_frame("tb3/base_scan")]
+    assert [(fact.layer, fact.profile) for fact in scan.facts] == [("declared", "profile:tb3")]
+    (site,) = atlas.by_kind("launchent")
+    (read,) = site.facts[0].values["file_reads"]
+    assert read["xacro_args"] == [["namespace", "tb3/"]]
+    assert schema.validate(atlas.to_json()) == []
+    again = _model_profile(tmp_path / "again", TB3_READ)
+    assert atlas.canonical_bytes() == again.canonical_bytes()
+
+
+@pytest.mark.ros
+def test_a_model_argument_nobody_could_perform_names_no_frame(tmp_path: Path) -> None:
+    atlas = _model_profile(tmp_path, (((), "xacro @src/bot/urdf/bot.urdf namespace:=Ns(...)"),))
+    assert not atlas.by_kind("frame")
+    (blind,) = [entry for entry in atlas.unresolved if entry.reason == "xacro_argument_unresolved"]
+    assert blind.owner == ids.build_file("bot", "urdf/bot.urdf")
+    assert blind.want == model.Want.FRAME_ID.value
+
+
+@pytest.mark.ros
+def test_a_model_behind_a_false_condition_is_not_loaded(tmp_path: Path) -> None:
+    atlas = _model_profile(tmp_path, TB3_READ, attrs={"unreachable": True})
+    assert ids.build_frame("tb3/base_scan") not in atlas.entities
+
+
+@pytest.mark.ros
+def test_a_model_xacro_refuses_with_the_profile_arguments_is_a_blind_spot(tmp_path: Path) -> None:
+    gated = (
+        '<robot name="bot" xmlns:xacro="http://ros.org/wiki/xacro">'
+        '<xacro:arg name="flag" default="true"/>'
+        '<xacro:if value="$(arg flag)"><link name="base_link"/></xacro:if></robot>'
+    )
+    atlas = _model_profile(tmp_path, (((("flag", "maybe"),), ""),), gated)
+    (blind,) = [entry for entry in atlas.unresolved if entry.reason == "xacro_failed"]
+    assert blind.expr == "xacro file:bot|urdf/bot.urdf flag:=maybe"
+    assert blind.want == model.Want.FRAME_ID.value
+    assert str(tmp_path) not in model.dumps(atlas.to_json())

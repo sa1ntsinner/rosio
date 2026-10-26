@@ -26,6 +26,8 @@ HEADER = """\
 #            Merge the entry points that start together into one profile, state the
 #            arguments they are started with, and delete the rest. A finding is always
 #            about one profile, so a profile nobody runs only produces noise.
+#            A launch file that reads an environment variable, such as a robot model
+#            name, needs it under env of the profile:  env: {TURTLEBOT3_MODEL: burger}
 """
 
 

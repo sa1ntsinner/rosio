@@ -325,6 +325,10 @@ def _command_text(value: str) -> str | None:
 
 
 class _Commands:
+    def __init__(self) -> None:
+        self.partial: set[str] = set()
+        """Command texts holding a part the walk could not perform, spelled as described."""
+
     def install(self) -> None:
         from launch import LaunchContext
         from launch.substitutions import Command
@@ -341,14 +345,18 @@ class _Commands:
 
         def perform(command, context):
             parts = []
+            described = False
             for part in command.command:
                 try:
                     parts.append(substitutions.perform(context, part))
                 except BaseException:
                     parts.append(substitutions.describe_value(part))
+                    described = True
             text = "".join(parts)
             text = _command_text(text) or text
             self.performed.append(text)
+            if described:
+                self.partial.add(text)
             return "__rosio_command_" + text.encode("utf-8").hex() + "__"
 
         def evaluate(value, context):
@@ -600,7 +608,9 @@ class Walker:
             return load_python_launch_file_as_module(self.entry)
         except BaseException as exc:
             self._raised("import", exc, self.entry)
-            self.result.loadable = False
+            # A module that reads an unset variable at import is a launch file the profile
+            # has not configured yet, which launch.raised says, and not a file of another kind.
+            self.result.loadable = bool(self.result.exceptions[-1].env)
             return None
 
     def _describe(self, module):
@@ -1024,7 +1034,7 @@ class Walker:
             site=_action_site(description, frame.file, f"ComposableNode({disc})"),
             attrs={} if reachable else {"unreachable": True},
         )
-        node = _finish_node(node, self.roots, self.models.texts())
+        node = _finish_node(node, self.roots, self.models.texts(), self.commands.partial)
         self.result.nodes.append(node)
 
     def _node(self, action, frame: _Frame) -> records.ResolvedNode | None:
@@ -1110,7 +1120,7 @@ class Walker:
             site=_action_site(action, frame.file, f"{type(action).__name__}({disc})"),
             attrs=attrs,
         )
-        node = _finish_node(node, self.roots, self.models.texts())
+        node = _finish_node(node, self.roots, self.models.texts(), self.commands.partial)
         self.result.nodes.append(node)
         if form == "lifecycle_node":
             self._lifecycle_nodes.append((action, node))
@@ -1152,7 +1162,7 @@ class Walker:
             node,
             role_content=_role_content(node.argv, node.remaps, node.params, self.roots),
         )
-        node = _finish_node(node, self.roots, self.models.texts())
+        node = _finish_node(node, self.roots, self.models.texts(), self.commands.partial)
         self.result.nodes.append(node)
 
     # ------------------------------------------------------------------
@@ -1426,9 +1436,30 @@ class Walker:
             message = f"{locator}: {message}"
         self.result.exceptions.append(
             records.WalkException(
-                path=path, phase=phase, exc_type=type(exc).__name__, message=message, kept=kept
+                path=path,
+                phase=phase,
+                exc_type=type(exc).__name__,
+                message=message,
+                kept=kept,
+                env=_unset_environment(exc),
             )
         )
+
+
+def _unset_environment(exc: BaseException) -> str:
+    """The variable an `os.environ[...]` lookup raised on, or an empty string.
+
+    Only a KeyError raised inside `os.environ` itself counts: a dictionary lookup in the launch
+    file raises the same type for a different reason, and naming it as the environment would
+    send the user to set a variable nothing reads."""
+    if not isinstance(exc, KeyError) or len(exc.args) != 1 or not isinstance(exc.args[0], str):
+        return ""
+    trace = exc.__traceback__
+    while trace is not None and trace.tb_next is not None:
+        trace = trace.tb_next
+    if trace is None or trace.tb_frame.f_code.co_name != "__getitem__":
+        return ""
+    return exc.args[0] if trace.tb_frame.f_locals.get("self") is os.environ else ""
 
 
 # ---------------------------------------------------------------------------
@@ -1568,7 +1599,10 @@ def _plain(value):
 
 
 def _finish_node(
-    node: records.ResolvedNode, roots, texts: dict[str, set[str]] | None = None
+    node: records.ResolvedNode,
+    roots,
+    texts: dict[str, set[str]] | None = None,
+    partial: set[str] | frozenset[str] = frozenset(),
 ) -> records.ResolvedNode:
     blinds = [(gate.command_role, command) for gate in node.gates for command in gate.commands]
 
@@ -1640,13 +1674,16 @@ def _finish_node(
     for key, expr in node.command_blinds:
         text = substitutions.command_text(expr, lambda path: identity.relative_path(path, roots))
         role += (f"command:{key}:{text}",)
-    return replace(node, file_reads=_file_reads(node, texts), role_content=role)
+    return replace(node, file_reads=_file_reads(node, texts, partial), role_content=role)
 
 
 def _file_reads(
-    node: records.ResolvedNode, texts: dict[str, set[str]] | None = None
+    node: records.ResolvedNode,
+    texts: dict[str, set[str]] | None = None,
+    partial: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[records.FileRead, ...]:
     reads: set[tuple[str, str]] = set()
+    models: set[tuple[str, tuple[tuple[str, str], ...], str]] = set()
 
     def commands(value):
         marked = uncarried_reason(value)
@@ -1656,7 +1693,20 @@ def _file_reads(
             except ValueError:
                 return
             if len(words) > 1 and Path(words[0]).name == "xacro" and Path(words[1]).is_absolute():
-                reads.add((words[1], "robot_model"))
+                blind = marked[0] if any(text in marked[0] for text in partial) else ""
+                # xacro folds its mappings into a dict, so a repeated name takes its last value
+                args = tuple(
+                    sorted(
+                        {
+                            key: stated
+                            for word in words[2:]
+                            if not word.startswith("-")
+                            for key, sep, stated in [word.partition(":=")]
+                            if sep and key
+                        }.items()
+                    )
+                )
+                models.add((words[1], () if blind else args, blind))
         elif isinstance(value, (list, tuple)):
             for item in value:
                 commands(item)
@@ -1681,7 +1731,12 @@ def _file_reads(
             if flag == "--params-file":
                 role = "parameters_file"
             reads.add((word, role))
-    return tuple(records.FileRead(path, role, node.site) for path, role in sorted(reads))
+    out = [records.FileRead(path, role, node.site) for path, role in reads]
+    out.extend(
+        records.FileRead(path, "robot_model", node.site, xacro_args=args, blind=blind)
+        for path, args, blind in models
+    )
+    return tuple(sorted(out, key=lambda item: (item.path, item.role, item.xacro_args, item.blind)))
 
 
 UNCARRIED = "~uncarried"

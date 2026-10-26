@@ -554,6 +554,7 @@ def encode_walk(walk_result: records.LaunchWalk) -> dict[str, Any]:
                 "exc_type": item.exc_type,
                 "message": item.message,
                 **({"kept": item.kept} if item.kept else {}),
+                **({"env": item.env} if item.env else {}),
             }
             for item in walk_result.exceptions
         ],
@@ -601,6 +602,7 @@ def decode_walk(
                 exc_type=str(item.get("exc_type", "Exception")),
                 message=str(item.get("message", "")),
                 kept=str(item.get("kept", "")),
+                env=str(item.get("env", "")),
             )
             for item in payload.get("exceptions", ())
         ],
@@ -648,7 +650,17 @@ def _encode_node(node: records.ResolvedNode) -> dict[str, Any]:
         ],
         "argv": list(node.argv),
         "file_reads": [
-            {"path": item.path, "role": item.role, "site": _encode_site(item.site)}
+            {
+                "path": item.path,
+                "role": item.role,
+                "site": _encode_site(item.site),
+                **(
+                    {"xacro_args": [list(pair) for pair in item.xacro_args]}
+                    if item.xacro_args
+                    else {}
+                ),
+                **({"blind": item.blind} if item.blind else {}),
+            }
             for item in node.file_reads
         ],
         "command_blinds": [list(pair) for pair in node.command_blinds],
@@ -713,6 +725,8 @@ def _decode_node(payload: Mapping[str, Any], workspace: Workspace | None) -> rec
                 path=str(item["path"]),
                 role=str(item["role"]),
                 site=_decode_site(item.get("site"), workspace),
+                xacro_args=tuple((str(k), str(v)) for k, v in item.get("xacro_args", ())),
+                blind=str(item.get("blind", "")),
             )
             for item in payload.get("file_reads", ())
         ),

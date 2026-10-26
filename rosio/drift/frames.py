@@ -513,8 +513,14 @@ def frame_orphan_root(atlas: Atlas) -> list[Finding]:
     played = _in_play(atlas, _tf_rows(atlas))
     for row in played:
         links.append((row.child, row.parent))
+        # A profile that expands a model with its own xacro arguments runs that tree instead
+        # of the default one, so the two expansions are two robots here and never one robot
+        # with a second root.
+        source = row.model
+        if row.model and row.profile != model.ANY_PROFILE:
+            source = f"{row.model} {row.profile}"
         for frame in (row.child, row.parent):
-            sources.setdefault(frame, set()).add(row.model)
+            sources.setdefault(frame, set()).add(source)
         if row.directed:
             children.add(row.child)
     for pair in _static_pairs(atlas):

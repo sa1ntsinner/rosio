@@ -189,6 +189,86 @@ def test_an_unknown_xacro_path_never_becomes_a_file(tmp_path: Path):
     assert not walk.nodes[0].file_reads
 
 
+def _xacro_walk(tmp_path: Path, namespace: str, args=()) -> records.LaunchWalk:
+    model = tmp_path / "robot.urdf"
+    model.write_text("<robot name='bot'/>", encoding="utf-8")
+    entry = tmp_path / "model.launch.py"
+    entry.write_text(
+        "from launch import LaunchDescription\n"
+        "from launch.substitutions import Command, LaunchConfiguration\n"
+        "from launch_ros.actions import Node\n"
+        "def generate_launch_description():\n"
+        f"    ns = {namespace}\n"
+        "    return LaunchDescription([Node(package='robot_state_publisher', "
+        "executable='robot_state_publisher', parameters=[{'robot_description': "
+        f"Command(['xacro ', {str(model)!r}, ' namespace:=', ns, ' use_sim:=false'])}}])])\n"
+    )
+    return launch_exec.walk(str(entry), args=args)
+
+
+@pytest.mark.ros
+def test_a_model_command_carries_its_xacro_arguments(tmp_path: Path):
+    walk = _xacro_walk(tmp_path, "LaunchConfiguration('namespace')", [("namespace", "tb3/")])
+    assert not walk.exceptions
+    (read,) = walk.nodes[0].file_reads
+    assert read.role == "robot_model"
+    assert read.xacro_args == (("namespace", "tb3/"), ("use_sim", "false"))
+    assert read.blind == ""
+
+
+@pytest.mark.ros
+def test_a_model_argument_the_walk_cannot_perform_is_blind_and_names_nothing(tmp_path: Path):
+    walk = _xacro_walk(tmp_path, "LaunchConfiguration('never_declared')")
+    (read,) = walk.nodes[0].file_reads
+    assert read.role == "robot_model"
+    assert read.xacro_args == ()
+    assert "never_declared" in read.blind
+
+
+@pytest.mark.ros
+def test_an_unset_environment_variable_is_named(tmp_path: Path):
+    entry = tmp_path / "env.launch.py"
+    entry.write_text(
+        "import os\n"
+        "from launch import LaunchDescription\n"
+        "def generate_launch_description():\n"
+        "    os.environ['ROSIO_TEST_MODEL']\n"
+        "    return LaunchDescription([])\n"
+    )
+    walk = launch_exec.walk(str(entry))
+    assert [(e.exc_type, e.env) for e in walk.exceptions] == [("KeyError", "ROSIO_TEST_MODEL")]
+    stated = launch_exec.walk(str(entry), env=[("ROSIO_TEST_MODEL", "burger")])
+    assert not stated.exceptions
+
+
+@pytest.mark.ros
+def test_a_variable_read_at_import_leaves_a_launch_file_loadable(tmp_path: Path):
+    """turtlebot3's navigation2.launch.py reads its model at module level. The file is a
+    launch file the profile has not configured, not a file of another kind."""
+    entry = tmp_path / "import_env.launch.py"
+    entry.write_text(
+        "import os\n"
+        "MODEL = os.environ['ROSIO_TEST_MODEL']\n"
+        "def generate_launch_description():\n"
+        "    from launch import LaunchDescription\n"
+        "    return LaunchDescription([])\n"
+    )
+    walk = launch_exec.walk(str(entry))
+    assert [(e.phase, e.env) for e in walk.exceptions] == [("import", "ROSIO_TEST_MODEL")]
+    assert walk.loadable
+    broken = tmp_path / "import_error.launch.py"
+    broken.write_text("import not_a_module_anywhere\n")
+    assert not launch_exec.walk(str(broken)).loadable
+
+
+@pytest.mark.ros
+def test_a_dictionary_key_error_is_not_an_environment_variable(tmp_path: Path):
+    entry = tmp_path / "dict.launch.py"
+    entry.write_text("def generate_launch_description():\n    return {}['ROSIO_TEST_MODEL']\n")
+    walk = launch_exec.walk(str(entry))
+    assert [(e.exc_type, e.env) for e in walk.exceptions] == [("KeyError", "")]
+
+
 URDF = '<?xml version="1.0"?>\n<robot name="bot">\n  <link name="base_link"/>\n</robot>\n'
 
 

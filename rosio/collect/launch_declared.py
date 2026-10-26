@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from rosio import ids, model
-from rosio.collect import CollectContext, register
+from rosio.collect import CollectContext, register, urdf
 from rosio.config import Entrypoint, ProfileSpec
 from rosio.errors import CollectorError, ContractError
 from rosio.resolve import identity, records, ros_args, substitutions
@@ -315,6 +315,8 @@ class LaunchDeclaredCollector:
                 }
                 if failure.kept:
                     row["kept"] = failure.kept
+                if failure.env:
+                    row["env"] = failure.env
                 if _unrun(failure):
                     # A file only a process writes is the walk's blind spot, stated by the
                     # unresolved entry of this file, and nothing the launch file can repair.
@@ -410,6 +412,7 @@ class LaunchDeclaredCollector:
         for entry_node in runs:
             self._emit_run_node(ctx, spec, run, entry_node, late)
         self._emit_lifecycle(ctx, spec, run, placed, late)
+        self._emit_models(ctx, spec, run, placed, late)
 
         ctx.builder.fact(
             profile_id,
@@ -430,6 +433,78 @@ class LaunchDeclaredCollector:
             evidence=[_source(ctx.ws, path) for path in sorted(dict.fromkeys(entry_files))],
         )
         late.sort(key=_problem_key)
+
+    def _emit_models(
+        self,
+        ctx: CollectContext,
+        spec: ProfileSpec,
+        run: str,
+        placed: Sequence[_Placed],
+        late: list[dict[str, Any]],
+    ) -> None:
+        """The robot models this profile hands its nodes through a xacro command.
+
+        The urdf collector expands every model with its own defaults, for every profile at
+        once. A launch line that passes arguments changes the model the profile runs:
+        turtlebot3 passes `namespace:=tb3/` and its state publisher then names `tb3/base_scan`,
+        not `base_scan`. So the profile states the model it loads in its own slot. An argument
+        the walk could not perform is a blind spot, and the frames it would name are never
+        guessed.
+        """
+        profile_id = ids.build_profile(spec.slug)
+        loaded: dict[tuple[str, tuple[tuple[str, str], ...]], model.Source] = {}
+        for row in placed:
+            # a site whose condition read false never loads its model in this profile
+            if row.node.attrs.get("unreachable") or any(
+                gate.outcome == "false" for gate in row.node.gates
+            ):
+                continue
+            for read in row.node.file_reads:
+                if read.role != "robot_model" or not _in_workspace(ctx.ws, read.path):
+                    continue
+                if read.blind:
+                    ctx.builder.unresolved(
+                        model.Unresolved(
+                            want=model.Want.FRAME_ID.value,
+                            owner=ctx.ws.file_id(read.path),
+                            expr=ctx.ws.stated_value(read.blind, ctx.cfg.ros_setup),
+                            reason="xacro_argument_unresolved",
+                            role="xacro",
+                            resolvable_by=["state the launch argument the command reads"],
+                            evidence=[row.source],
+                        )
+                    )
+                elif read.xacro_args:
+                    loaded.setdefault((read.path, read.xacro_args), row.source)
+        for (path, args), source in sorted(loaded.items(), key=lambda item: item[0]):
+            try:
+                urdf.emit_loaded(ctx, run, profile_id, path, args)
+            except (CollectorError, ContractError) as exc:
+                file_id = ctx.ws.file_id(path)
+                message = ctx.ws.stated_value(str(exc).replace(path, file_id), ctx.cfg.ros_setup)
+                late.append(
+                    {
+                        "path": _problem_path(source.file),
+                        "phase": "visit",
+                        "exc_type": type(exc).__name__,
+                        "message": message,
+                    }
+                )
+                # the frames this profile runs are unknown, and the blind spot says so
+                ctx.builder.unresolved(
+                    model.Unresolved(
+                        want=model.Want.FRAME_ID.value,
+                        owner=file_id,
+                        expr=ctx.ws.stated_value(
+                            " ".join(["xacro", file_id, *(f"{k}:={v}" for k, v in args)]),
+                            ctx.cfg.ros_setup,
+                        ),
+                        reason="xacro_failed",
+                        role="xacro",
+                        resolvable_by=["fix what the xacro tool refused"],
+                        evidence=[source],
+                    )
+                )
 
     # ------------------------------------------------------------------
     # walks
@@ -1691,15 +1766,20 @@ def _include_args(ws: Workspace, include: records.LaunchInclude) -> list[list[An
     return out
 
 
-def _read_values(ctx: CollectContext, node: records.ResolvedNode) -> list[dict[str, str]]:
-    out = []
+def _read_values(ctx: CollectContext, node: records.ResolvedNode) -> list[dict[str, Any]]:
+    out: dict[tuple[str, str], dict[str, Any]] = {}
     for read in node.file_reads:
         if not _in_workspace(ctx.ws, read.path):
             continue
         file_id = ctx.ws.file_id(read.path)
         ctx.builder.node(file_id)
-        out.append({"file": file_id, "role": read.role})
-    return sorted(out, key=lambda row: (row["file"], row["role"]))
+        row: dict[str, Any] = {"file": file_id, "role": read.role}
+        if read.xacro_args:
+            row["xacro_args"] = ctx.ws.stated_value([list(pair) for pair in read.xacro_args])
+        # A model read both as text and through its command is one read, with its arguments.
+        if len(row) >= len(out.get((file_id, read.role), {})):
+            out[(file_id, read.role)] = row
+    return [out[key] for key in sorted(out)]
 
 
 def _param_values(ws: Workspace, item: records.ParamSource) -> dict[str, Any]:

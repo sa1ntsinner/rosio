@@ -1023,6 +1023,8 @@ class _Hop:
     site: str
     node: str = ""
     layer: str = ""
+    static: bool = False
+    """A static_transform_publisher a launch file starts: its numbers are in its argv."""
 
 
 def _frame_ref(name: object) -> str:
@@ -1040,8 +1042,14 @@ def _first_site(evidence: Sequence) -> str:
 
 
 def _model_joints(atlas: Atlas, wanted: str) -> dict[str, dict[str, _Hop]]:
-    """Model file id to child frame to the joint placing it. A urdf edge runs child first."""
-    out: dict[str, dict[str, _Hop]] = {}
+    """Model file id to child frame to the joint placing it. A urdf edge runs child first.
+
+    A profile that loads a model with its own xacro arguments states that expansion in its
+    own slot. Asked for that profile, it replaces the expansion with the defaults. Asked for
+    no profile, the defaults answer for every frame they place, and the profile expansions
+    for the frames only they name."""
+    own: dict[str, dict[str, _Hop]] = {}
+    shared: dict[str, dict[str, _Hop]] = {}
     for handle in sorted(atlas.edges):
         edge = atlas.edges[handle]
         if edge.kind != "tf_parent":
@@ -1052,9 +1060,12 @@ def _model_joints(atlas: Atlas, wanted: str) -> dict[str, dict[str, _Hop]]:
                 continue
             if wanted and fact.profile not in (wanted, ANY_PROFILE):
                 continue
+            into = shared if fact.profile == ANY_PROFILE else own
             hop = _Hop(edge.dst, edge.src, fact.values, _first_site(fact.evidence))
-            out.setdefault(model_id, {}).setdefault(edge.src, hop)
-    return out
+            into.setdefault(model_id, {}).setdefault(edge.src, hop)
+    if wanted:
+        return {**shared, **own}
+    return {key: {**own.get(key, {}), **shared.get(key, {})} for key in sorted({*own, *shared})}
 
 
 def _broadcast_hops(atlas: Atlas, wanted: str) -> dict[str, list[_Hop]]:
@@ -1081,6 +1092,110 @@ def _broadcast_hops(atlas: Atlas, wanted: str) -> dict[str, list[_Hop]]:
                         fact.layer,
                     )
                 )
+    return out
+
+
+STATIC_TF = "static_transform_publisher"
+
+_STATIC_FLAGS = {
+    "--x": ("xyz", 0),
+    "--y": ("xyz", 1),
+    "--z": ("xyz", 2),
+    "--roll": ("rpy", 0),
+    "--pitch": ("rpy", 1),
+    "--yaw": ("rpy", 2),
+    "--qx": ("quaternion", 0),
+    "--qy": ("quaternion", 1),
+    "--qz": ("quaternion", 2),
+    "--qw": ("quaternion", 3),
+}
+_STATIC_PARENT = ("--frame-id", "--frame_id")
+_STATIC_CHILD = ("--child-frame-id", "--child_frame_id")
+
+
+def _static_argv(argv: Sequence[object]) -> tuple[str, str, dict] | None:
+    """(parent, child, values) from the argv of a static_transform_publisher.
+
+    Both forms tf2_ros reads: the flags, where an omitted number is the zero and the identity
+    rotation tf2_ros itself takes, and the positional `x y z yaw pitch roll parent child` or
+    `x y z qx qy qz qw parent child`. A word that is not a number is named, never read as 0.
+    """
+    words = [str(item) for item in argv]
+    if "--ros-args" in words:
+        words = words[: words.index("--ros-args")]
+    stated: dict[str, list[str]] = {
+        "xyz": ["0", "0", "0"],
+        "rpy": ["0", "0", "0"],
+        "quaternion": ["0", "0", "0", "1"],
+    }
+    given: set[str] = set()
+    parent = child = ""
+    if any(word.startswith("--") for word in words):
+        for index, word in enumerate(words[:-1]):
+            if word in _STATIC_PARENT:
+                parent = words[index + 1]
+            elif word in _STATIC_CHILD:
+                child = words[index + 1]
+            elif word in _STATIC_FLAGS:
+                key, slot = _STATIC_FLAGS[word]
+                stated[key][slot] = words[index + 1]
+                given.add(key)
+    elif len(words) == 8:
+        stated["xyz"] = words[:3]
+        stated["rpy"] = [words[5], words[4], words[3]]
+        parent, child = words[6], words[7]
+    elif len(words) == 9:
+        stated["xyz"], stated["quaternion"] = words[:3], words[3:7]
+        given.add("quaternion")
+        parent, child = words[7], words[8]
+    parent, child = _frame_ref(parent), _frame_ref(child)
+    if not parent or not child:
+        return None
+    quaternion = "quaternion" in given
+    keys = ("xyz", "quaternion") if quaternion else ("xyz", "rpy")
+    values: dict = {}
+    unreadable = []
+    for key in keys:
+        try:
+            values[key] = [float(word) for word in stated[key]]
+        except ValueError:
+            unreadable.append(key)
+    if unreadable:
+        values["unreadable"] = unreadable
+    elif quaternion:
+        values["rpy"] = _rpy_of(_rotation_q(values["quaternion"]))
+    return parent, child, values
+
+
+def _rotation_q(q: Sequence[float]) -> Matrix:
+    norm = math.sqrt(sum(item * item for item in q)) or 1.0
+    x, y, z, w = (item / norm for item in q)
+    return [
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ]
+
+
+def _static_hops(atlas: Atlas, wanted: str) -> dict[str, list[_Hop]]:
+    """Child frame to the static_transform_publisher nodes that place it, read off the argv
+    the declared layer recorded, with the launch line that starts each one."""
+    out: dict[str, list[_Hop]] = {}
+    for node in atlas.by_kind("node"):
+        for fact in node.facts:
+            if fact.values.get("executable") != STATIC_TF or fact.confidence == "unknown":
+                continue
+            if wanted and fact.profile not in (wanted, ANY_PROFILE):
+                continue
+            read = _static_argv(fact.values.get("argv") or [])
+            if read is None:
+                continue
+            parent, child, values = read
+            # The launch line, not the name table row that may sit beside it.
+            sites = [row for row in fact.evidence if not row.file.startswith("file:@repo|")]
+            hop = _Hop(parent, child, values, _first_site(sites), node.id, fact.layer, True)
+            if not any(item.node == hop.node for item in out.get(child, [])):
+                out.setdefault(child, []).append(hop)
     return out
 
 
@@ -1205,6 +1320,16 @@ def _readable(hop: _Hop) -> bool:
 
 def _hop_line(hop: _Hop) -> str:
     frames = f"{ids.parse_frame(hop.parent)} -> {ids.parse_frame(hop.child)}"
+    if hop.static:
+        rotation = (
+            f"quaternion xyzw [{_stated(hop.values['quaternion'])}]"
+            if "quaternion" in hop.values
+            else f"rpy [{_stated(hop.values.get('rpy'))}]"
+        )
+        return (
+            f"    static {frames} by {slices.label(hop.node)} ({hop.layer}): "
+            f"xyz [{_stated(hop.values.get('xyz'))}] {rotation} at {hop.site}"
+        )
     if hop.node:
         return f"    broadcast {frames} by {slices.label(hop.node)} ({hop.layer}) at {hop.site}"
     kind = str(hop.values.get("joint_type") or "unknown type")
@@ -1253,7 +1378,7 @@ def _chain_answer(
         f"  chain from {name_t} {' and '.join(legs) or 'to itself'}, {_many(len(hops), 'link')}:",
         *(_hop_line(hop) for hop in hops),
     ]
-    casted = [hop for hop in hops if hop.node]
+    casted = [hop for hop in hops if hop.node and not hop.static]
     if casted:
         first = casted[0]
         return ("stop", key), [
@@ -1263,6 +1388,13 @@ def _chain_answer(
             *chain,
         ]
     blind = [hop for hop in hops if not _readable(hop)]
+    if blind and blind[0].static:
+        return ("unreadable", key), [
+            f"  {slices.label(blind[0].node)} starts with arguments that are not numbers "
+            f"({', '.join(blind[0].values.get('unreadable') or ['origin'])}), so nothing is "
+            "composed",
+            *chain,
+        ]
     if blind:
         return ("unreadable", key), [
             f"  joint {blind[0].values.get('joint', '?')} states an origin that is not numbers "
@@ -1317,17 +1449,22 @@ def transform(
     profile: str | None = None,
     model: str | None = None,
 ) -> str:
-    """Where `source` sits relative to `target`, composed from the robot model joints.
+    """Where `source` sits relative to `target`, composed from the robot model joints and the
+    static_transform_publisher nodes the launch files start.
 
     The pose of the source frame in the target frame, the transform lookupTransform(target,
     source) returns. A broadcast on the chain stops the composition, movable joints are taken
     at zero, and models that state the chain differently answer one each.
     """
     wanted = _profile_id(atlas, profile)
+    casts = _static_hops(atlas, wanted)
+    # a static publisher names its child frame in its argv, and no collector mints an entity
+    # for it, so the frames it places are frames here too
+    placed = {frame for hops in casts.values() for hop in hops for frame in (hop.child, hop.parent)}
     frames = []
     for name in (source, target):
         frame = _frame_ref(name)
-        if not frame or frame not in atlas.entities:
+        if not frame or (frame not in atlas.entities and frame not in placed):
             every = sorted(item.label for item in atlas.by_kind("frame"))
             near = [item for item in every if _text(name).lower() in item.lower()]
             return _fit(
@@ -1342,7 +1479,8 @@ def transform(
         frames.append(frame)
     src, tgt = frames
     joints = _model_joints(atlas, wanted)
-    casts = _broadcast_hops(atlas, wanted)
+    for child, hops in _broadcast_hops(atlas, wanted).items():
+        casts.setdefault(child, []).extend(hops)
     loads = _model_profiles(atlas)
     models = sorted(joints)
     if _text(model):
@@ -1368,7 +1506,8 @@ def transform(
     lines = [
         f"{name_s} relative to {name_t}: the pose of {name_s} in the {name_t} frame, as "
         f'lookupTransform("{name_t}", "{name_s}") returns it',
-        "  static robot model geometry, metres and radians, rpy fixed axis "
+        "  static robot model geometry and static publisher arguments, metres and radians, "
+        "rpy fixed axis "
         "R = Rz(yaw) Ry(pitch) Rx(roll), line numbers advisory",
     ]
     if not models:

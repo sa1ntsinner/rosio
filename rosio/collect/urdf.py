@@ -825,6 +825,23 @@ def _include(
     return XacroInclude(raw=raw, package=package, resolved=resolved)
 
 
+def uses_xacro(path: str) -> bool:
+    """Whether a file holds xacro markup: an element in the xacro namespace, or a `${...}`
+    or `$(...)` expression outside a comment. A namespace declaration alone is not markup,
+    and neither is commented out xacro, which nav2's own tb3 model carries."""
+    try:
+        root = ElementTree.fromstring(Path(path).read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ElementTree.ParseError):
+        return False
+    for element in root.iter():
+        if _xacro_namespace(element.tag) is not None:
+            return True
+        texts = [element.text or "", *element.attrib.values()]
+        if any("${" in text or "$(" in text for text in texts):
+            return True
+    return False
+
+
 def xacro_available() -> bool:
     return shutil.which("xacro") is not None
 
@@ -881,6 +898,11 @@ class UrdfCollector:
         profile = ids.build_profile(ctx.profile) if ctx.profile else model.ANY_PROFILE
         urdfs = [path for path in ws.source_files([URDF_SUFFIX]) if _describes(ws, path)]
         xacros = [path for path in ws.source_files([XACRO_SUFFIX]) if _describes(ws, path)]
+        # A model named .urdf that holds xacro markup is a xacro model. Read as urdf, its
+        # `${namespace}base_scan` became a frame id no running system ever names.
+        marked = [path for path in urdfs if uses_xacro(path)]
+        urdfs = [path for path in urdfs if path not in marked]
+        xacros = sorted(xacros + marked)
         parsed: list[tuple[str, UrdfModel]] = []
         exceptions: list[dict[str, Any]] = []
         refusals: list[tuple[str, str, str]] = []
@@ -937,14 +959,7 @@ class UrdfCollector:
         frame_shapes: dict[str, dict[str, Any]] = {}
         for path, found in parsed:
             self._emit_model(ctx, run, profile, path, found, frame_models, frame_shapes)
-        for name in sorted(frame_models):
-            builder.node(
-                ids.build_frame(name),
-                attrs={
-                    "urdf_models": sorted(set(frame_models[name])),
-                    "urdf_geometry": frame_shapes.get(name, {}),
-                },
-            )
+        _frame_attrs(builder, frame_models, frame_shapes)
         for path, reason, detail in refusals:
             self._refuse(ctx, path, reason, detail)
 
@@ -1023,6 +1038,8 @@ class UrdfCollector:
                 "joint_type": joint.type,
                 "strategy": found.strategy,
             }
+            if found.xacro_args:
+                values["xacro_args"] = ws.stated_value([list(pair) for pair in found.xacro_args])
             if "origin.xyz" not in unreadable:
                 values["xyz"] = list(joint.xyz)
             if "origin.rpy" not in unreadable:
@@ -1189,6 +1206,56 @@ class UrdfCollector:
         )
 
 
+def emit_loaded(
+    ctx: CollectContext,
+    run: str,
+    profile: str,
+    path: str,
+    args: Sequence[tuple[str, str]],
+) -> bool:
+    """One model as one profile loads it, expanded with the xacro arguments its launch line
+    passes, stated in that profile's slot. Returns False and writes nothing when those
+    arguments give the links and joints the defaults give, which the collector above already
+    states for every profile.
+
+    A frame both expansions declare keeps the geometry the default expansion wrote, so the
+    attribute does not depend on which pass ran first."""
+    found = parse_xacro_file(path, args, resolve_package=ctx.ws.share)
+    try:
+        default: UrdfModel | None = parse_xacro_file(path, (), resolve_package=ctx.ws.share)
+    except CollectorError:
+        default = None
+    if default is not None and (default.links, default.joints) == (found.links, found.joints):
+        return False
+    frame_models: dict[str, list[str]] = {}
+    frame_shapes: dict[str, dict[str, Any]] = {}
+    UrdfCollector()._emit_model(ctx, run, profile, path, found, frame_models, frame_shapes)
+    shared = frozenset(default.links) if default is not None else frozenset()
+    _frame_attrs(ctx.builder, frame_models, frame_shapes, shared)
+    return True
+
+
+def _frame_attrs(
+    builder: model.AtlasBuilder,
+    frame_models: Mapping[str, Sequence[str]],
+    frame_shapes: Mapping[str, Mapping[str, Any]],
+    keep: frozenset[str] = frozenset(),
+) -> None:
+    """The models declaring each frame, unioned with what an earlier pass wrote, and the
+    geometry of each model, except for the frames in `keep`, whose geometry for that model
+    the default expansion states. The urdf pass and a profile expansion therefore write the
+    same attributes in either order."""
+    for name in sorted(frame_models):
+        node = builder.node(ids.build_frame(name))
+        held = set(node.attrs.get("urdf_models") or ())
+        node.attrs["urdf_models"] = sorted(held | set(frame_models[name]))
+        geometry = node.attrs.setdefault("urdf_geometry", {})
+        if name in keep:
+            continue
+        for file_id, shapes in sorted(frame_shapes.get(name, {}).items()):
+            geometry.setdefault(file_id, model.canonical_value(shapes))
+
+
 def _with_mesh_files(
     ws: Any, shapes: dict[str, Any], files: Mapping[str, str], outside: set[str]
 ) -> dict[str, Any]:
@@ -1350,10 +1417,12 @@ __all__ = [
     "XacroFile",
     "XacroInclude",
     "diff_models",
+    "emit_loaded",
     "expand_xacro",
     "parse_urdf_file",
     "parse_urdf_text",
     "parse_xacro_file",
     "scan_xacro",
+    "uses_xacro",
     "xacro_available",
 ]
