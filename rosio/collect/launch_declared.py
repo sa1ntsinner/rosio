@@ -29,6 +29,7 @@ with the note `launch.raised`, and the drift rule of that name builds the findin
 from __future__ import annotations
 
 import dataclasses
+import os
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -166,8 +167,26 @@ class _LaunchLayer:
 
 
 WALKERS = 4
-"""Launch children running at once. Each walk is its own process and states nothing about
-another, so this changes how long a run takes and never what it writes."""
+"""Launch children running at once, never more than the processors that run them. Each
+walk is its own process and states nothing about another. The child's timeout is wall time,
+so a walk that timed out beside others is walked again alone before a pass reads it, and the
+number changes how long a run takes and never what it writes."""
+
+
+@dataclass
+class _Ahead:
+    """The walks started ahead of their passes, stopped with the run whichever way it ends."""
+
+    pool: ThreadPoolExecutor
+    children: Any
+
+    def stop(self) -> None:
+        self.pool.shutdown(wait=False, cancel_futures=True)
+        self.children.stop()
+
+
+def _timed_out(walk: records.LaunchWalk) -> bool:
+    return any(failure.exc_type == "TimeoutExpired" for failure in walk.exceptions)
 
 
 def _started_key(spec: ProfileSpec, entry: Entrypoint, path: str) -> tuple[Any, ...]:
@@ -194,10 +213,11 @@ def _start_walks(ctx: CollectContext, layer: _LaunchLayer) -> None:
     """
     if "started" in ctx.launch_walks or len(ctx.cfg.profiles) < 2 or not layer.state().ok:
         return
-    ctx.launch_walks["started"] = True
+    pool = ThreadPoolExecutor(max_workers=max(1, min(WALKERS, os.cpu_count() or 1)))
+    children = _launch_exec().Children()
+    ctx.launch_walks["started"] = _Ahead(pool, children)
     index = _launch_index(ctx.ws)
     aliases = _aliases(ctx.ws)
-    pool = ThreadPoolExecutor(max_workers=WALKERS)
     for spec in sorted(ctx.cfg.profiles, key=lambda item: item.slug):
         for entry in spec.entrypoints:
             if entry.verb != "launch":
@@ -207,8 +227,9 @@ def _start_walks(ctx: CollectContext, layer: _LaunchLayer) -> None:
             if key is None or key in ctx.launch_walks:
                 continue
             options = _walk_options(ctx, spec, entry)
-            ctx.launch_walks[key] = pool.submit(_launch_exec().walk, path, **options)
-    pool.shutdown(wait=False)
+            ctx.launch_walks[key] = pool.submit(
+                _launch_exec().walk, path, children=children, **options
+            )
 
 
 class LaunchDeclaredCollector:
@@ -461,11 +482,10 @@ class LaunchDeclaredCollector:
         state = layer.state()
         try:
             started = ctx.launch_walks.pop(_started_key(spec, entry, path), None)
-            if state.ok and started is not None:
-                walk = started.result()
-            elif state.ok:
+            walk = started.result() if state.ok and started is not None else None
+            if state.ok and (walk is None or _timed_out(walk)):
                 walk = walker.walk(path, **_walk_options(ctx, spec, entry))
-            else:
+            elif not state.ok:
                 # Nothing on this box can build a launch description, so the source reader
                 # is a lower bound over a file that was never loaded. Saying so on every
                 # entry point is the difference between a thin atlas and a silent one.

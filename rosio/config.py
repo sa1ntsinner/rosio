@@ -31,7 +31,7 @@ import yaml
 
 from rosio.errors import UsageError
 from rosio.resolve import records
-from rosio.workspace import LAUNCH_SUFFIXES, Workspace
+from rosio.workspace import LAUNCH_SUFFIXES, SRC_SKIP_DIRS, Workspace
 
 CONFIG_NAME = "rosio.yaml"
 CONFIG_ENV = "ROSIO_CONFIG"
@@ -632,6 +632,7 @@ def _default_roots(workspace: Any) -> tuple[RootSpec, ...]:
 
     A directory that is itself an ament prefix (`/opt/ros/<distro>`, a colcon `install/`,
     merged or isolated) is one install root, and so is a workspace holding only `install/`.
+    Packages beside that `install/` make the directory the src root as well.
     The merged index is asked first, because `/opt/ros/<distro>` also holds a `src`.
     """
     if isinstance(workspace, Workspace):
@@ -653,9 +654,20 @@ def _default_roots(workspace: Any) -> tuple[RootSpec, ...]:
             return (RootSpec(kind=INSTALL, path=str(directory)),)
         out.append(RootSpec(kind="src", path=str(directory)))
         install = directory.parent / "install"
+    elif _holds_package(directory):
+        out.append(RootSpec(kind="src", path=str(directory)))
     if install.is_dir():
         out.append(RootSpec(kind="install", path=str(install)))
     return tuple(out)
+
+
+def _holds_package(directory: Path) -> bool:
+    """A package manifest anywhere a source walk would reach, so not under install or build."""
+    for _, dirs, files in os.walk(directory):
+        if "package.xml" in files:
+            return True
+        dirs[:] = [name for name in dirs if name not in SRC_SKIP_DIRS]
+    return False
 
 
 def _is_install_tree(path: Path) -> bool:

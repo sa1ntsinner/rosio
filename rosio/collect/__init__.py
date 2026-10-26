@@ -94,6 +94,12 @@ class CollectContext:
             "producer with it, or hand the records in"
         )
 
+    def close(self) -> None:
+        """Stop the launch walks started ahead of passes that will now never read them."""
+        started = self.launch_walks.get("started")
+        if started is not None:
+            started.stop()
+
     def profile_id(self) -> str:
         """The profile id a fact should carry, `*` when the fact is profile independent."""
         return self.profile or model.ANY_PROFILE

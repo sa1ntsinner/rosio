@@ -25,6 +25,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -286,6 +287,51 @@ def available(ros_setup: Sequence[str] = ()) -> bool:
     return probe(ros_setup).ok
 
 
+class Children:
+    """The launch children of one run, so a run that stops takes its children with it.
+
+    A walk asked for after `stop` raises rather than starting a process.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._live: set[subprocess.Popen[str]] = set()
+        self._stopped = False
+
+    def run(
+        self, command: list[str], env: Mapping[str, str] | None, text: str, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        with self._lock:
+            if self._stopped:
+                raise CollectorError("the run stopped before this launch walk started")
+            process = subprocess.Popen(
+                command,
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self._live.add(process)
+        try:
+            with process:
+                try:
+                    stdout, stderr = process.communicate(text, timeout=timeout)
+                except BaseException:
+                    process.kill()
+                    raise
+        finally:
+            with self._lock:
+                self._live.discard(process)
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stopped = True
+            for process in self._live:
+                process.kill()
+
+
 def walk(
     entry_path: str,
     *,
@@ -296,6 +342,7 @@ def walk(
     workspace: Workspace | None = None,
     launch_sandbox: str = "auto",
     sandbox_command: str | None = None,
+    children: Children | None = None,
 ) -> records.LaunchWalk:
     """Execute one entry point with one argument set and report what it launches."""
     entry = _abs(entry_path)
@@ -343,14 +390,8 @@ def walk(
         )
         command = [*prefix, "--", *command]
     try:
-        done = subprocess.run(
-            command,
-            env=child_env,
-            input=model.dumps(request),
-            capture_output=True,
-            text=True,
-            timeout=max(1.0, float(timeout)),
-            check=False,
+        done = (children or Children()).run(
+            command, child_env, model.dumps(request), max(1.0, float(timeout))
         )
     except subprocess.TimeoutExpired:
         return _refused(

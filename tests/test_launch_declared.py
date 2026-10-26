@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -2054,3 +2056,90 @@ def test_includes_with_the_same_basename_keep_existing_node_ids(ws: Workspace):
     assert set(baseline.entities) <= set(atlas.entities)
     assert len(atlas.by_kind("launchent")) == 4
     assert schema.validate(atlas.to_json()) == []
+
+
+# ---------------------------------------------------------------------------
+# walks started ahead of their passes
+
+
+def _ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rosio.resolve import launch_exec
+
+    monkeypatch.setattr(launch_exec, "probe", lambda _setup=(): launch_exec.LaunchImport(ok=True))
+
+
+def _context(ws: Workspace, cases: dict[str, list[str]]) -> CollectContext:
+    profiles = tuple(
+        ProfileSpec(slug=slug, label=slug, entrypoints=tuple(entry_for(case) for case in names))
+        for slug, names in cases.items()
+    )
+    cfg = Config(
+        roots=tuple(RootSpec(kind=spec.kind, path=spec.path) for spec in ws.roots),
+        profiles=profiles,
+        launch_sandbox="off",
+    )
+    return CollectContext(ws=ws, cfg=cfg, builder=model.AtlasBuilder())
+
+
+def test_walks_queued_for_later_passes_stop_with_the_run(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rosio.resolve import launch_exec
+
+    started: list[str] = []
+    release = threading.Event()
+
+    def walk(path: str, **_options: object) -> records.LaunchWalk:
+        started.append(path)
+        release.wait(5)
+        return records.LaunchWalk(entry_path=path)
+
+    _ready(monkeypatch)
+    monkeypatch.setattr(launch_exec, "walk", walk)
+    monkeypatch.setattr(launch_declared, "WALKERS", 1)
+    ctx = _context(ws, {f"p{index}": [case] for index, case in enumerate(ONE_PER_FILE[:4])})
+    launch_declared._start_walks(ctx, launch_declared._LaunchLayer(ros_setup=()))
+    queued = [future for key, future in ctx.launch_walks.items() if key != "started"]
+    assert len(queued) == 4
+    ctx.close()
+    release.set()
+    # A future cancelled before it ran never notifies a waiter, so `futures.wait` would hang.
+    deadline = time.monotonic() + 10
+    while not all(future.done() for future in queued) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(started) <= 1
+    assert sum(future.cancelled() for future in queued) >= 3
+
+
+def test_a_walk_that_timed_out_beside_others_is_walked_again_alone(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rosio.resolve import launch_exec
+
+    cases = {"first": ["plain_node"], "second": ["param_order"]}
+    by_path = {
+        _abs(json.loads((EXPECTED / f"{case}.json").read_text())["entry"]): (slug, case)
+        for slug, names in cases.items()
+        for case in names
+    }
+
+    def walk(path: str, **_options: object) -> records.LaunchWalk:
+        slug, case = by_path[path]
+        if threading.current_thread() is not threading.main_thread():
+            timed_out = records.LaunchWalk(entry_path=path, strategy="refused", loadable=False)
+            timed_out.exceptions.append(
+                records.WalkException(
+                    path=path, phase="visit", exc_type="TimeoutExpired", message="slow"
+                )
+            )
+            return timed_out
+        return walk_for(case, slug)
+
+    _ready(monkeypatch)
+    monkeypatch.setattr(launch_exec, "walk", walk)
+    ctx = _context(ws, cases)
+    try:
+        get(launch_declared.NAME).collect(ctx)
+    finally:
+        ctx.close()
+    assert ctx.builder.build().canonical_bytes() == build(ws, cases).canonical_bytes()

@@ -237,12 +237,15 @@ def run(
     scoped = sum(1 for step in steps if step.profile)
     passes = []
     done = 0
-    for step in steps:
-        each = None if step.profile else say
-        passes.append((step.layer, _run_pass(ctx, cfg, step, roots, instances or {}, each)))
-        if step.profile:
-            done += 1
-            say(f"{', '.join(step.names)} for profile {step.profile} ({done}/{scoped})")
+    try:
+        for step in steps:
+            each = None if step.profile else say
+            passes.append((step.layer, _run_pass(ctx, cfg, step, roots, instances or {}, each)))
+            if step.profile:
+                done += 1
+                say(f"{', '.join(step.names)} for profile {step.profile} ({done}/{scoped})")
+    finally:
+        ctx.close()
     _declare_layers(builder, passes)
     if any(name in STATIC for name in selected):
         _join(builder)

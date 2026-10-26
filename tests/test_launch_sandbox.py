@@ -86,11 +86,11 @@ def test_auto_without_bwrap_uses_the_old_walk(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setattr(launch_exec, "probe_sandbox", lambda *_: "")
     monkeypatch.setattr(launch_exec, "_python", lambda *_: (["python3", "child"], None))
 
-    def run(command, **kwargs):
+    def run(_self, command, *_args):
         assert command == ["python3", "child"]
         return SimpleNamespace(stdout=launch_exec.MARKER + model.dumps({}), returncode=0)
 
-    monkeypatch.setattr(launch_exec.subprocess, "run", run)
+    monkeypatch.setattr(launch_exec.Children, "run", run)
     auto = launch_exec.walk(str(entry))
     off = launch_exec.walk(str(entry), launch_sandbox="off")
     assert not auto.exceptions

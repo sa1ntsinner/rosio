@@ -193,14 +193,6 @@ impl State {
         if method == "rosio/summary" {
             return Ok(self.summary());
         }
-        if method == "rosio/mesh" {
-            let file = string(&params, "file");
-            let path = self
-                .loaded
-                .as_ref()
-                .and_then(|l| crate::mesh::locate(&l.atlas, &l.paths, file));
-            return Ok(crate::mesh::mesh(file, path.as_deref()));
-        }
         if method == "textDocument/codeLens" && !self.options.code_lens {
             return Ok(json!([]));
         }
@@ -301,6 +293,17 @@ fn event_loop(connection: &Connection, state: &mut State, progress: bool) -> Res
     let mut extraction = Extraction::default();
     let (migration_done, migration_results) = unbounded();
     let mut shutdown = false;
+    // One worker reads and decimates meshes and owns their cache, so the loop never waits on
+    // one and the answers still arrive in the order they were asked for.
+    let (meshes, mesh_requests) = unbounded::<(Request, Option<PathBuf>)>();
+    let mesh_sender = connection.sender.clone();
+    std::thread::spawn(move || {
+        let mut cache = crate::mesh::Cache::default();
+        for (request, path) in mesh_requests {
+            let answer = cache.answer(string(&request.params, "file"), path.as_deref());
+            respond(&mesh_sender, request, Ok(answer), -32602);
+        }
+    });
     loop {
         while let Ok(result) = results.try_recv() {
             extraction.finish(&connection.sender, result);
@@ -408,6 +411,11 @@ fn event_loop(connection: &Connection, state: &mut State, progress: bool) -> Res
                         _ => Err(format!("Unknown command {command}")),
                     };
                     respond(&connection.sender, request, result, -32602);
+                } else if request.method == "rosio/mesh" {
+                    let path = state.loaded.as_ref().and_then(|l| {
+                        crate::mesh::locate(&l.atlas, &l.paths, string(&request.params, "file"))
+                    });
+                    let _ = meshes.send((request, path));
                 } else if request.method == "textDocument/codeAction" {
                     let mut actions =
                         crate::actions::code_actions(&state.workspace, &request.params);
@@ -434,7 +442,6 @@ fn event_loop(connection: &Connection, state: &mut State, progress: bool) -> Res
                             | "rosio/paramTree"
                             | "rosio/graph"
                             | "rosio/robotModel"
-                            | "rosio/mesh"
                             | "rosio/unresolved"
                     );
                     let result = if known {

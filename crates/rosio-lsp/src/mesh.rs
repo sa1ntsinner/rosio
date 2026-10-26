@@ -4,6 +4,7 @@ use crate::paths::Paths;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 /// Most triangles one answer carries.
 const LIMIT: usize = 20_000;
@@ -67,6 +68,47 @@ pub(crate) fn mesh(file: &str, path: Option<&Path>) -> Value {
         "triangleCount": count,
         "bounds": (count > 0).then(|| json!({"min": min, "max": max})),
     })
+}
+
+/// Answers kept, newest last.
+const CACHED: usize = 64;
+
+/// The last `CACHED` answers, each keyed by file id, path, size and modification time, so an
+/// unchanged file is neither read nor decimated again.
+#[derive(Default)]
+pub(crate) struct Cache {
+    entries: Vec<(MeshKey, Value)>,
+}
+
+type MeshKey = (String, PathBuf, u64, SystemTime);
+
+impl Cache {
+    pub(crate) fn answer(&mut self, file: &str, path: Option<&Path>) -> Value {
+        let key = path.and_then(|path| {
+            let meta = std::fs::metadata(path).ok()?;
+            Some((
+                file.to_owned(),
+                path.to_owned(),
+                meta.len(),
+                meta.modified().ok()?,
+            ))
+        });
+        let Some(key) = key else {
+            return mesh(file, path);
+        };
+        if let Some(at) = self.entries.iter().position(|(k, _)| *k == key) {
+            let entry = self.entries.remove(at);
+            let answer = entry.1.clone();
+            self.entries.push(entry);
+            return answer;
+        }
+        let answer = mesh(file, path);
+        if self.entries.len() == CACHED {
+            self.entries.remove(0);
+        }
+        self.entries.push((key, answer.clone()));
+        answer
+    }
 }
 
 /// Vertex clustering on the coarsest grid tried that keeps at most `LIMIT` triangles, and the
@@ -140,27 +182,39 @@ fn finite(triangles: Vec<Triangle>) -> Option<Vec<Triangle>> {
         .then_some(triangles)
 }
 
-/// Binary when the header's count matches the length exactly, else ASCII.
+/// Binary when the header's count matches the length exactly, else ASCII, else binary when
+/// the file holds at least the triangles its header counts, ignoring the bytes after them.
 fn stl(bytes: &[u8]) -> Option<Vec<Triangle>> {
-    let count = bytes
+    let end = bytes
         .get(80..84)
-        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
-    if count.is_some_and(|n| n.checked_mul(50).and_then(|s| s.checked_add(84)) == Some(bytes.len()))
-    {
-        let triangles = bytes[84..]
-            .as_chunks::<50>()
-            .0
-            .iter()
-            .map(|facet| {
-                let mut t = [0.0; 9];
-                for (v, word) in t.iter_mut().zip(facet[12..48].as_chunks::<4>().0) {
-                    *v = f32::from_le_bytes(*word);
-                }
-                t
-            })
-            .collect();
-        return finite(triangles);
+        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
+        .and_then(|n| n.checked_mul(50))
+        .and_then(|n| n.checked_add(84))
+        .filter(|&end| end <= bytes.len());
+    match end {
+        Some(end) if end == bytes.len() => binary_stl(&bytes[84..end]),
+        Some(end) => ascii_stl(bytes).or_else(|| binary_stl(&bytes[84..end])),
+        None => ascii_stl(bytes),
     }
+}
+
+fn binary_stl(facets: &[u8]) -> Option<Vec<Triangle>> {
+    let triangles = facets
+        .as_chunks::<50>()
+        .0
+        .iter()
+        .map(|facet| {
+            let mut t = [0.0; 9];
+            for (v, word) in t.iter_mut().zip(facet[12..48].as_chunks::<4>().0) {
+                *v = f32::from_le_bytes(*word);
+            }
+            t
+        })
+        .collect();
+    finite(triangles)
+}
+
+fn ascii_stl(bytes: &[u8]) -> Option<Vec<Triangle>> {
     let text = std::str::from_utf8(bytes).ok()?;
     let mut words = text.split_ascii_whitespace();
     if words.next() != Some("solid") || !text.split_ascii_whitespace().any(|w| w == "endsolid") {
@@ -385,6 +439,45 @@ mod tests {
             "{outward} of {}",
             kept.len()
         );
+    }
+
+    #[test]
+    fn an_unchanged_file_is_answered_from_the_cache_until_it_is_evicted() {
+        let mut cache = Cache::default();
+        let file = "file:bot|meshes/cached.stl";
+        let path = scratch("cached.stl", &binary(&TWO));
+        let first = cache.answer(file, Some(&path));
+        expect_two(&first, "stl");
+        let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let mut moved = TWO;
+        moved[0][0] = 0.5;
+        std::fs::write(&path, binary(&moved)).unwrap();
+        let handle = std::fs::File::options().write(true).open(&path).unwrap();
+        handle.set_modified(stamp).unwrap();
+        drop(handle);
+        assert_eq!(cache.answer(file, Some(&path)), first, "same size and time");
+        for i in 0..CACHED {
+            let other = scratch(&format!("other{i}.stl"), &binary(&TWO));
+            cache.answer(&format!("file:bot|meshes/other{i}.stl"), Some(&other));
+        }
+        assert_ne!(
+            cache.answer(file, Some(&path)),
+            first,
+            "evicted, so read again"
+        );
+        std::fs::write(&path, binary(&TWO)).unwrap();
+        expect_two(&cache.answer(file, Some(&path)), "stl");
+    }
+
+    #[test]
+    fn a_binary_stl_with_trailing_bytes_reads_its_declared_triangles() {
+        let mut padded = binary(&TWO);
+        padded.extend([0u8; 13]);
+        expect_two(&answer("padded.stl", &padded), "stl");
+        let mut solid = binary(&TWO);
+        solid[..5].copy_from_slice(b"solid");
+        solid.push(b'\n');
+        expect_two(&answer("solid.stl", &solid), "stl");
     }
 
     #[test]

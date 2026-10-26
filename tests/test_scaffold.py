@@ -159,3 +159,17 @@ def test_the_written_yaml_is_the_same_bytes_wherever_the_tree_sits(tmp_path: Pat
         texts.append(target.read_bytes())
         assert scaffold.write(tmp_path / name, force=True)[0].read_bytes() == texts[-1]
     assert texts[0] == texts[1]
+
+
+def test_packages_beside_an_install_tree_are_read_as_sources(tmp_path: Path) -> None:
+    shutil.copytree(WS / "src" / "lx_bringup", tmp_path / "lx_bringup")
+    (tmp_path / "build" / "stale").mkdir(parents=True)
+    (tmp_path / "build" / "stale" / "package.xml").write_text("", encoding="utf-8")
+    _installed(tmp_path / "install", "binary_only")
+    cfg = default_config(str(tmp_path))
+    assert [(spec.kind, spec.path) for spec in cfg.roots] == [
+        ("src", str(tmp_path)),
+        ("install", str(tmp_path / "install")),
+    ]
+    assert "binary_only bringup.launch.py" in _profiles(cfg).values()
+    assert any(label.startswith("lx_bringup ") for label in _profiles(cfg).values())

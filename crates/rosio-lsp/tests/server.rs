@@ -606,3 +606,59 @@ fn trees_over_memory_transport() {
     assert_eq!(frames[0]["children"][0]["id"], "frame:camera");
     client.stop();
 }
+
+#[test]
+fn a_mesh_being_read_does_not_hold_back_other_requests() {
+    let src = scratch("mesh-src");
+    let meshes = src.join("fx_desc/meshes");
+    std::fs::create_dir_all(&meshes).unwrap();
+    let count: u32 = 200_000;
+    let mut bytes = vec![b' '; 80];
+    bytes.extend(count.to_le_bytes());
+    for i in 0..count {
+        bytes.extend([0u8; 12]);
+        let x = i as f32;
+        for v in [x, 0.0, 0.0, x + 1.0, 0.0, 0.0, x, 1.0, 1.0] {
+            bytes.extend(v.to_le_bytes());
+        }
+        bytes.extend([0u8; 2]);
+    }
+    std::fs::write(meshes.join("fx_body.stl"), bytes).unwrap();
+    let options = json!({"atlasPath":fixture(),"roots":{"src":src.display().to_string()}});
+    let client = Client::start(&root(), options);
+    let send = |id: i32, method: &str, params: Value| {
+        client
+            .connection
+            .sender
+            .send(Message::Request(Request::new(
+                id.into(),
+                method.into(),
+                params,
+            )))
+            .unwrap();
+    };
+    send(
+        900,
+        "rosio/mesh",
+        json!({"file":"file:fx_desc|meshes/fx_body.stl"}),
+    );
+    send(901, "rosio/summary", Value::Null);
+    let mut order = Vec::new();
+    let mut mesh = Value::Null;
+    while order.len() < 2 {
+        if let Message::Response(response) = client
+            .connection
+            .receiver
+            .recv_timeout(Duration::from_secs(60))
+            .unwrap()
+        {
+            if response.id == 900.into() {
+                mesh = response.result.unwrap();
+            }
+            order.push(response.id);
+        }
+    }
+    assert_eq!(order, [901.into(), 900.into()]);
+    assert_eq!(mesh["triangleCount"], count);
+    client.stop();
+}

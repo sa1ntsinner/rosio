@@ -900,11 +900,11 @@ def test_the_child_request_goes_through_the_pinned_encoder(ws_launch: Path, monk
 
     seen: dict[str, str] = {}
 
-    def fake_run(_argv, **kwargs):
-        seen["input"] = kwargs["input"]
+    def fake_run(_self, _argv, _env, text, _timeout):
+        seen["input"] = text
         raise OSError("no child in this test")
 
-    monkeypatch.setattr(launch_exec.subprocess, "run", fake_run)
+    monkeypatch.setattr(launch_exec.Children, "run", fake_run)
     launch_exec.walk(
         str(ws_launch / "src/lx_bringup/launch/plain_node.launch.py"), launch_sandbox="off"
     )
@@ -1414,3 +1414,44 @@ def test_construction_line_uses_the_innermost_frame_in_the_launch_file(tmp_path)
     result = launch_exec.walk(str(entry))
     assert not result.exceptions
     assert result.nodes[0].site.line_hint == 4
+
+
+def test_a_stopped_run_kills_its_child_and_starts_no_other(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    import threading
+    import time
+
+    from rosio.errors import CollectorError
+
+    entry = tmp_path / "slow.launch.py"
+    entry.write_text("value = 1\n", encoding="utf-8")
+    sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+    monkeypatch.setattr(launch_exec, "_python", lambda _setup, _script: (sleeper, None))
+    children = launch_exec.Children()
+    threading.Timer(0.5, children.stop).start()
+    began = time.monotonic()
+    walk = launch_exec.walk(str(entry), launch_sandbox="off", timeout=60, children=children)
+    assert time.monotonic() - began < 10
+    assert walk.strategy == "refused"
+    with pytest.raises(CollectorError, match="stopped"):
+        launch_exec.walk(str(entry), launch_sandbox="off", children=children)
+
+
+def test_a_file_launch_code_opened_is_read_once_per_walk(tmp_path: Path) -> None:
+    from rosio.resolve import _launch_child
+
+    model_file = tmp_path / "robot.urdf"
+    model_file.write_text("<robot/>", encoding="utf-8")
+    models = _launch_child._ModelTexts()
+    reads: list[str] = []
+    original = models._open
+
+    def counted(path, **kwargs):
+        reads.append(path)
+        return original(path, **kwargs)
+
+    models._open = counted
+    models.opened.add((str(model_file), None, None, None))
+    for _node in range(3):
+        assert models.texts() == {"<robot/>": {str(model_file)}}
+    assert reads == [str(model_file)]

@@ -57,6 +57,24 @@ pub fn parse(text: &str) -> Result<Id, String> {
     })
 }
 
+/// Build an id from its kind and segments, escaping as `rosio.ids.build` does.
+pub fn build(kind: &str, segments: &[&str]) -> String {
+    let body: Vec<String> = segments.iter().map(|s| escape(s)).collect();
+    format!("{kind}:{}", body.join("|"))
+}
+
+fn escape(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        if (0x21..0x7f).contains(&byte) && !matches!(byte, b'%' | b'|' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 fn decode(text: &str) -> Result<String, String> {
     let mut bytes = Vec::new();
     let mut input = text.bytes();
@@ -92,5 +110,9 @@ mod tests {
         assert!(parse("future:~p|e").is_ok());
         assert!(parse("1bad:x").is_err());
         assert!(parse("node:~p|e|/|abc").unwrap().synthetic);
+        assert_eq!(
+            build("file", &["@repo", "a|b%~é"]),
+            "file:@repo|a%7Cb%25%7E%C3%A9"
+        );
     }
 }

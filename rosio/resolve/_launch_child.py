@@ -387,6 +387,7 @@ class _ModelTexts:
         self.produced: dict[str, set[str]] = {}
         self._saved: list[tuple[Any, str, Any]] = []
         self._open = open
+        self._read: dict[tuple[str, Any, Any, Any], str] = {}
 
     def install(self) -> None:
         import builtins
@@ -407,12 +408,14 @@ class _ModelTexts:
 
     def texts(self) -> dict[str, set[str]]:
         out = {text: set(paths) for text, paths in self.produced.items()}
-        for path, encoding, errors, newline in self.opened:
+        for key in self.opened - self._read.keys():
+            path, encoding, errors, newline = key
             try:
                 with self._open(path, encoding=encoding, errors=errors, newline=newline) as f:
-                    text = f.read()
+                    self._read[key] = f.read()
             except (OSError, UnicodeError, ValueError, TypeError, LookupError):
-                continue
+                self._read[key] = ""
+        for (path, *_), text in self._read.items():
             out.setdefault(text, set()).add(path)
         out.pop("", None)
         return out

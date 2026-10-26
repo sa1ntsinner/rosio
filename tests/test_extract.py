@@ -1780,3 +1780,18 @@ def test_a_root_with_no_file_is_not_a_loss_and_the_gate_stays_green(tmp_path: Pa
     written = tmp_path / "rosio-out" / "atlas.json"
     assert main(["drift", "--atlas", str(written), "--fail-on", "error"]) == 0
     capsys.readouterr()
+
+
+def test_a_run_that_stops_early_stops_the_walks_it_started(
+    tmp_path: Path, ws: Workspace, monkeypatch: pytest.MonkeyPatch
+):
+    closed: list[bool] = []
+    monkeypatch.setattr(CollectContext, "close", lambda self: closed.append(True), raising=False)
+
+    def interrupted(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(extract, "_run_pass", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        extract.run(_config(tmp_path, ws), ws)
+    assert closed == [True]

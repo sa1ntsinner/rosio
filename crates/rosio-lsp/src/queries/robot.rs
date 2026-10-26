@@ -236,7 +236,7 @@ pub(super) fn robot_model(atlas: &Atlas, index: &Index, params: &Value) -> Value
         let v = values(edge, p);
         let parent_name = v["parent"].as_str();
         let parent = parent_name
-            .map(|name| format!("frame:{}", name.trim_start_matches('/')))
+            .map(|name| crate::ids::build("frame", &[name.trim().trim_start_matches('/')]))
             .filter(|id| atlas.entities.contains_key(id));
         let touches = links.contains_key(fields.dst.as_str())
             || parent.as_deref().is_some_and(|id| links.contains_key(id));
@@ -419,6 +419,19 @@ mod tests {
             run(json!({"profile": "sim", "model": "file:bot|b.urdf"}))["broadcasts"],
             json!([])
         );
+    }
+
+    #[test]
+    fn a_broadcast_parent_is_found_under_its_escaped_id() {
+        let text = r#"{"schema_version":"1.13","entities":{
+            "file:bot|a.urdf":{"kind":"file","attrs":{"strategy":"urdf"}},
+            "frame:base":{"kind":"frame","attrs":{"urdf_models":["file:bot|a.urdf"]}},
+            "frame:cam%7Ele%C3%A9%25":{"kind":"frame"},
+            "node:/cam":{"kind":"node"}},
+          "edges":{"b":{"kind":"broadcasts_tf","src":"node:/cam","dst":"frame:base","facts":[
+            {"layer":"coded","profile":"*","values":{"parent":"/cam~leé%"}}]}}}"#;
+        let result = robot_model(&Atlas::parse(text).unwrap(), &Index::default(), &json!({}));
+        assert_eq!(result["broadcasts"][0]["parent"], "frame:cam%7Ele%C3%A9%25");
     }
 
     #[test]
