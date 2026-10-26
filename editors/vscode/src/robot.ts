@@ -11,6 +11,8 @@ export class RobotPanel implements vscode.Disposable {
   private model: string | undefined;
   /** Mesh answers by file id, kept until the atlas is reloaded. */
   private meshes = new Map<string, MeshData>();
+  /** Moves on every reload, so a slower update started before it does not refill the cache with old answers. */
+  private generation = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -30,7 +32,11 @@ export class RobotPanel implements vscode.Disposable {
 
   /** `reloaded` is true when the atlas changed, which is when a mesh on disk may have changed too. */
   async update(reloaded = false): Promise<void> {
-    if (reloaded) this.meshes.clear();
+    if (reloaded) {
+      this.meshes.clear();
+      this.generation++;
+    }
+    const generation = this.generation;
     if (!this.panel || !this.ready) return;
     const profiles = (await this.server.summary())?.profiles ?? [];
     if (this.profile && !profiles.includes(this.profile)) this.profile = undefined;
@@ -54,10 +60,17 @@ export class RobotPanel implements vscode.Disposable {
         if (shape.geometry?.file) files.add(shape.geometry.file);
       }
     }
+    const meshes: Record<string, MeshData> = {};
     for (const file of [...files].sort()) {
-      if (!this.meshes.has(file)) this.meshes.set(file, await this.server.mesh(file));
+      let mesh = this.meshes.get(file);
+      if (!mesh) {
+        const answer = await this.server.mesh(file);
+        if (generation !== this.generation) return;
+        if (answer) this.meshes.set(file, answer);
+        mesh = answer ?? { file, format: "", refused: "no_answer" };
+      }
+      meshes[file] = mesh;
     }
-    const meshes = Object.fromEntries([...files].sort().map((file) => [file, this.meshes.get(file)!]));
     const message: ToRobot = { type: "robot", robot, profiles, meshes, select: this.select };
     this.select = undefined;
     await this.panel.webview.postMessage(message);

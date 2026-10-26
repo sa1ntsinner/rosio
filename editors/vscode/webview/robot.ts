@@ -478,6 +478,7 @@ const REFUSED: Record<string, string> = {
   file_missing: "not in the workspace",
   format_not_read: "not drawn, rosio reads STL and OBJ",
   mesh_unreadable: "not drawn, the file does not read",
+  no_answer: "not drawn, the language server did not answer",
 };
 
 function meshNote(file: string | undefined): string {

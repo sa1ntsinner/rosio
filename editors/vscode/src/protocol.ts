@@ -375,4 +375,5 @@ export type MeshData =
       bounds: { min: [number, number, number]; max: [number, number, number] } | null;
       refused?: undefined;
     }
-  | { file: string; format: string; refused: "file_missing" | "format_not_read" | "mesh_unreadable" };
+  /** `no_answer` is the extension's own: the server was not running or the request failed. */
+  | { file: string; format: string; refused: "file_missing" | "format_not_read" | "mesh_unreadable" | "no_answer" };

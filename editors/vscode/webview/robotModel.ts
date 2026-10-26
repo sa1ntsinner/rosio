@@ -49,7 +49,7 @@ export function rpyOf(r: number[]): Vec {
   return [Math.atan2(r[7], r[8]), pitch, Math.atan2(r[3], r[0])];
 }
 
-/** x, y, z, w with w never negative, so one rotation prints one way. */
+/** x, y, z, w with w never negative, and the first nonzero of x, y, z positive when w is zero, so one rotation prints one way. */
 export function quaternion(r: number[]): [number, number, number, number] {
   const trace = r[0] + r[4] + r[8];
   let q: [number, number, number, number];
@@ -66,7 +66,8 @@ export function quaternion(r: number[]): [number, number, number, number] {
     const k = Math.sqrt(1 + r[8] - r[0] - r[4]) * 2;
     q = [(r[2] + r[6]) / k, (r[5] + r[7]) / k, k / 4, (r[3] - r[1]) / k];
   }
-  return q[3] < 0 ? [-q[0], -q[1], -q[2], -q[3]] : q;
+  const sign = Math.abs(q[3]) > 1e-12 ? q[3] : q.slice(0, 3).find((value) => Math.abs(value) > 1e-12) ?? 1;
+  return sign < 0 ? [-q[0], -q[1], -q[2], -q[3]] : q;
 }
 
 export type Placement = {

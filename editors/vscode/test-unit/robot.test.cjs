@@ -50,6 +50,8 @@ test("rpy read back from a rotation is the rpy it was built from", () => {
 test("a quaternion never has a negative w", () => {
   close(quaternion(rpyRotation([0, 0, Math.PI / 2])), [0, 0, Math.SQRT1_2, Math.SQRT1_2]);
   assert.ok(quaternion(rpyRotation([Math.PI, 0, 0]))[3] >= 0);
+  close(quaternion(rpyRotation([0, 0, Math.PI])), [0, 0, 1, 0]);
+  close(quaternion(rpyRotation([0, 0, -Math.PI])), [0, 0, 1, 0]);
   close(quaternion(rpyRotation([-Math.PI / 2, 0, -Math.PI / 2])), [-0.5, 0.5, -0.5, 0.5]);
 });
 

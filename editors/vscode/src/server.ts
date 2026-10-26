@@ -173,8 +173,9 @@ export class Server implements vscode.Disposable {
     }));
   }
 
-  mesh(file: string): Promise<MeshData> {
-    return this.request<MeshData>("rosio/mesh", { file }).then((mesh) => mesh ?? { file, format: "", refused: "file_missing" });
+  /** Undefined when the server did not answer, which is not the same as a mesh it refused. */
+  mesh(file: string): Promise<MeshData | undefined> {
+    return this.request<MeshData>("rosio/mesh", { file });
   }
 
   async extract(): Promise<void> {
