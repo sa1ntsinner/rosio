@@ -367,6 +367,21 @@ class Workspace:
         ]
         return _replaced(value, rows)
 
+    def stated_path(self, path: str, ros_setup: Sequence[str] = ()) -> str:
+        """A path a message or a blind spot names, as compared data may carry it.
+
+        Inside a root it is `<package>/<relative path>`. Under the directory of a setup file
+        in `ros_setup` it is the rest of the path below `@outside`, which names the same file
+        on every box that holds the distribution. Anywhere else it is `@outside/<name>`,
+        because the directories around it are a property of one machine.
+        """
+        try:
+            package, relative = self.rel(path)
+        except ContractError:
+            stated = self.stated_value(path, ros_setup)
+            return stated if stated != path else _outside(path)
+        return f"{package}/{relative}" if package else relative
+
     def _by_content(self, path: str) -> str:
         absolute = self.localise(path)
         target = Path(absolute)
@@ -426,7 +441,7 @@ class Workspace:
         for root_path, _kind in self._roots_by_depth:
             if _under(absolute, root_path):
                 return None, _relative(absolute, root_path)
-        raise ContractError(f"path is outside every configured root: {path}")
+        raise ContractError(f"path is outside every configured root: {_outside(path)}")
 
     def file_id(self, path: str) -> str:
         package, relative = self.rel(path)
@@ -1154,6 +1169,10 @@ def _nameable(path: str) -> bool:
     except UnicodeEncodeError:
         return False
     return True
+
+
+def _outside(path: str) -> str:
+    return f"{OUTSIDE}/{_spell(Path(path).name)}"
 
 
 def _spell(text: str) -> str:

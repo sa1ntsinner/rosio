@@ -308,7 +308,7 @@ class LaunchDeclaredCollector:
             problems.extend(_include_problems(ctx.ws, walk))
             for failure in walk.exceptions:
                 row = {
-                    "path": _rel_or_path(ctx.ws, failure.path),
+                    "path": _rel_or_path(ctx.ws, failure.path, ctx.cfg.ros_setup),
                     "phase": failure.phase,
                     "exc_type": failure.exc_type,
                     "message": failure.message,
@@ -432,6 +432,9 @@ class LaunchDeclaredCollector:
             confidence=model.Confidence.RESOLVED.value,
             evidence=[_source(ctx.ws, path) for path in sorted(dict.fromkeys(entry_files))],
         )
+        # Every row of this run passes here, and a message names whatever path it raised on.
+        for row in late:
+            row["message"] = ctx.ws.stated_value(row["message"], ctx.cfg.ros_setup)
         late.sort(key=_problem_key)
 
     def _emit_models(
@@ -728,7 +731,7 @@ class LaunchDeclaredCollector:
                     model.Unresolved(
                         want=model.Want.OTHER.value,
                         owner=launchfile_id,
-                        expr=include.path,
+                        expr=ctx.ws.stated_path(include.path, ctx.cfg.ros_setup),
                         reason="the included launch file is outside every configured root",
                         role="include",
                         resolvable_by=["add the package to the roots"],
@@ -861,7 +864,9 @@ class LaunchDeclaredCollector:
                 "container": node.container,
                 "conditions": list(node.conditions),
                 "gates": [_gate_values(gate) for gate in node.gates],
-                "parameter_inputs": [_param_values(ctx.ws, item) for item in node.params],
+                "parameter_inputs": [
+                    _param_values(ctx.ws, item, ctx.cfg.ros_setup) for item in node.params
+                ],
                 "file_reads": _read_values(ctx, node),
                 "namespace": identity.namespace,
                 "namespace_stated": identity.namespace_stated,
@@ -981,7 +986,9 @@ class LaunchDeclaredCollector:
             "form": node.form,
             "entrypoint": row.entry,
             "argv": _argv_values(ctx.ws, node.argv),
-            "parameter_inputs": [_param_values(ctx.ws, item) for item in node.params],
+            "parameter_inputs": [
+                _param_values(ctx.ws, item, ctx.cfg.ros_setup) for item in node.params
+            ],
         }
         if identity.name:
             values["name"] = identity.name
@@ -1782,7 +1789,9 @@ def _read_values(ctx: CollectContext, node: records.ResolvedNode) -> list[dict[s
     return [out[key] for key in sorted(out)]
 
 
-def _param_values(ws: Workspace, item: records.ParamSource) -> dict[str, Any]:
+def _param_values(
+    ws: Workspace, item: records.ParamSource, ros_setup: Sequence[str] = ()
+) -> dict[str, Any]:
     """The parameter input as the launch walk saw it. Provenance points at the source file
     and the rewrite list, never at the temp file a rewrite materialises."""
     payload: dict[str, Any] = {"order": item.order, "kind": item.kind}
@@ -1795,7 +1804,7 @@ def _param_values(ws: Workspace, item: records.ParamSource) -> dict[str, Any]:
             payload[key] = EXTERNAL_TOKEN
             payload["external"] = True
             continue
-        payload[key] = _rel_or_path(ws, value)
+        payload[key] = _rel_or_path(ws, value, ros_setup)
     from rosio.resolve._launch_child import uncarried_reason
 
     if item.root_key is not None:
@@ -2004,12 +2013,8 @@ def _root_paths(ws: Workspace) -> list[str]:
     return [str(spec.path) for spec in ws.roots]
 
 
-def _rel_or_path(ws: Workspace, path: str) -> str:
-    try:
-        package, relative = ws.rel(path)
-    except ContractError:
-        return path
-    return f"{package}/{relative}" if package else relative
+def _rel_or_path(ws: Workspace, path: str, ros_setup: Sequence[str] = ()) -> str:
+    return ws.stated_path(path, ros_setup)
 
 
 def _predicates(ws: Workspace, walks: list[records.LaunchWalk]) -> dict[str, bool]:

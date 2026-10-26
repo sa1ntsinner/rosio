@@ -3858,3 +3858,26 @@ def test_a_composed_server_creates_its_costmap_too(ws: Workspace):
         plugin_class="nav2_controller::Other",
     )
     assert params_collect.child_nodes(other) == []
+
+
+def test_a_blind_value_names_a_root_by_its_label(tmp_path: Path) -> None:
+    """nav2's localization launch writes the map path turtlebot3 hands it from a file no root
+    holds, so the value becomes a blind spot, and the value is a path into the install
+    tree of this machine."""
+    install = tmp_path / "install"
+    (install / "share").mkdir(parents=True)
+    workspace = Workspace.discover((RootSpec("install", str(install)),))
+    builder = model.AtlasBuilder()
+    ctx = CollectContext(
+        ws=workspace, cfg=Config(roots=workspace.roots, profiles=()), builder=builder
+    )
+    value = f"'{install}/share/turtlebot3_navigation2/map/map.yaml'"
+    pending = params_collect._Pending(
+        state=model.ParamState.OTHER.value,
+        blinds=[params_collect.Blind(expr=value, reason="the write site is not placed")],
+    )
+    builder.node(ids.build_node("/map_server"))
+    owner = ids.build_param(ids.build_node("/map_server"), "yaml_filename")
+    params_collect.ParamsCollector()._blind(ctx, owner, pending)
+    (blind,) = builder.build().unresolved
+    assert blind.expr == "'@install/share/turtlebot3_navigation2/map/map.yaml'"

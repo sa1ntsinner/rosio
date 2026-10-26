@@ -2719,7 +2719,7 @@ class ParamsCollector:
                 model.Unresolved(
                     want=model.Want.PARAM_VALUE.value,
                     owner=param_id,
-                    expr=blind.expr,
+                    expr=ctx.ws.stated_value(blind.expr, ctx.cfg.ros_setup),
                     reason=blind.reason,
                     evidence=[cited] if cited is not None else [],
                 )

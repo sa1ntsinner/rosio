@@ -2321,3 +2321,74 @@ def test_a_model_xacro_refuses_with_the_profile_arguments_is_a_blind_spot(tmp_pa
     assert blind.expr == "xacro file:bot|urdf/bot.urdf flag:=maybe"
     assert blind.want == model.Want.FRAME_ID.value
     assert str(tmp_path) not in model.dumps(atlas.to_json())
+
+
+def test_a_file_outside_every_root_is_never_named_by_its_machine_path(tmp_path: Path) -> None:
+    """turtlebot3 includes nav2_bringup from the ROS installation, which no root holds. The
+    include, the nodes it starts and the exception rows they raise named the file by where
+    this machine keeps it, so two boxes wrote two atlases. Under the directory of a setup
+    file the rest of the path still names the file; anywhere else only its name does."""
+    checkout = tmp_path / "ws"
+    (checkout / ".git").mkdir(parents=True)
+    package = checkout / "src" / "bot"
+    (package / "launch").mkdir(parents=True)
+    (package / "package.xml").write_text(
+        "<package format='3'><name>bot</name><version>0.0.0</version>"
+        "<description>d</description><maintainer email='a@b.c'>a</maintainer>"
+        "<license>Apache-2.0</license></package>",
+        encoding="utf-8",
+    )
+    entry = package / "launch" / "nav.launch.py"
+    entry.write_text("def generate_launch_description():\n    pass\n", encoding="utf-8")
+    distro = tmp_path / "opt" / "ros" / "jazzy"
+    included = distro / "share" / "nav2_bringup" / "launch" / "bringup_launch.py"
+    elsewhere = tmp_path / "underlay" / "share" / "nav2_map_server" / "launch" / "map.py"
+    roots = (RootSpec("src", str(checkout / "src")),)
+    walk = records.LaunchWalk(
+        entry_path=str(entry),
+        profile="nav",
+        includes=[
+            records.LaunchInclude(
+                path=str(included),
+                entity_path=("Include(bringup_launch.py)",),
+                site=records.Site(str(entry)),
+            )
+        ],
+        nodes=[
+            records.ResolvedNode(
+                pkg="nav2_map_server",
+                executable="map_server",
+                namespace="",
+                name="map_server",
+                name_source="literal",
+                entity_path=("Include(bringup_launch.py)", "Node(map_server)"),
+                site=records.Site(str(elsewhere)),
+            )
+        ],
+        exceptions=[
+            records.WalkException(
+                path=str(elsewhere), phase="visit", exc_type="KeyError", message="'map'"
+            )
+        ],
+    )
+    cfg = Config(
+        roots=roots,
+        ros_setup=(str(distro / "setup.bash"),),
+        profiles=(
+            ProfileSpec(
+                slug="nav",
+                entrypoints=(Entrypoint(verb="launch", pkg="bot", target="nav.launch.py"),),
+            ),
+        ),
+    )
+    builder = model.AtlasBuilder()
+    ctx = CollectContext(ws=Workspace.discover(list(roots)), cfg=cfg, builder=builder)
+    ctx.declared.walks.append(walk)
+    get(launch_declared.NAME).collect(ctx)
+    atlas = builder.build()
+    assert str(tmp_path) not in model.dumps(atlas.to_json())
+    (blind,) = [entry for entry in atlas.unresolved if entry.role == "include"]
+    assert blind.expr == "@outside/share/nav2_bringup/launch/bringup_launch.py"
+    rows = [row for run in atlas.by_kind("run") for row in run.attrs["exceptions"]]
+    assert "@outside/map.py" in [row["path"] for row in rows]
+    assert any("@outside/map.py" in row["message"] for row in rows)
