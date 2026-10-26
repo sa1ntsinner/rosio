@@ -158,11 +158,13 @@ function draw(svg: SVGSVGElement, robot: RobotModel, poses: Map<string, Pose>): 
   solidMeshes(paint, solids, at, style.getPropertyValue("--vscode-foreground").trim());
 
   const items: { depth: number; node: SVGElement }[] = [];
+  const ground = colour(style.getPropertyValue("--vscode-editor-background")) ?? [0.12, 0.12, 0.12];
+  const ink = colour(style.getPropertyValue("--vscode-foreground")) ?? [0.8, 0.8, 0.8];
   for (const solid of solids) {
     if (!solid.lines.length) continue;
     const group = s("g", { class: `shape${solid.link === selected ? " near" : ""}` });
     // the panel CSP refuses style attributes, a property set from script is allowed
-    if (solid.rgba) group.style.setProperty("--tint", rgb(solid.rgba));
+    if (solid.rgba) group.style.setProperty("--tint", rgb(legible(solid.rgba, ground, ink)));
     let depth = 0;
     let count = 0;
     for (const line of solid.lines) {
@@ -217,6 +219,29 @@ function draw(svg: SVGSVGElement, robot: RobotModel, poses: Map<string, Pose>): 
     items.push({ depth, node: group });
   }
   for (const item of items.sort((a, b) => a.depth - b.depth)) svg.append(item.node);
+}
+
+function colour(css: string): number[] | undefined {
+  const hex = css.trim().match(/^#([0-9a-f]{6})/i)?.[1];
+  return hex ? [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) : undefined;
+}
+
+function luminance(rgba: number[]): number {
+  const [r, g, b] = rgba.slice(0, 3).map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** The material colour, moved toward the ink only as far as it takes to read 3:1 against the ground. */
+function legible(rgba: number[], ground: number[], ink: number[]): number[] {
+  const contrast = (c: number[]) => {
+    const [a, b] = [luminance(c), luminance(ground)].sort((x, y) => y - x);
+    return (a + 0.05) / (b + 0.05);
+  };
+  for (let mix = 0; mix <= 1; mix += 0.1) {
+    const tried = [0, 1, 2].map((i) => rgba[i] * (1 - mix) + ink[i] * mix);
+    if (contrast(tried) >= 3) return tried;
+  }
+  return ink;
 }
 
 function rgb(rgba: number[], light = 1): string {
