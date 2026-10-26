@@ -348,6 +348,24 @@ class Workspace:
         """
         return [self.in_repo(path) or self._by_content(path) for path in paths]
 
+    def stated_value(self, value: Any, ros_setup: Sequence[str] = ()) -> Any:
+        """A value as compared data may carry it, with every place this machine holds a root
+        named by that root's label, `@install/share/bot/urdf/bot.xacro` for one.
+
+        A value is what a node receives or what a tool said, so the text around the prefix is
+        kept and only the mount point changes, by the same table `content_marks` hashes with.
+        The directory of a setup file in `ros_setup` becomes `@outside`, as `stated_by_content`
+        hashes it, unless it is a root. Any other path outside every root keeps its spelling,
+        as `stated` keeps it.
+        """
+        marks = dict(row for setup in ros_setup for row in _prefix_marks(str(Path(setup).parent)))
+        marks.update(self.content_marks())
+        rows = [
+            (path.decode("utf-8", "surrogateescape"), mark.strip(b"\x00").decode())
+            for path, mark in sorted(marks.items(), key=lambda item: (-len(item[0]), item[0]))
+        ]
+        return _replaced(value, rows)
+
     def _by_content(self, path: str) -> str:
         absolute = self.localise(path)
         target = Path(absolute)
@@ -1079,6 +1097,20 @@ def _prefix_marks(prefix: str) -> list[tuple[bytes, bytes]]:
         ((row.encode("utf-8", "surrogateescape"), mark) for row in rows),
         key=lambda item: (-len(item[0]), item[0]),
     )
+
+
+def _replaced(value: Any, rows: Sequence[tuple[str, str]]) -> Any:
+    if isinstance(value, str):
+        for path, mark in rows:
+            value = value.replace(path, mark)
+        return value
+    if isinstance(value, list):
+        return [_replaced(item, rows) for item in value]
+    if type(value) is tuple:
+        return tuple(_replaced(item, rows) for item in value)
+    if isinstance(value, dict):
+        return {key: _replaced(item, rows) for key, item in value.items()}
+    return value
 
 
 def _same_bytes(left: str, right: str) -> bool:

@@ -206,7 +206,7 @@ class CandidateRow:
         if self.raw is not None and self.raw != self.value:
             note = ", ".join(part for part in (note, f"argv text {self.raw!r}") if part)
         return model.Candidate(
-            value=self.value,
+            value=ws.stated_value(self.value),
             value_type=self.value_type,
             mechanism=self.mechanism,
             source=ws.source(self.site),
@@ -2667,7 +2667,7 @@ class ParamsCollector:
         if row.owner_fqn:
             values["owner"] = row.owner_fqn
         if pending.state == model.ParamState.EFFECTIVE.value:
-            values["value"] = winner.value
+            values["value"] = ctx.ws.stated_value(winner.value)
         if row.block:
             values["block"] = row.block
         if row.selector_key:

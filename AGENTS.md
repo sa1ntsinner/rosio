@@ -553,7 +553,11 @@ the expression and what was wanted, so two blind spots can neither merge nor mul
    dirty and stopped `git merge` and `git pull` before they started. One workspace built at
    two absolute paths is one file, byte for byte, and a test asserts that too. Where the
    workspace sits on one machine stays in that machine's configuration and command line,
-   which is where a person debugging that machine already looks.
+   which is where a person debugging that machine already looks. A text value that holds a
+   path (the banner xacro writes into a robot description, a launch argument, a tool message)
+   keeps its text and has each root's mount point replaced by the root label, `@src/...` or
+   `@install/...`, through `Workspace.stated_value`, so the value a node receives is restated
+   only where it names the machine.
 4. `line_hint` is advisory, for humans. It never appears in an id and never enters a
    semantic diff. Provenance is inline `{file, locator, line_hint, root}`, never an index
    into a shared table: a slice of the atlas has to be self sufficient, and an index shifts

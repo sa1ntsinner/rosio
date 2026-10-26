@@ -4451,7 +4451,7 @@ class CppCodeCollector:
             LAYER,
             input_digest=ids.digest(
                 NAME,
-                *[ws.file_id(unit.path) for unit in units],
+                *sorted(ws.file_id(unit.path) for unit in units),
                 *[f"{key}={value}" for key, value in sorted(ws.root_hashes().items())],
             ),
             roots=ws.root_hashes(),

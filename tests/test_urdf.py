@@ -690,3 +690,86 @@ def test_shape_numbers_that_do_not_read_are_named_and_order_is_not_a_fact() -> N
         "geometry": {"radius": 0.1, "type": "cylinder"},
         "origin": {"xyz": [0.0, 0.0, 1.0]},
     }
+
+
+def _bot_install(install: Path) -> Path:
+    share = install / "share" / "bot"
+    (share / "meshes").mkdir(parents=True)
+    (share / "package.xml").write_text(
+        "<package format='3'><name>bot</name></package>", encoding="utf-8"
+    )
+    (share / "meshes" / "body.stl").write_text("solid body\nendsolid body\n", encoding="utf-8")
+    return share
+
+
+def test_a_mesh_named_by_its_absolute_path_is_stated_without_it(tmp_path: Path) -> None:
+    """`$(find bot)` expands to where this machine installed the package, and that path sat in
+    the geometry, so two clones wrote two atlases and the robot view could not draw the mesh."""
+    install = tmp_path / "ws" / "install"
+    share = _bot_install(install)
+    elsewhere = tmp_path / "elsewhere" / "wheel.stl"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text("solid wheel\nendsolid wheel\n", encoding="utf-8")
+    (share / "urdf").mkdir()
+    (share / "urdf" / "bot.urdf").write_text(
+        '<robot name="bot"><link name="base">'
+        f'<visual><geometry><mesh filename="file://{share}/meshes/body.stl"/></geometry>'
+        f'<material name="skin"><texture filename="{share}/meshes/skin.png"/></material></visual>'
+        f'<visual><geometry><mesh filename="{share}/meshes/gone.stl"/></geometry></visual>'
+        f'<collision><geometry><mesh filename="file://{elsewhere}"/></geometry></collision>'
+        "</link></robot>",
+        encoding="utf-8",
+    )
+    roots = (RootSpec("install", str(install)),)
+    ws = Workspace.discover(roots)
+    builder = model.AtlasBuilder()
+    urdf_collect.UrdfCollector().collect(
+        CollectContext(ws=ws, cfg=Config(roots=roots, profiles=()), builder=builder)
+    )
+    atlas = builder.build()
+    model_id = ids.build_file("bot", "urdf/bot.urdf")
+    shapes = atlas.entities[ids.build_frame("base")].attrs["urdf_geometry"][model_id]
+    visuals = sorted(shapes["visuals"], key=lambda row: row["geometry"]["filename"])
+    assert visuals[0]["geometry"] == {
+        "file": ids.build_file("bot", "meshes/body.stl"),
+        "filename": "package://bot/meshes/body.stl",
+        "type": "mesh",
+    }
+    assert visuals[0]["material"]["texture"] == "package://bot/meshes/skin.png"
+    assert visuals[1]["geometry"] == {"filename": "package://bot/meshes/gone.stl", "type": "mesh"}
+    outside = shapes["collisions"][0]["geometry"]["filename"]
+    assert outside.startswith("@outside/wheel.stl#")
+    assert atlas.entities[model_id].attrs["missing_meshes"] == ["package://bot/meshes/gone.stl"]
+    blind = [entry for entry in atlas.unresolved if entry.reason == "file_outside_roots"]
+    assert [(entry.owner, entry.expr) for entry in blind] == [(model_id, outside)]
+    assert str(tmp_path).encode() not in atlas.canonical_bytes()
+
+
+def test_the_run_id_does_not_follow_where_the_roots_sort(tmp_path: Path) -> None:
+    """The digest took the models in absolute path order, so a src root that sorted before
+    the install root on one machine and after it on another gave one tree two run ids."""
+    runs = []
+    for src_at, install_at in (("a", "b"), ("b", "a")):
+        src = tmp_path / src_at / "src"
+        install = tmp_path / install_at / "x" / "install"
+        _bot_install(install)
+        (install / "share" / "bot" / "bot.urdf").write_text(
+            '<robot name="bot"><link name="base"/></robot>', encoding="utf-8"
+        )
+        package = src / "loose"
+        package.mkdir(parents=True)
+        (package / "package.xml").write_text(
+            "<package format='3'><name>loose</name></package>", encoding="utf-8"
+        )
+        (package / "loose.urdf").write_text(
+            '<robot name="loose"><link name="l"/></robot>', encoding="utf-8"
+        )
+        roots = (RootSpec("src", str(src)), RootSpec("install", str(install)))
+        builder = model.AtlasBuilder()
+        urdf_collect.UrdfCollector().collect(
+            CollectContext(
+                ws=Workspace.discover(roots), cfg=Config(roots=roots, profiles=()), builder=builder
+            )
+        )
+        runs.append(sorted(key for key in builder.build().entities if key.startswith("run:")))
+    assert runs[0] == runs[1]

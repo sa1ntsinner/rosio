@@ -394,6 +394,96 @@ def test_one_distribution_at_two_prefixes_is_one_file(tmp_path: Path):
     assert str(tmp_path).encode("utf-8") not in files[0]
 
 
+XACRO_LAUNCH = """\
+import os
+
+import xacro
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def generate_launch_description():
+    model = os.path.normpath(os.path.join(HERE, '..', 'urdf', 'bot.urdf.xacro'))
+    text = xacro.process_file(model).toxml()
+    return LaunchDescription([
+        DeclareLaunchArgument('map', default_value=''),
+        Node(package='robot_state_publisher', executable='robot_state_publisher', name='rsp',
+             parameters=[{'robot_description': text,
+                          'yaml_filename': LaunchConfiguration('map')}]),
+    ])
+"""
+
+
+def _xacro_importable() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("xacro") is not None
+
+
+@pytest.mark.ros
+@pytest.mark.skipif(not _xacro_importable(), reason="xacro is not importable")
+def test_a_model_xacro_wrote_into_a_parameter_is_one_file_at_two_paths(tmp_path: Path):
+    """xacro writes a banner naming the absolute path of its input into the text a node
+    receives, a launch argument names a file by where this machine holds it, and a launch
+    file that raises can quote its own path. Each put the mount point into compared data."""
+    written = []
+    for name in ("a/ws", "b/a/much/longer/place/ws"):
+        target = tmp_path / name
+        package = target / "src" / "bot"
+        for folder in ("launch", "urdf", "maps"):
+            (package / folder).mkdir(parents=True)
+        (package / "package.xml").write_text(
+            "<package format='3'><name>bot</name>"
+            "<export><build_type>ament_python</build_type></export></package>",
+            encoding="utf-8",
+        )
+        (package / "urdf" / "bot.urdf.xacro").write_text(
+            '<robot name="bot" xmlns:xacro="http://www.ros.org/wiki/xacro">'
+            '<link name="base"/></robot>',
+            encoding="utf-8",
+        )
+        (package / "maps" / "map.yaml").write_text("image: map.pgm\n", encoding="utf-8")
+        (package / "launch" / "bringup.launch.py").write_text(XACRO_LAUNCH, encoding="utf-8")
+        (package / "launch" / "broken.launch.py").write_text(
+            "import os\n\n\ndef generate_launch_description():\n"
+            "    raise RuntimeError('cannot use ' + os.path.abspath(__file__))\n",
+            encoding="utf-8",
+        )
+        workspace = Workspace.discover((RootSpec(kind="src", path=str(target / "src")),))
+        profiles = (
+            ProfileSpec(
+                slug="bot",
+                entrypoints=(
+                    Entrypoint(
+                        verb="launch",
+                        pkg="bot",
+                        target="bringup.launch.py",
+                        args=(("map", str(package / "maps" / "map.yaml")),),
+                    ),
+                ),
+            ),
+            ProfileSpec(
+                slug="broken",
+                entrypoints=(Entrypoint(verb="launch", pkg="bot", target="broken.launch.py"),),
+            ),
+        )
+        atlas = extract.run(_config(target / "out", workspace, profiles), workspace)
+        written.append(atlas.canonical_bytes())
+        description = atlas.entities["param:/rsp|robot_description"].candidates[0].value
+        assert "@src/bot/urdf/bot.urdf.xacro" in description
+        assert atlas.entities["param:/rsp|yaml_filename"].candidates[0].value == (
+            "@src/bot/maps/map.yaml"
+        )
+
+    assert written[0] == written[1]
+    assert str(tmp_path).encode("utf-8") not in written[0]
+    assert b"cannot use @src/bot/launch/broken.launch.py" in written[0]
+
+
 def test_a_non_deterministic_run_stamps_the_time_outside_the_comparison(
     tmp_path: Path, ws: Workspace
 ):

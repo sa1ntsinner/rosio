@@ -36,7 +36,7 @@ from xml.etree import ElementTree
 
 from rosio import ids, model, workspace
 from rosio.collect import CollectContext, register
-from rosio.errors import CollectorError
+from rosio.errors import CollectorError, ContractError
 from rosio.resolve import records
 
 LAYER = model.Layer.DECLARED.value
@@ -90,6 +90,7 @@ XACRO_DIRECTIVES = frozenset(
 """Everything else in the xacro namespace is a macro call."""
 
 _PACKAGE_URI = re.compile(r"^package://([^/]+)/(.+)$")
+_FILE_URI = "file://"
 _ARG_USE = re.compile(r"\$\(arg\s+([A-Za-z_][A-Za-z0-9_]*)\s*\)")
 _FIND_USE = re.compile(r"\$\(find(?:-pkg-share)?\s+([A-Za-z0-9_]+)\s*\)")
 
@@ -457,6 +458,9 @@ def _meshes(root: ElementTree.Element, resolve_package: PackageResolver | None) 
             if base:
                 path = str(Path(base) / match.group(2))
                 exists = Path(path).is_file()
+        elif _local(filename):
+            path = _local(filename)
+            exists = Path(path).is_file()
         out[filename] = Mesh(filename=filename, package=package, path=path, exists=exists)
     return [out[key] for key in sorted(out)]
 
@@ -887,13 +891,13 @@ class UrdfCollector:
                 # The file still costs its entity and its blind spot. Without them a model
                 # that is not parsable xml took its frames, its edges and the whole frame
                 # want out of the atlas with nothing but a run exception row to show it.
-                exceptions.append(_exception_row(ws, path, exc))
+                exceptions.append(_exception_row(ctx, path, exc))
                 refusals.append((path, "urdf_unreadable", str(exc)))
         for path in xacros:
             try:
                 scan = scan_xacro(path, resolve_package=ws.share)
             except CollectorError as exc:
-                exceptions.append(_exception_row(ws, path, exc))
+                exceptions.append(_exception_row(ctx, path, exc))
                 refusals.append((path, "xacro_unreadable", str(exc)))
                 continue
             if scan.kind != "model":
@@ -914,14 +918,14 @@ class UrdfCollector:
             try:
                 parsed.append((path, parse_xacro_file(path, args, resolve_package=ws.share)))
             except CollectorError as exc:
-                exceptions.append(_exception_row(ws, path, exc))
+                exceptions.append(_exception_row(ctx, path, exc))
                 refusals.append((path, "xacro_failed", str(exc)))
         run = builder.add_run(
             LAYER,
             profile=profile if ctx.profile else None,
             input_digest=ids.digest(
                 NAME,
-                *[ws.file_id(path) for path in sorted(urdfs + xacros)],
+                *sorted(ws.file_id(path) for path in urdfs + xacros),
                 *[f"{key}={value}" for key, value in sorted(ws.root_hashes().items())],
             ),
             roots=ws.root_hashes(),
@@ -973,10 +977,25 @@ class UrdfCollector:
         meshes = {
             mesh.filename: ws.file_id(mesh.path)
             for mesh in found.meshes
-            if mesh.path and mesh.exists
+            if mesh.path and mesh.exists and _spelled(ws, mesh.filename)[1]
         }
+        outside: set[str] = set()
         for name, shapes in found.shapes:
-            frame_shapes.setdefault(name, {})[file_id] = _with_mesh_files(shapes, meshes)
+            frame_shapes.setdefault(name, {})[file_id] = _with_mesh_files(
+                ws, shapes, meshes, outside
+            )
+        for spelled in sorted(outside):
+            builder.unresolved(
+                model.Unresolved(
+                    want=model.Want.OTHER.value,
+                    owner=file_id,
+                    expr=spelled,
+                    reason="file_outside_roots",
+                    role="mesh",
+                    resolvable_by=["add the tree that holds the file to the roots"],
+                    evidence=[source],
+                )
+            )
         for name, frame in found.frames().items():
             if not frame.declared:
                 continue
@@ -1146,8 +1165,8 @@ class UrdfCollector:
         ws = ctx.ws
         file_id = ws.file_id(path)
         # The detail is compared data and it can quote a tool message, so the machine
-        # path in it becomes the file id.
-        detail = detail.replace(path, file_id)
+        # path in it becomes the file id and every other mount point its label.
+        detail = ws.stated_value(detail.replace(path, file_id), ctx.cfg.ros_setup)
         ctx.builder.node(
             file_id,
             attrs={"loadable": False, "refused_because": reason, "refused_detail": detail},
@@ -1170,17 +1189,59 @@ class UrdfCollector:
         )
 
 
-def _with_mesh_files(shapes: dict[str, Any], files: Mapping[str, str]) -> dict[str, Any]:
-    """The rows with the file id of each mesh the workspace holds beside its written name."""
+def _with_mesh_files(
+    ws: Any, shapes: dict[str, Any], files: Mapping[str, str], outside: set[str]
+) -> dict[str, Any]:
+    """The rows with the file id of each mesh the workspace holds beside its written name.
+
+    An absolute name, which is what `$(find pkg)` expands to, is spelled as `_spelled` states
+    it, and a name outside every root is added to `outside` for its blind spot.
+    """
     out: dict[str, Any] = {}
     for kind, rows in shapes.items():
         out[kind] = []
         for row in rows:
             geometry = row.get("geometry", {})
-            if geometry.get("filename") in files:
-                row = {**row, "geometry": {**geometry, "file": files[geometry["filename"]]}}
+            filename = geometry.get("filename")
+            if filename:
+                spelled, inside = _spelled(ws, filename)
+                geometry = {**geometry, "filename": spelled}
+                if filename in files:
+                    geometry["file"] = files[filename]
+                if not inside:
+                    outside.add(spelled)
+                row = {**row, "geometry": geometry}
+            texture = row.get("material", {}).get("texture")
+            if texture:
+                spelled, inside = _spelled(ws, texture)
+                if not inside:
+                    outside.add(spelled)
+                row = {**row, "material": {**row["material"], "texture": spelled}}
             out[kind].append(row)
     return out
+
+
+def _local(filename: str) -> str:
+    """The absolute path a model file name names, `file://` or bare, or empty."""
+    local = filename[len(_FILE_URI) :] if filename.startswith(_FILE_URI) else filename
+    return local if local.startswith("/") else ""
+
+
+def _spelled(ws: Any, filename: str) -> tuple[str, bool]:
+    """(the file name as compared data may state it, whether it sits inside a root).
+
+    A name inside a package becomes the `package://` spelling a model would have written,
+    any other name inside a root has its mount point stated by the root label, and a name
+    outside every root is stated by its name and content, never by where it sits here.
+    """
+    local = _local(filename)
+    if not local:
+        return filename, True
+    try:
+        package, relative = ws.rel(local)
+    except ContractError:
+        return ws.stated_by_content([local])[0], False
+    return (f"package://{package}/{relative}" if package else ws.stated_value(local)), True
 
 
 def _file_entity(ctx: CollectContext, path: str, found: UrdfModel) -> str:
@@ -1191,7 +1252,11 @@ def _file_entity(ctx: CollectContext, path: str, found: UrdfModel) -> str:
         "strategy": found.strategy,
         "robot_name": found.robot_name or "",
     }
-    missing = sorted(mesh.filename for mesh in found.meshes if mesh.package and not mesh.exists)
+    missing = sorted(
+        _spelled(ws, mesh.filename)[0]
+        for mesh in found.meshes
+        if (mesh.package or mesh.path) and not mesh.exists
+    )
     if missing:
         attrs["missing_meshes"] = missing
     builder.node(file_id, attrs=attrs)
@@ -1243,14 +1308,16 @@ def _describes(ws: Any, path: str) -> bool:
     return ws.package_of(path) is not None or ws.root_of(path) != "install"
 
 
-def _exception_row(ws: Any, path: str, exc: Exception) -> dict[str, Any]:
+def _exception_row(ctx: CollectContext, path: str, exc: Exception) -> dict[str, Any]:
+    ws = ctx.ws
     file_id = ws.file_id(path)
     return {
         "file": file_id,
         "phase": "describe",
         "exc_type": type(exc).__name__,
-        # The message is compared data, so the machine path in it becomes the file id.
-        "message": str(exc).replace(path, file_id),
+        # The message is compared data, so the machine path in it becomes the file id and
+        # every other mount point its label.
+        "message": ws.stated_value(str(exc).replace(path, file_id), ctx.cfg.ros_setup),
     }
 
 

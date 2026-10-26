@@ -637,7 +637,7 @@ def _input_digest(
     entrypoints = [entry.label for entry in spec.entrypoints] if spec else []
     args = (
         [
-            f"{ids.escape_segment(entry.label)}|{key}={value}"
+            f"{ids.escape_segment(entry.label)}|{key}={ws.stated_value(value)}"
             for entry in spec.entrypoints
             for key, value in entry.args
         ]
@@ -652,7 +652,7 @@ def _input_digest(
             "profile": step.profile,
             "entrypoints": entrypoints,
             "args": args,
-            "env": [f"{key}={value}" for key, value in (spec.env if spec else ())],
+            "env": [f"{key}={ws.stated_value(value)}" for key, value in (spec.env if spec else ())],
             "ignore": list(cfg.ignore),
             "ros_setup": ws.stated_by_content(cfg.ros_setup),
             "roots": [f"{key}={value}" for key, value in sorted(roots.items())],

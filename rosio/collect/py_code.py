@@ -2755,7 +2755,7 @@ class PyCodeCollector:
             LAYER,
             input_digest=ids.digest(
                 NAME,
-                *[ws.file_id(item.path) for item in read],
+                *sorted(ws.file_id(item.path) for item in read),
                 *[row.symbol for row in self.discovered],
                 *sorted(self.node_bases),
                 *[f"{key}={value}" for key, value in sorted(ws.root_hashes().items())],

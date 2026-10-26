@@ -28,6 +28,7 @@ with the note `launch.raised`, and the drift rule of that name builds the findin
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -348,7 +349,7 @@ class LaunchDeclaredCollector:
             profile=profile_id,
             input_digest=input_digest,
             roots=ctx.ws.root_hashes(),
-            env=dict(spec.env),
+            env=ctx.ws.stated_value(dict(spec.env)),
             predicates=predicates,
             exceptions=sorted(problems, key=_problem_key),
         )
@@ -361,8 +362,10 @@ class LaunchDeclaredCollector:
             entry=sorted(dict.fromkeys(launchfile_ids)),
             entry_kind="launch" if not other_verbs else "mixed",
             inputs={
-                "args": [[key, value] for entry in spec.entrypoints for key, value in entry.args],
-                "env": [[key, value] for key, value in spec.env],
+                "args": ctx.ws.stated_value(
+                    [[key, value] for entry in spec.entrypoints for key, value in entry.args]
+                ),
+                "env": ctx.ws.stated_value([[key, value] for key, value in spec.env]),
                 "ros_setup": ctx.ws.stated_by_content(ctx.cfg.ros_setup),
                 "run_entrypoints": sorted(other_verbs),
             },
@@ -425,6 +428,14 @@ class LaunchDeclaredCollector:
             if (existing.profile, existing.entry_path, existing.args) == wanted:
                 return existing
         walk = self._resolve(ctx, spec, entry, path, layer)
+        # A tool message names where this machine holds the roots, and it reaches the run
+        # rows, the findings and the blind spots, so the mount point is stated by its label.
+        walk.exceptions = [
+            dataclasses.replace(
+                failure, message=ctx.ws.stated_value(failure.message, ctx.cfg.ros_setup)
+            )
+            for failure in walk.exceptions
+        ]
         ctx.declared.walks.append(walk)
         return walk
 
@@ -502,7 +513,7 @@ class LaunchDeclaredCollector:
         if _complete(walk):
             values.update(
                 {
-                    "args": [[key, value] for key, value in walk.args],
+                    "args": ctx.ws.stated_value([[key, value] for key, value in walk.args]),
                     "node_count": len(walk.nodes),
                     "raised": [failure.exc_type for failure in walk.exceptions],
                     "notes": list(walk.notes),
@@ -1650,7 +1661,7 @@ def _include_args(ws: Workspace, include: records.LaunchInclude) -> list[list[An
                 if _command_text(value) is not None
                 else EXTERNAL_TOKEN
                 if _under_temp(value, _root_paths(ws))
-                else value,
+                else ws.stated_value(value),
             ]
         )
     return out
@@ -1928,9 +1939,9 @@ def _input_digest(
     parts: list[str] = [spec.slug]
     for entry in spec.entrypoints:
         parts.append(entry.label)
-        parts.extend(f"{key}:={value}" for key, value in entry.args)
-        parts.extend(entry.argv)
-    parts.extend(f"{key}={value}" for key, value in spec.env)
+        parts.extend(f"{key}:={ctx.ws.stated_value(value)}" for key, value in entry.args)
+        parts.extend(ctx.ws.stated_value(list(entry.argv)))
+    parts.extend(f"{key}={ctx.ws.stated_value(value)}" for key, value in spec.env)
     parts.extend(ctx.ws.stated_by_content(ctx.cfg.ros_setup))
     parts.extend(sorted(launchfile_ids))
     parts.extend(f"{key}={value}" for key, value in sorted(predicates.items()))
@@ -1987,8 +1998,8 @@ def _include_problems(ws: Workspace, walk: records.LaunchWalk) -> list[dict[str,
                 "phase": "include",
                 "exc_type": INCLUDE_UNRESOLVED,
                 "message": (
-                    f"{_include_expr(include)} did not resolve to a launch file, so the "
-                    "nodes it includes are not in this profile"
+                    f"{ws.stated_value(_include_expr(include))} did not resolve to a launch "
+                    "file, so the nodes it includes are not in this profile"
                 ),
             }
         )
