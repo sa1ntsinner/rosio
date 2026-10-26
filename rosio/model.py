@@ -37,7 +37,8 @@ from rosio.errors import ContractError
 SCHEMA_MINOR = "15"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
 stored id: the `model.mesh_missing` rule and the model file attributes
-`meshes_not_installed` and `meshes_absent`; frame `urdf_geometry`, the visual and collision rows each model states;
+`meshes_not_installed` and `meshes_absent`; frame `urdf_geometry`, the visual and collision
+rows each model states;
 endpoint and tf broadcast record `guard_parameters`;
 the launch exception row `kept`; the unresolved entry `construction`;
 `class_templates` definition counts and specialization presence; construction
