@@ -272,6 +272,58 @@ def test_a_document_xacro_processed_is_a_robot_model_read(tmp_path: Path, serial
     assert first.nodes[0].file_reads == second.nodes[0].file_reads
 
 
+def _installed_walk(tmp_path: Path, read: str) -> records.LaunchWalk:
+    """A launch file where a binary install puts it, beside a library that can read too."""
+    model = tmp_path / "robot.urdf"
+    model.write_text(URDF)
+    launch_dir = tmp_path / "opt" / "ros" / "x" / "share" / "bot" / "launch"
+    library = tmp_path / "opt" / "ros" / "x" / "lib" / "python3.12" / "site-packages"
+    launch_dir.mkdir(parents=True)
+    library.mkdir(parents=True)
+    (library / "bot_helper.py").write_text(
+        "import os\n"
+        "def model(path):\n"
+        "    os.path.exists(path + '.library')\n"
+        "    return open(path).read()\n"
+    )
+    entry = launch_dir / "bot.launch.py"
+    entry.write_text(
+        "import os, sys\n"
+        f"sys.path.insert(0, {str(library)!r})\n"
+        "import bot_helper\n"
+        "from launch import LaunchDescription\n"
+        "from launch_ros.actions import Node\n"
+        "def generate_launch_description():\n"
+        f"    path = {str(model)!r}\n"
+        "    os.path.exists(path + '.launch')\n"
+        f"    text = {read}\n"
+        "    return LaunchDescription([Node(package='robot_state_publisher', "
+        "executable='robot_state_publisher', "
+        "parameters=[{'robot_description': text}])])\n"
+    )
+    walk = launch_exec.walk(str(entry), launch_sandbox="off")
+    assert not walk.exceptions
+    return walk
+
+
+@pytest.mark.ros
+def test_an_installed_launch_file_records_its_model_read(tmp_path: Path):
+    walk = _installed_walk(tmp_path, "open(path).read()")
+    assert [(r.path, r.role) for r in walk.nodes[0].file_reads] == [
+        (str(tmp_path / "robot.urdf"), "robot_model")
+    ]
+    probes = " ".join(walk.predicates)
+    assert "robot.urdf.launch" in probes
+    assert "robot.urdf.library" not in probes
+
+
+@pytest.mark.ros
+def test_a_read_by_library_code_is_not_a_launch_file_read(tmp_path: Path):
+    walk = _installed_walk(tmp_path, "bot_helper.model(path)")
+    assert not walk.nodes[0].file_reads
+    assert "robot.urdf.library" not in " ".join(walk.predicates)
+
+
 @pytest.mark.ros
 def test_a_model_read_is_the_same_on_every_walk(tmp_path: Path):
     reads = {_model_walk(tmp_path, "open(path).read()").nodes[0].file_reads for _ in range(2)}

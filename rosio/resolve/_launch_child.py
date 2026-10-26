@@ -47,7 +47,12 @@ ROOT = identity.ROOT
 """What launch_ros means by its unspecified namespace sentinel: the node runs in the root
 namespace. The sentinel text itself never leaves this module."""
 
-_LIBRARY_MARKERS = ("/site-packages/", "/dist-packages/", "/opt/ros/", "/lib/python3")
+_LIBRARY_MARKERS = ("/site-packages/", "/dist-packages/", "/lib/python3")
+"""Where python libraries live, the launch and launch_ros packages, xacro and the standard
+library among them. Where a distribution is mounted says nothing about what a file is: every
+launch file a binary install ships sits under `/opt/ros/<distro>/share/<pkg>/launch/`."""
+
+_LAUNCH_DIR = re.compile(r"/share/[^/]+/launch/")
 
 TEMP_ENV = frozenset({"TMPDIR", "TEMP", "TMP"})
 """Where a process keeps its temp files is a property of the machine and never a branch of a
@@ -253,6 +258,8 @@ def _from_launch_code() -> bool:
         return False
     if name.startswith(_OWN_PACKAGE):
         return False
+    if _LAUNCH_DIR.search(name):
+        return True
     return not any(marker in name for marker in _LIBRARY_MARKERS)
 
 
