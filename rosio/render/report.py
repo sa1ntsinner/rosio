@@ -635,7 +635,7 @@ def _blind_spots(atlas: Atlas) -> list[str]:
             cause,
             row["count"],
             joined(sorted(row["wants"])),
-            clip(f"{row['example'].expr} in {query.label(row['example'].owner)}", 80),
+            clip(_example(row["example"], atlas), 80),
         ]
         for cause, row in sorted(grouped.items(), key=lambda item: (-item[1]["count"], item[0]))
     ]
@@ -654,6 +654,10 @@ def _blind_spots(atlas: Atlas) -> list[str]:
 
 # ---------------------------------------------------------------------------
 # the cross layer section, which is what this tool exists for
+
+
+def _example(entry, atlas: Atlas) -> str:
+    return f"{query.readable(entry.expr, atlas)} in {query.label(entry.owner)}"
 
 
 def _crossings(atlas: Atlas) -> list[str]:

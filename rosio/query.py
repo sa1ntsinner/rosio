@@ -120,6 +120,59 @@ def site(source: Source | Mapping[str, Any] | None, *, locator: bool = False) ->
     return text
 
 
+_FILE_TOKEN = re.compile(r"\bfile:[^\s|'\"]+\|[^\s'\"]+")
+_ROOT_TOKEN = re.compile(r"@([a-z][a-z0-9_]*)/([^\s'\"]*)")
+_TRAILING = ".,;:)]"
+OUTSIDE = "outside"
+"""The label `Workspace.stated` gives a path under no root."""
+
+
+def readable(text: str, atlas: Atlas | None = None) -> str:
+    """Prose with the tokens the atlas stores paths as turned back into paths a person reads.
+
+    A file id becomes `package/relpath`, and a root token such as `@src/pkg_dir/x.yaml`
+    becomes the package relative path when the atlas names the package holding it. A path
+    under no root keeps its tail behind a marker, because a reader seeing `@outside/...`
+    reads it as a file rosio opened by that name."""
+    if "file:" not in text and "@" not in text:
+        return text
+    generated = (atlas.generated or {}) if atlas is not None else {}
+    labels = {str(row.get("label")) for row in generated.get("roots") or ()} or {"src", "install"}
+    packages = generated.get("packages") or {}
+
+    def file_token(found: re.Match) -> str:
+        token, tail = _split_tail(found.group(0))
+        try:
+            return file_label(token) + tail
+        except ContractError:
+            return found.group(0)
+
+    def root_token(found: re.Match) -> str:
+        root, (rest, tail) = found.group(1), _split_tail(found.group(2))
+        if root == OUTSIDE:
+            # after a substitution such as $(find-pkg-share x) the token only joined a name
+            glued = found.start() > 0 and found.string[found.start() - 1] == ")"
+            return f"{'' if glued else '<outside the workspace>'}/{rest}{tail}"
+        if root not in labels:
+            return found.group(0)
+        best = ""
+        for package, dirs in packages.items():
+            prefix = str((dirs or {}).get(root) or "")
+            if prefix and rest.startswith(prefix + "/") and len(prefix) > len(best):
+                best, name = prefix, package
+        if best:
+            return f"{name}/{rest[len(best) + 1 :]}{tail}"
+        return f"{root}/{rest}{tail}"
+
+    return _ROOT_TOKEN.sub(root_token, _FILE_TOKEN.sub(file_token, text))
+
+
+def _split_tail(token: str) -> tuple[str, str]:
+    """A token and the punctuation of the sentence it ends, which is not part of the path."""
+    body = token.rstrip(_TRAILING)
+    return body, token[len(body) :]
+
+
 def profile_name(profile_id: str) -> str:
     return profile_id[len("profile:") :] if profile_id.startswith("profile:") else profile_id
 
@@ -343,7 +396,7 @@ def explain(atlas: Atlas, selector: str, *, limit: int = DEFAULT_LIMIT) -> Answe
         "profiles": node.profiles,
         "agreement": node.agreement,
         "conflicts": list(node.conflicts),
-        "facts": _fact_rows(node, limit),
+        "facts": _fact_rows(node, limit, atlas),
         "effective": _effective_rows(node, limit),
         "edges": _edge_rows(atlas, entity_id, limit),
         "unresolved": _unresolved_rows(atlas, entity_id, limit),
@@ -377,7 +430,7 @@ def explain(atlas: Atlas, selector: str, *, limit: int = DEFAULT_LIMIT) -> Answe
         pairs = ", ".join(
             f"{key}={_stated(row['value'])}" for key, row in per_key.items() if _said(row["value"])
         )
-        lines.append(f"  effective in {profile_name(profile)}: {_clip(pairs)}")
+        lines.append(f"  effective in {profile_name(profile)}: {_clip(readable(pairs, atlas))}")
         for key, row in per_key.items():
             if row["where"]:
                 lines.append(f"      {key} from {row['where']}")
@@ -469,7 +522,7 @@ def _ambiguous(verb: str, selector: str, matches: Sequence[str], atlas: Atlas) -
     )
 
 
-def _fact_rows(node: Node, limit: int) -> list[dict[str, Any]]:
+def _fact_rows(node: Node, limit: int, atlas: Atlas | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for fact in sorted(node.facts, key=lambda item: item.sort_key()):
         keys = sorted(key for key in fact.values if _said(fact.values[key]))
@@ -481,7 +534,7 @@ def _fact_rows(node: Node, limit: int) -> list[dict[str, Any]]:
                 "layer": fact.layer,
                 "profile": fact.profile,
                 "confidence": fact.confidence,
-                "values": _clip(shown) or "no values",
+                "values": _clip(readable(shown, atlas)) or "no values",
                 "where": [site(source) for source in fact.evidence[:limit]],
             }
         )
@@ -564,7 +617,7 @@ def _unresolved_rows(atlas: Atlas, entity_id: str, limit: int) -> list[dict[str,
     rows = [
         {
             "want": entry.want,
-            "expr": entry.expr,
+            "expr": readable(entry.expr, atlas),
             "reason": entry.reason,
             "where": site(entry.evidence[0]) if entry.evidence else "",
         }
@@ -910,7 +963,11 @@ def query(atlas: Atlas, question: str, *, limit: int = DEFAULT_LIMIT) -> Answer:
             ],
         )
 
-    matched = _matches(atlas, needles, kinds)
+    stated = [token for token in (question or "").split() if _names_an_entity(token)]
+    missing = [token for token in stated if token not in atlas.entities]
+    if missing:
+        return _no_such_entity(atlas, missing[0], data, limit)
+    matched = list(dict.fromkeys(stated)) or _matches(atlas, needles, kinds)
     widened = not matched and bool(kinds) and bool(needles)
     if not matched and kinds:
         # "which nodes publish cmd_vel" names a topic and asks for nodes. Keep the named
@@ -992,6 +1049,33 @@ def query(atlas: Atlas, question: str, *, limit: int = DEFAULT_LIMIT) -> Answer:
     return Answer(verb="query", data=data, lines=lines)
 
 
+def _names_an_entity(token: str) -> bool:
+    """`topic:/scan` is a selector, read exactly. A word that merely holds a colon is not."""
+    kind, colon, rest = token.partition(":")
+    return bool(colon and rest) and kind in ids.ENTITY_KINDS
+
+
+def _no_such_entity(atlas: Atlas, selector: str, data: dict[str, Any], limit: int) -> Answer:
+    """A selector names one entity, so a near name is offered and never answered for it."""
+    kind, _, rest = selector.partition(":")
+    try:
+        name = label(selector)
+    except ContractError:
+        name = rest
+    near = sorted(
+        label(entity.id)
+        for entity in atlas.by_kind(kind)
+        if name.lower() in label(entity.id).lower()
+    )
+    kept, hidden = _cap(near, limit)
+    line = f"no {kind} {name} in this atlas"
+    if kept:
+        line += f", near: {', '.join(kept)}" + (f" and {hidden} more" if hidden else "")
+    else:
+        line += f", and no {kind} name holds it"
+    return Answer(verb="query", ok=False, data=data, lines=[line])
+
+
 def _matches(atlas: Atlas, needles: Sequence[str], kinds: set[str]) -> list[str]:
     scored: list[tuple[int, str]] = []
     for entity_id in sorted(atlas.entities):
@@ -1058,6 +1142,7 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
         "hops": hops or [],
         "found": bool(hops),
         "data_route": data_route,
+        "data_direction": _data_direction(hops) if data_route else "",
     }
     if not hops:
         return Answer(
@@ -1077,6 +1162,10 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
             f"  no data route connects them, this one runs through {', '.join(other)}, "
             "which carries no message between them"
         )
+    elif data["data_direction"] == "backward":
+        lines.append(f"  data flows the other way, from {label(end)} to {label(start)}")
+    elif data["data_direction"] == "mixed":
+        lines.append("  no message travels this route end to end, some hops run against the data")
     lines.append(f"  {label(start)}")
     for hop in hops:
         arrow = "->" if hop["forward"] else "<-"
@@ -1088,6 +1177,22 @@ DATA_EDGE_KINDS = frozenset(
     {"publishes", "subscribes", "serves", "calls", "remaps", "broadcasts_tf"}
 )
 """The edges data travels along. A path is looked for through these first."""
+
+DATA_LEAVES_SOURCE = frozenset({"publishes", "calls", "broadcasts_tf"})
+"""Data kinds whose message leaves the edge source. A subscription and a server receive."""
+
+
+def _data_direction(hops: Sequence[Mapping[str, Any]]) -> str:
+    """`forward` when every hop runs with the data, `backward` when every hop runs against
+    it, `mixed` otherwise. A remap carries no message and takes no side."""
+    sides = {
+        (hop["kind"] in DATA_LEAVES_SOURCE) == hop["forward"]
+        for hop in hops
+        if hop["kind"] != "remaps"
+    }
+    if sides == {False}:
+        return "backward"
+    return "mixed" if len(sides) > 1 else "forward"
 
 
 def _shortest(
@@ -1280,10 +1385,21 @@ def _side(atlas: Atlas, profile: str | None = None) -> dict[str, Any]:
     # normalised detail, and a rate stated to six places moves whenever anything at all
     # resolves, so keying on it reports one finding twice, once as gone and once as new.
     findings = {}
+    prints = {}
     for item in atlas.findings:
         if wanted and item.profiles and not any(name in wanted for name in item.profiles):
             continue
-        findings[_finding_key(item)] = item
+        if profile and item.profiles == [profile]:
+            # the discriminator carries the profile, so a finding of this profile alone is
+            # lined up by its title
+            title = _without_profile(" ".join(item.title.split()), profile)
+            key = "|".join((item.rule, item.subject_key, title))
+            said = " ".join(f"{item.say} {item.detail}".split())
+            prints[key] = _without_profile(said, profile)
+        else:
+            key = _finding_key(item)
+            prints[key] = _finding_print(item)
+        findings[key] = item
     return {
         "values": values,
         "candidates": candidates,
@@ -1294,7 +1410,13 @@ def _side(atlas: Atlas, profile: str | None = None) -> dict[str, Any]:
         "kinds": kinds,
         "endpoints": endpoints,
         "findings": findings,
+        "prints": prints,
     }
+
+
+def _without_profile(text: str, profile: str) -> str:
+    name = re.escape(profile_name(profile))
+    return re.sub(rf"(?<![\w.]){name}(?![\w]|\.\w)", "<profile>", text)
 
 
 def _matters(before: dict[str, Any], after: dict[str, Any], limit: int) -> dict[str, Any]:
@@ -1476,7 +1598,7 @@ def _finding_restated(before: dict[str, Any], after: dict[str, Any]) -> list[dic
     rows = []
     for key in sorted(set(before["findings"]) & set(after["findings"])):
         was, now = before["findings"][key], after["findings"][key]
-        if _finding_print(was) == _finding_print(now):
+        if before["prints"][key] == after["prints"][key]:
             continue
         rows.append(
             {
@@ -1743,7 +1865,7 @@ def unresolved(
             row["examples"].append(
                 {
                     "owner": label(entry.owner),
-                    "expr": entry.expr,
+                    "expr": readable(entry.expr, atlas),
                     "reason": entry.reason,
                     "where": site(entry.evidence[0]) if entry.evidence else "",
                     "resolvable_by": list(entry.resolvable_by),

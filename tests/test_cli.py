@@ -1290,6 +1290,41 @@ def test_the_summary_prints_one_line_per_distinct_problem_with_names_a_reader_kn
     ]
 
 
+def test_a_problem_line_names_paths_and_never_the_tokens_the_atlas_stores():
+    atlas = model.Atlas(
+        generated={
+            "roots": [{"kind": "src", "label": "src"}],
+            "packages": {"demo_ten": {"src": "rcd/example_10"}},
+        }
+    )
+    rows = [
+        {
+            "path": "demo_ten/launch/a.launch.py",
+            "exc_type": "FileNotFoundError",
+            "message": "No such file or directory: @src/rcd/example_10/ros2_control/r.xacro, "
+            "'file:demo_one|urdf/rrbot.urdf.xacro' in "
+            'File "@outside/lib/python3.12/site-packages/xacro/__init__.py".',
+        }
+    ]
+
+    ((text, _),) = cli._problem_lines(rows, atlas)
+
+    assert "@src" not in text and "@outside" not in text and "file:" not in text
+    assert "demo_ten/ros2_control/r.xacro," in text
+    assert "'demo_one/urdf/rrbot.urdf.xacro'" in text
+    assert '<outside the workspace>/lib/python3.12/site-packages/xacro/__init__.py".' in text
+
+
+def test_a_name_joined_to_a_substitution_reads_as_one_path():
+    from rosio.query import readable
+
+    text = "$(find-pkg-share hls_lfcd_lds_driver)@outside/hlds_laser.launch.py did not resolve"
+
+    assert readable(text) == (
+        "$(find-pkg-share hls_lfcd_lds_driver)/hlds_laser.launch.py did not resolve"
+    )
+
+
 def test_a_phase_on_a_terminal_is_written_once(monkeypatch):
     import io
 
@@ -1348,3 +1383,19 @@ def test_a_reader_that_closes_the_pipe_early_gets_no_traceback(tmp_path):
     )
     assert "Traceback" not in done.stderr
     assert "BrokenPipeError" not in done.stderr
+
+
+def test_every_argument_of_every_verb_and_action_says_what_it_is():
+    import argparse
+
+    def walk(parser, name):
+        if not parser.description:
+            yield f"{name}: no description"
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for child, sub in action.choices.items():
+                    yield from walk(sub, f"{name} {child}")
+            elif not action.help:
+                yield f"{name} {'/'.join(action.option_strings) or action.metavar}"
+
+    assert list(walk(cli.build_parser(), "rosio")) == []

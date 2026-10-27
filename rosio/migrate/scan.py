@@ -281,6 +281,7 @@ def _params_yaml(context, package, path, text) -> Iterable[Change]:
             if entry["node"] != node:
                 continue
             name, releases = entry["name"], entry["releases"]
+            replacement = cited = None
             if name in leaves:
                 if not releases.get(context.start, {}).get("declared"):
                     continue
@@ -295,6 +296,15 @@ def _params_yaml(context, package, path, text) -> Iterable[Change]:
                 kind, key_path = "not_declared", (*block.key_path, *leaves[name].key_path)
                 said = releases[since]
                 say = f"{node} stops declaring {name} in {since}, so this value is ignored"
+                successor = context.table.parameters.get(f"{node}.{name}")
+                if successor and context.target in successor.checked:
+                    replacement, cited = successor.use, successor.source
+                    instead = f"reads {successor.use} instead"
+                    say = (
+                        f"{node} stops declaring {name} in {since} and {instead}"
+                        if successor.use
+                        else f"{say}; {successor.say}"
+                    )
             else:
                 if "*" in block.selector:
                     continue
@@ -341,7 +351,9 @@ def _params_yaml(context, package, path, text) -> Iterable[Change]:
                 effect="behaviour",
                 release=since,
                 say=say,
-                source=f"{facts['repository']}/blob/{where['branch']}/{where['path']}#L{where['line']}",
+                source=cited
+                or f"{facts['repository']}/blob/{where['branch']}/{where['path']}#L{where['line']}",
+                replacement=replacement,
             )
 
 

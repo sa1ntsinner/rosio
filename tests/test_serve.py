@@ -500,6 +500,15 @@ def test_unresolved_narrows_by_want_and_by_owner(atlas):
     assert "nothing unresolved of want frame_id" in tools.unresolved(atlas, want="frame_id")
 
 
+def test_unresolved_counts_against_what_was_wanted_as_the_overview_does():
+    builder = model.AtlasBuilder()
+    builder.count_resolved("topic_name", 44)
+    atlas = builder.build()
+
+    assert tools.unresolved(atlas).splitlines()[0] == "0 values unresolved of 44 wanted"
+    assert "0 values unresolved of 44 wanted" in tools.overview(atlas)
+
+
 # ---------------------------------------------------------------------------
 # the tool set as an interface
 
@@ -929,6 +938,66 @@ def test_graph_lists_each_channel_with_its_ends_and_the_stated_qos():
     assert "/cmd_vel: published by /safety_stop; no subscriber" in answer
 
 
+def test_graph_names_each_qos_of_one_node_whole():
+    builder = model.AtlasBuilder()
+    builder.add_profile("rover")
+    builder.fact(FILTER, "coded", profile=ROVER, values={"seen": True})
+    builder.node(FILTER, name_source="literal")
+    builder.fact(TWIST, "coded", profile=ROVER, values={"seen": True})
+    for site, qos in (
+        ("a", {"reliability": "reliable", "durability": "transient_local", "depth": 1}),
+        ("b", {"durability": "transient_local", "history": "keep_last", "depth": 1}),
+    ):
+        builder.edge(
+            "publishes",
+            FILTER,
+            TWIST,
+            key=ids.edge_key(symbol=site),
+            layer="coded",
+            profile=ROVER,
+            values={"qos": {**qos, "history": "keep_last"}},
+        )
+
+    answer = tools.graph(builder.build(), profile="rover")
+
+    assert "..." not in answer
+    assert (
+        "published by /scan_filter [reliable, transient_local, keep_last, depth 1], "
+        "/scan_filter [transient_local, keep_last, depth 1]; no subscriber"
+    ) in answer
+
+
+def test_graph_names_a_lifecycle_node_as_the_server_of_its_lifecycle_services(tmp_path, capsys):
+    talker, client = ids.build_node("/lc_talker"), ids.build_node("/lc_client")
+    change, event = (
+        ids.build_service("/lc_talker/change_state"),
+        ids.build_topic("/lc_talker/transition_event"),
+    )
+    builder = model.AtlasBuilder()
+    builder.add_profile("rover")
+    builder.fact(talker, "declared", profile=ROVER, values={"form": "lifecycle_node"})
+    builder.fact(client, "declared", profile=ROVER, values={"form": "node"})
+    for entity_id in (talker, client):
+        builder.node(entity_id, name_source="literal")
+    for entity_id in (change, event):
+        builder.fact(entity_id, "coded", profile=ROVER, values={"seen": True})
+    for kind, channel in (("calls", change), ("subscribes", event)):
+        builder.edge(
+            kind, client, channel, key=ids.edge_key(profile=ROVER), layer="coded", profile=ROVER
+        )
+    atlas = builder.build()
+
+    answer = tools.graph(atlas, profile="rover")
+
+    assert (
+        "/lc_talker/change_state: served by /lc_talker (lifecycle node); called by /lc_client"
+        in (answer)
+    )
+    assert "/lc_talker/transition_event: published by /lc_talker (lifecycle node)" in answer
+    assert "no server" not in answer and "no publisher" not in answer
+    assert tools.diagram(atlas, "mermaid", profile="rover").count("-->") == 4
+
+
 def test_graph_keeps_to_one_profile_and_never_names_a_synthetic_id():
     atlas = rover()
     sim = tools.graph(atlas, profile="rover_sim")
@@ -1267,6 +1336,100 @@ def test_migrate_over_a_directory_it_cannot_read_names_the_directory(
         tools.migrate(str(tmp_path), "kilted", start="jazzy")
     assert str(tmp_path / "secret") in str(caught.value)
     assert "Permission denied" in str(caught.value)
+
+
+def test_migrate_lists_each_rewrite_apply_would_make(tmp_path: Path, monkeypatch):
+    from rosio import migrate as release
+    from rosio.migrate.scan import Change
+
+    def change(line, found, replacement):
+        return Change(
+            rule="tf2_ros_hpp",
+            package="rover_perception",
+            file="src/rover_perception/src/scan_filter.cpp",
+            line=line,
+            column=10,
+            found=found,
+            title="header renamed",
+            effect="deprecated",
+            release="lyrical",
+            say=f"include <{replacement}>",
+            source="https://index.ros.org/p/tf2_ros/",
+            replacement=replacement,
+        )
+
+    planned = [
+        change(9, "tf2_ros/buffer.h", "tf2_ros/buffer.hpp"),
+        change(10, "tf2_ros/transform_listener.h", "tf2_ros/transform_listener.hpp"),
+    ]
+    monkeypatch.setattr(release, "plan_workspace", lambda *args: (planned, tmp_path))
+
+    text = tools.migrate(str(tmp_path), "lyrical", start="humble")
+
+    assert (
+        "src/rover_perception/src/scan_filter.cpp:9 apply rewrites tf2_ros/buffer.h to "
+        "tf2_ros/buffer.hpp"
+    ) in text
+    assert "scan_filter.cpp:10 apply rewrites tf2_ros/transform_listener.h" in text
+
+
+def test_migrate_over_http_reads_only_the_served_workspace(tmp_path: Path, monkeypatch):
+    from rosio import migrate as release
+
+    workspace = tmp_path / "ws"
+    (workspace / "src").mkdir(parents=True)
+    (tmp_path / "elsewhere").mkdir()
+    read = []
+    monkeypatch.setattr(
+        release, "plan_workspace", lambda directory, *args: (read.append(directory), ([], ""))[1]
+    )
+    source = tools.AtlasSource(workspace / "rosio-out" / "atlas.json", confined=True)
+    (migrate,) = [item for item in server.bindings(source) if item.__name__ == "migrate"]
+
+    for outside in (str(tmp_path / "elsewhere"), "..", "/"):
+        with pytest.raises(UsageError, match="over http migrate reads only the workspace"):
+            migrate("jazzy", start="humble", workspace=outside)
+    assert read == []
+
+    migrate("jazzy", start="humble")
+    migrate("jazzy", start="humble", workspace="src")
+    assert [Path(item) for item in read] == [workspace.resolve(), (workspace / "src").resolve()]
+
+
+def test_migrate_over_stdio_reads_the_directory_it_is_given(tmp_path: Path, monkeypatch):
+    from rosio import migrate as release
+
+    read = []
+    monkeypatch.setattr(
+        release, "plan_workspace", lambda directory, *args: (read.append(directory), ([], ""))[1]
+    )
+    source = tools.AtlasSource(tmp_path / "ws" / "rosio-out" / "atlas.json")
+    (migrate,) = [item for item in server.bindings(source) if item.__name__ == "migrate"]
+
+    migrate("jazzy", start="humble", workspace=str(tmp_path))
+    assert read == [str(tmp_path)]
+
+
+def test_the_http_transport_confines_migrate(monkeypatch):
+    from types import SimpleNamespace
+
+    built = []
+    monkeypatch.setattr(
+        server, "build", lambda source: built.append(source) or SimpleNamespace(run_stdio_async=0)
+    )
+    monkeypatch.setattr(server, "_run_async", lambda entry: None)
+
+    server.run(server.Options(atlas="a.json"))
+    assert built[-1].confined is False
+
+    fake = SimpleNamespace(
+        Config=lambda *args, **named: None,
+        Server=lambda config: SimpleNamespace(run=lambda: None),
+    )
+    monkeypatch.setitem(sys.modules, "uvicorn", fake)
+    monkeypatch.setattr(server, "http_app", lambda built_server, options: None)
+    server.run(server.Options(atlas="a.json", http=True))
+    assert built[-1].confined is True
 
 
 def test_the_current_release_comes_from_the_one_under_opt_ros_when_the_environment_has_none(

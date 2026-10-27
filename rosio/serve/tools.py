@@ -44,9 +44,12 @@ MAX_LIMIT = 50
 class AtlasSource:
     """One atlas, read from disk on the first question and answered from memory after."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, confined: bool = False) -> None:
         self.path = Path(path).expanduser()
         self._atlas: Atlas | None = None
+        self.confined = confined
+        """Whether a tool that reads the file system keeps to the served workspace, which
+        is how the http transport serves a caller who is not the person who started it."""
 
     def atlas(self) -> Atlas:
         if self._atlas is None:
@@ -56,6 +59,11 @@ class AtlasSource:
     @property
     def loaded(self) -> bool:
         return self._atlas is not None
+
+    def workspace(self) -> Path:
+        """The directory above the one that holds the atlas, where extract wrote it."""
+        target = self.path / ATLAS_NAME if self.path.is_dir() else self.path
+        return target.absolute().parent.parent.resolve()
 
     @property
     def present(self) -> bool:
@@ -423,6 +431,7 @@ def explain(atlas: Atlas, selector: str, *, limit: int | None = None) -> str:
             for key, row in list(per_key.items())[:rows]
             if slices._said(row["value"])
         )
+        pairs = slices.readable(pairs, atlas)
         lines.append(f"  effective in {slices.profile_name(profile)}: {_clip(pairs, 220)}")
         for key, row in list(per_key.items())[:rows]:
             if row["where"]:
@@ -539,6 +548,19 @@ _TOPIC_SIDES = (
 _SERVER_SIDES = (("serves", "served by", "no server"), ("calls", "called by", "no client"))
 _SIDES = {"topic": _TOPIC_SIDES, "service": _SERVER_SIDES, "action": _SERVER_SIDES}
 
+LIFECYCLE_ENDPOINTS = {
+    "change_state": "serves",
+    "get_state": "serves",
+    "get_available_states": "serves",
+    "get_available_transitions": "serves",
+    "get_transition_graph": "serves",
+    "transition_event": "publishes",
+}
+"""What rcl_lifecycle creates under every lifecycle node, with no call in its source. Checked
+in the string table of `/opt/ros/jazzy/lib/librcl_lifecycle.so`, which holds `~/change_state`,
+`~/get_state`, `~/get_available_states`, `~/get_available_transitions`,
+`~/get_transition_graph` and `~/transition_event`."""
+
 
 def _in_profile(item: Node | Edge, wanted: str) -> bool:
     if not wanted:
@@ -621,6 +643,7 @@ class GraphSelection:
     beyond: int = 0
     nodes: int = 0
     endpoints: int = 0
+    lifecycle: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 def select_graph(
@@ -702,6 +725,11 @@ def select_graph(
     rules = {entity_id: _rules(atlas, entity_id, wanted) for entity_id in channels}
     channels.sort(key=lambda entity_id: not rules[entity_id])
 
+    lifecycle = {
+        channel: found
+        for channel in channels
+        if (found := _lifecycle_side(atlas, channel, by_channel.get(channel, []), wanted))
+    }
     nodes = sum(1 for entity_id in scope if atlas.entities[entity_id].kind == "node")
     counts = _counted(atlas.entities[entity_id].kind for entity_id in channels)
     tally = ", ".join(plural(counts.get(kind, 0), kind) for kind in CHANNEL_KINDS)
@@ -723,7 +751,33 @@ def select_graph(
         beyond=beyond,
         nodes=nodes,
         endpoints=len(shown) + hidden,
+        lifecycle=lifecycle,
     )
+
+
+def _lifecycle_side(
+    atlas: Atlas, channel: str, edges: Sequence[Edge], wanted: str
+) -> tuple[str, str] | None:
+    """The edge kind and the lifecycle node behind an endpoint rcl_lifecycle creates, when
+    the atlas states that side of the channel nowhere else."""
+    parent, _, leaf = slices.label(channel).rpartition("/")
+    kind = LIFECYCLE_ENDPOINTS.get(leaf)
+    if not kind or not parent or any(edge.kind == kind for edge in edges):
+        return None
+    if (kind == "serves") != (atlas.entities[channel].kind == "service"):
+        return None
+    try:
+        owner = ids.build_node(parent)
+    except ContractError:
+        return None
+    node = atlas.entities.get(owner)
+    if node is None or not any(
+        fact.values.get("form") == "lifecycle_node"
+        for fact in node.facts
+        if not wanted or fact.profile in (wanted, ANY_PROFILE)
+    ):
+        return None
+    return kind, owner
 
 
 def _pass(cli: bool, name: str, value: str = "") -> str:
@@ -794,12 +848,21 @@ def graph(
         flags = f" [{', '.join(rules)}]" if rules else ""
         sides = []
         for edge_kind, verb, none in _SIDES[kind]:
-            ends: dict[str, set[str]] = {}
-            for edge in chosen.by_channel.get(entity_id, []):
-                if edge.kind == edge_kind:
-                    qos = _qos(edge, wanted)
-                    ends.setdefault(slices.label(edge.src), set()).add(f" [{qos}]" if qos else "")
-            named = [name + "".join(sorted(qos)) for name, qos in sorted(ends.items())]
+            # one entry per distinct QoS, so a clip never cuts into a bracket
+            ends = {
+                (slices.label(edge.src), _qos(edge, wanted))
+                for edge in chosen.by_channel.get(entity_id, [])
+                if edge.kind == edge_kind
+            }
+            stated = {name for name, qos in ends if qos}
+            named = [
+                name + (f" [{qos}]" if qos else "")
+                for name, qos in sorted(ends)
+                if qos or name not in stated
+            ]
+            implicit = chosen.lifecycle.get(entity_id)
+            if not named and implicit and implicit[0] == edge_kind:
+                named = [f"{slices.label(implicit[1])} (lifecycle node)"]
             sides.append(f"{verb} {_named(named, more='more')}" if named else none)
         type_name = _channel_type(atlas, entity_id, wanted)
         typed = f" ({type_name})" if type_name else ""
@@ -909,6 +972,10 @@ def diagram(
             ends = (edge.src, channel) if edge.kind in _FLOWS_OUT else (channel, edge.src)
             qos = _qos(edge, chosen.wanted)
             arrows.setdefault(ends, set()).update([qos] if qos else [])
+        if channel in chosen.lifecycle:
+            kind, owner = chosen.lifecycle[channel]
+            boxes.setdefault(owner, [slices.label(owner)])
+            arrows.setdefault((owner, channel) if kind in _FLOWS_OUT else (channel, owner), set())
     notes = [chosen.head]
     if len(chosen.channels) > rows:
         notes.append(f"{plural(len(chosen.channels) - rows, 'more channel')} not drawn")
@@ -989,10 +1056,18 @@ def unresolved(
         if (not wanted or entry.want == wanted) and (not owner_id or entry.owner == owner_id)
     ]
     rates = dict(sorted((atlas.counters.get("resolution_rate") or {}).items()))
+    counters = atlas.counters or {}
+    total_wanted = sum((counters.get("resolved") or {}).values()) + sum(
+        (counters.get("unresolved") or {}).values()
+    )
+    whole = f"{len(entries)} values unresolved of {total_wanted} wanted"
     lines = [
-        f"{len(kept)} unresolved values of {len(entries)} in this atlas"
+        f"{len(kept)} values unresolved"
         + (f", want {wanted}" if wanted else "")
         + (f", owner {slices.label(owner_id)}" if owner_id else "")
+        + f"; {whole} in this atlas"
+        if wanted or owner_id
+        else whole
     ]
     lines.append(
         f"  by want: {_ranked(_counted(entry.want for entry in kept), top=10, noun='wants')}"
@@ -1006,7 +1081,7 @@ def unresolved(
     if not owner_id and owners:
         lines.append(f"  owners: {_ranked(owners, top=3, noun='owners')}")
     for entry in kept[:rows]:
-        lines.append(f"  {entry.want}: {entry.expr}")
+        lines.append(f"  {entry.want}: {slices.readable(entry.expr, atlas)}")
         lines.append(
             f"      in {slices.label(entry.owner)} ({entry.reason})"
             + (f" at {slices.site(entry.evidence[0])}" if entry.evidence else "")
@@ -1035,9 +1110,10 @@ def stamps(atlas: Atlas, *, bag: str | None = None, limit: int | None = None) ->
     if not bags:
         known = sorted(entity.label for entity in atlas.by_kind("bag"))
         if wanted and wanted not in known:
-            return _fit(
-                [f"no recording named {wanted}", f"  recordings: {_named(known)}"],
-                "call stamps with no bag for all of them",
+            raise UsageError(
+                f"no recording named {wanted} in this atlas, it holds: {_named(known)}. bag "
+                "takes the directory name of a recording the atlas holds, and rosio stamps "
+                "reads one it does not"
             )
         return _fit(
             ["no recording in this atlas carries header stamp checks"],
@@ -1627,6 +1703,12 @@ def current_release(start: str | None) -> tuple[str, str]:
     )
 
 
+CONFINED = (
+    "over http migrate reads only the workspace the served atlas was written in, so name a "
+    "directory inside it or run rosio migrate on that machine"
+)
+
+
 def migrate(
     workspace: str,
     target: str,
@@ -1634,12 +1716,14 @@ def migrate(
     start: str | None = None,
     package: str | None = None,
     limit: int | None = None,
+    within: Path | None = None,
 ) -> str:
     """What moving the workspace to another release asks, by hand items first.
 
-    The exact rewrites are counted and handed to `rosio migrate apply` rather than listed,
-    because an agent that retypes them can only add mistakes. This reads source files, not
-    the atlas, and edits nothing.
+    The exact rewrites are listed so an agent can say what apply will change, and handed
+    to `rosio migrate apply`, because an agent that retypes them can only add mistakes. This
+    reads source files, not the atlas, and edits nothing. `within` keeps it to one directory,
+    because over http a caller would otherwise read any tree the server user can.
     """
     from rosio import migrate as release
 
@@ -1647,6 +1731,10 @@ def migrate(
     if not source:
         return _fit([how], "call migrate with start=<release>")
     directory = _text(workspace) or "."
+    if within is not None:
+        directory = str((within / directory).resolve())
+        if not Path(directory).is_relative_to(within):
+            raise UsageError(CONFINED)
     try:
         changes, _root = release.plan_workspace(directory, source, target)
     except OSError as exc:
@@ -1676,6 +1764,13 @@ def migrate(
         )
     if len(by_hand) > rows:
         lines.append(f"and {len(by_hand) - rows} more by hand, narrow with package")
+    room = max(0, rows - len(by_hand))
+    for change in automatic[:room]:
+        first, *rest = change.replacement.splitlines() or [""]
+        more = " ..." if rest else ""
+        lines.append(f"{change.file}:{change.line} apply rewrites {change.found} to {first}{more}")
+    if len(automatic) > room:
+        lines.append(f"and {len(automatic) - room} more rewrites, narrow with package")
     if not changes:
         lines.append("nothing in this workspace changes")
     else:

@@ -656,7 +656,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Report each hook, the interpreter it embeds and whether that file still exists, "
         "the merge driver registration, and the wall time of the rebuilds recorded so far.",
     )
-    hook_status.add_argument("--repo", metavar="DIR")
+    hook_status.add_argument("--repo", metavar="DIR", help="repository, default the working one")
 
     hook_uninstall = _hook_sub(
         hooks,
@@ -664,7 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
         "remove the hooks and the merge driver registration",
         "Undo install. A hook file rosio did not write is left alone unless --force.",
     )
-    hook_uninstall.add_argument("--repo", metavar="DIR")
+    hook_uninstall.add_argument("--repo", metavar="DIR", help="repository, default the working one")
     hook_uninstall.add_argument(
         "--force", action="store_true", help="delete a hook rosio did not write"
     )
@@ -676,7 +676,7 @@ def build_parser() -> argparse.ArgumentParser:
         "rebuild the atlas the way the hooks do",
         "Run the rebuild the hooks run, time it and record the time. Always exits zero.",
     )
-    hook_run.add_argument("--repo", metavar="DIR")
+    hook_run.add_argument("--repo", metavar="DIR", help="repository, default the working one")
     hook_run.add_argument("--event", default="manual", metavar="NAME", help="what triggered this")
     hook_run.add_argument(
         "--no-cache",
@@ -763,16 +763,54 @@ def build_parser() -> argparse.ArgumentParser:
         flags=(),
     )
     actions = bundle.add_subparsers(dest="bundle_command", metavar="action")
-    create = actions.add_parser("create", help="write a portable bundle")
-    _add_global_flags(create, root=False, flags=READ_FLAGS)
-    create.add_argument("workspace", nargs="?", default=".", metavar="PATH")
-    create.add_argument("--atlas", metavar="FILE")
-    create.add_argument("--include", choices=["findings", "cited"], default="findings")
-    create.add_argument("--note", default="", metavar="TEXT")
-    opened = actions.add_parser("open", help="unpack a bundle and summarize the problem")
+    create = actions.add_parser(
+        "create",
+        help="write a portable bundle",
+        description="Write the atlas, both reports, the files the findings cite, the "
+        "configuration and the git revision into one archive.",
+    )
+    _add_global_flags(create, root=False, flags=("json", "quiet"))
+    create.add_argument(
+        "--out",
+        default=argparse.SUPPRESS,
+        metavar="FILE",
+        help="archive to write, default rosio-out/bundle.rosio.zip in the workspace",
+    )
+    create.add_argument(
+        "workspace",
+        nargs="?",
+        default=".",
+        metavar="PATH",
+        help="workspace the atlas describes, default is the current directory",
+    )
+    create.add_argument(
+        "--atlas",
+        metavar="FILE",
+        help="atlas.json to bundle, default rosio-out/atlas.json in the workspace",
+    )
+    create.add_argument(
+        "--include",
+        choices=["findings", "cited"],
+        default="findings",
+        help="findings takes the files the findings cite, cited every file any evidence "
+        "row cites, default findings",
+    )
+    create.add_argument(
+        "--note", default="", metavar="TEXT", help="a sentence for the person who opens it"
+    )
+    opened = actions.add_parser(
+        "open",
+        help="unpack a bundle and summarize the problem",
+        description="Unpack a bundle into a directory that stands in for the sender's "
+        "workspace and print the most severe findings with the file and line to edit.",
+    )
     _add_global_flags(opened, root=False, flags=("json", "quiet"))
-    opened.add_argument("file", metavar="FILE")
-    opened.add_argument("--into", metavar="DIR")
+    opened.add_argument("file", metavar="FILE", help="the bundle archive")
+    opened.add_argument(
+        "--into",
+        metavar="DIR",
+        help="directory to unpack into, default beside the archive and named after it",
+    )
     opened.add_argument("--force", action="store_true", help="overwrite existing files")
 
     move = _sub(
@@ -793,9 +831,15 @@ def build_parser() -> argparse.ArgumentParser:
         ("apply", "rewrite the automatic changes and write the diff"),
         ("verify", "build copied sources in the target and compare errors with the plan"),
     ):
-        step = steps.add_parser(action, help=summary)
+        step = steps.add_parser(action, help=summary, description=summary.capitalize() + ".")
         _add_global_flags(step, root=False, flags=READ_FLAGS)
-        step.add_argument("workspace", nargs="?", default=".", metavar="PATH")
+        step.add_argument(
+            "workspace",
+            nargs="?",
+            default=".",
+            metavar="PATH",
+            help="workspace whose source packages move, default is the current directory",
+        )
         step.add_argument("--config", metavar="FILE", help="rosio.yaml, default the workspace's")
         step.add_argument(
             "--from",
@@ -803,7 +847,13 @@ def build_parser() -> argparse.ArgumentParser:
             metavar="RELEASE",
             help="the release the workspace builds against now, default $ROS_DISTRO",
         )
-        step.add_argument("--to", dest="target", required=True, metavar="RELEASE")
+        step.add_argument(
+            "--to",
+            dest="target",
+            required=True,
+            metavar="RELEASE",
+            help="the release to move to, for example jazzy",
+        )
         if action == "verify":
             step.add_argument("--image", metavar="NAME", help="target container image")
         if action == "apply":
@@ -1060,7 +1110,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         print(model.dumps(payload), end="")
     elif not args.quiet:
         print(f"{PROG} extract: {target.absolute()} ({_bytes(target)})")
-        _print_summary(report, elapsed)
+        _print_summary(report, elapsed, atlas)
         _stale_note(target, atlas)
 
     if args.fail_on_violation and report["exceptions"]:
@@ -1213,13 +1263,15 @@ imported at all. It is printed before the counts, because the counts under it ar
 bound over files that were never loaded and read as a complete atlas otherwise."""
 
 
-def _print_summary(report: dict, elapsed: float) -> None:
+def _print_summary(report: dict, elapsed: float, atlas=None) -> None:
     """What the atlas holds after a run. The caller prints the first line, because the verb
     that wrote the file is the caller's to name."""
+    from rosio.query import readable
+
     for row in report["exceptions"]:
         if str(row.get("exc_type", "")) != LAYER_DOWN:
             continue
-        print(f"  the launch layer did not happen: {row.get('message', '')}")
+        print(f"  the launch layer did not happen: {readable(str(row.get('message', '')), atlas)}")
         print("    every launch entry point is marked unloadable, and the node,")
         print("    parameter and plugin counts below are a lower bound")
         break
@@ -1241,7 +1293,7 @@ def _print_summary(report: dict, elapsed: float) -> None:
     problems = report["exceptions"]
     if problems:
         print(f"  problems recorded {len(problems)}:")
-        shown = _problem_lines(problems)
+        shown = _problem_lines(problems, atlas)
         for text, count in shown[:5]:
             print(f"    {text}" + (f", recorded {count} times" if count > 1 else ""))
         if len(shown) > 5:
@@ -1254,11 +1306,13 @@ OPAQUE = r"OpaqueFunction\(fn[0-9a-f]+\)"
 """How the launch walk names a function it could not name, by a digest of its code."""
 
 
-def _problem_lines(problems: list) -> list[tuple[str, int]]:
+def _problem_lines(problems: list, atlas=None) -> list[tuple[str, int]]:
     """One line per distinct problem with how often it was recorded, in the order recorded.
     A launch file walked by three profiles raised three identical rows, and the digest a walk
     gives an unnamed function or the token for a process output is no name to a reader."""
     import re
+
+    from rosio.query import readable
 
     counted: dict[str, int] = {}
     for row in problems:
@@ -1269,7 +1323,7 @@ def _problem_lines(problems: list) -> list[tuple[str, int]]:
             where = "the launch walk"
         text = f"{where} {row.get('exc_type', '')}: {row.get('message', '')}".strip()
         text = re.sub(OPAQUE, "an OpaqueFunction", text)
-        text = text.replace("@output", "<its output file>")
+        text = readable(text.replace("@output", "<its output file>"), atlas)
         counted[text] = counted.get(text, 0) + 1
     return list(counted.items())
 
@@ -1700,7 +1754,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
         print(f"{PROG} probe: {target} ({_bytes(target)})")
         print(f"  domain {domain}, window {args.duration:g}s, settle {settle:g}s")
         print(f"  observed: {_counts(seen)}")
-        _print_summary(report, elapsed)
+        _print_summary(report, elapsed, written)
         _stale_note(target, written)
     if not status.present:
         print(

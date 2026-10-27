@@ -256,6 +256,27 @@ headers:
   rcppmath/clamp.hpp:
     say: rcppmath is gone; std::clamp from <algorithm> does the same
     source: https://github.com/ros2/rcpputils/pull/193
+  nav2_costmap_2d/array_parser.hpp:
+    say: include <nav2_util/array_parser.hpp> and call nav2_util::parseVVF, which took over nav2_costmap_2d::parseVVF
+    source: https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_util/include/nav2_util/array_parser.hpp
+
+# A parameter the target's node no longer declares, and the one that took its place, as
+# `<node>.<parameter>`. `checked` lists the releases whose own parameter file was read for it;
+# a move to any other release names nothing. With `use` apply renames the key, because the
+# value means the same; without it the sentence in `say` is the change.
+parameters:
+  controller_server.progress_checker_plugin:
+    say: set progress_checker_plugins, a list, to the same plugin name
+    checked: [jazzy]
+    source: https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_bringup/params/nav2_params.yaml
+  behavior_server.costmap_topic:
+    use: local_costmap_topic
+    checked: [jazzy]
+    source: https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_bringup/params/nav2_params.yaml
+  behavior_server.footprint_topic:
+    use: local_footprint_topic
+    checked: [jazzy]
+    source: https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_bringup/params/nav2_params.yaml
 
 # A dependency the target does not release, and its successor where there is one.
 packages:

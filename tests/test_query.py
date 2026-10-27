@@ -423,6 +423,20 @@ def test_query_says_honestly_when_nothing_matched(atlas):
     assert "this atlas holds" in texts(answer)
 
 
+def test_a_kind_and_name_selector_is_read_exactly_and_offers_near_names():
+    builder = model.AtlasBuilder()
+    for name in ("/scan_filtered", "/lidar/scan", "/cmd_vel"):
+        builder.node(ids.build_topic(name))
+    atlas = builder.build()
+
+    missing = query.query(atlas, "topic:/scan")
+    found = query.query(atlas, "topic:/lidar/scan")
+
+    assert missing.ok is False
+    assert texts(missing) == "no topic /scan in this atlas, near: /lidar/scan, /scan_filtered"
+    assert [row["id"] for row in found.data["matched"]] == [ids.build_topic("/lidar/scan")]
+
+
 # ---------------------------------------------------------------------------
 # path
 
@@ -619,6 +633,36 @@ def test_two_profiles_of_one_atlas_are_grouped_the_same_way(atlas):
     assert "1.0 -> 9.0" in texts(answer)
 
 
+def test_one_finding_in_each_of_two_profiles_is_neither_gone_nor_new():
+    """The id carries the profile, so the same finding in two profiles is two ids."""
+    builder = model.AtlasBuilder()
+    for slug in ("nx_navigation", "nx_sim"):
+        builder.add_profile(slug)
+    builder.node(PARAMS_FILE)
+    for profile, extra in ((REAL, ""), (SIM, " with 3 keys")):
+        name = query.profile_name(profile)
+        for rule in ("plugin.inert_by_design", "param.orphan_block"):
+            builder.finding(
+                Finding(
+                    rule=rule,
+                    severity="info",
+                    subject=PARAMS_FILE,
+                    title=f"block static_layer is inert in {name}",
+                    say=f"static_layer is loaded by nothing in profile {name}."
+                    + (extra if rule == "param.orphan_block" else ""),
+                    discriminator=ids.digest(rule, profile),
+                    profiles=[profile],
+                )
+            )
+
+    matters = query.diff(builder.build(), left_profile="nx_navigation", right_profile="nx_sim")
+    findings = matters.data["matters"]["findings"]
+
+    assert [row["rule"] for row in findings["gone"]] == []
+    assert [row["rule"] for row in findings["new"]] == []
+    assert [row["rule"] for row in findings["restated"]] == ["param.orphan_block"]
+
+
 def test_a_value_that_changed_type_is_a_change(atlas):
     right = build()
     node = right.entities[COST_PENALTY]
@@ -798,6 +842,25 @@ def test_unresolved_groups_by_want_and_by_owner(atlas):
     assert "topic_name: 1 unresolved" in body
     assert "speed_limit_topic" in body
     assert ":~" not in body
+
+
+def test_unresolved_names_a_file_in_an_expression_by_its_path():
+    builder = model.AtlasBuilder()
+    model_file = ids.build_file("demo_one", "urdf/rrbot.urdf.xacro")
+    builder.node(model_file)
+    builder.unresolved(
+        Unresolved(
+            want="frame_id",
+            owner=model_file,
+            expr=f"xacro {model_file} prefix:=",
+            reason="xacro_failed",
+        )
+    )
+
+    body = texts(query.unresolved(builder.build()))
+
+    assert "xacro demo_one/urdf/rrbot.urdf.xacro prefix:=" in body
+    assert "file:" not in body
 
 
 def test_unresolved_filters_by_want(atlas):
@@ -1108,6 +1171,43 @@ def test_path_shows_a_lifecycle_route_only_when_no_data_route_exists_and_says_so
     assert answer.data["data_route"] is False
     assert "no data route connects them" in texts(answer)
     assert "manages_lifecycle" in texts(answer)
+
+
+def test_path_says_so_when_data_flows_from_target_to_source():
+    answer = query.path(_routes(), "/collision_monitor", "/controller_server")
+
+    assert answer.data["data_route"] is True
+    assert answer.data["data_direction"] == "backward"
+    assert "data flows the other way, from /controller_server to /collision_monitor" in texts(
+        answer
+    )
+
+
+def test_path_along_the_data_adds_no_direction_note():
+    answer = query.path(_routes(), "/controller_server", "/collision_monitor")
+
+    assert answer.data["data_direction"] == "forward"
+    assert "other way" not in texts(answer)
+
+
+def test_path_between_two_publishers_says_no_message_travels_it():
+    builder = model.AtlasBuilder()
+    builder.add_profile("nx_navigation")
+    builder.node(CMD_VEL)
+    for node in (CONTROLLER, RELAY):
+        builder.node(node, name_source="literal")
+        builder.edge(
+            "publishes",
+            node,
+            CMD_VEL,
+            key=ids.edge_key(profile=REAL),
+            layer="declared",
+            profile=REAL,
+        )
+    answer = query.path(builder.build(), "/controller_server", "/relay")
+
+    assert answer.data["data_direction"] == "mixed"
+    assert "no message travels this route" in texts(answer)
 
 
 # ---------------------------------------------------------------------------

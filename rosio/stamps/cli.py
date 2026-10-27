@@ -23,7 +23,7 @@ SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
 def add_arguments(parser: argparse.ArgumentParser, *, json_flag: bool = True) -> None:
     """The flags of the verb, shared by `rosio stamps` and `python -m rosio.stamps`. Under
     `rosio` the `--json` flag is a global one, so the verb does not add it twice."""
-    parser.add_argument("bag", nargs="?", help="path to a ROS 1 or ROS 2 bag")
+    parser.add_argument("bag", nargs="?", metavar="BAG", help="path to a ROS 1 or ROS 2 bag")
     parser.add_argument(
         "--topics", action="append", metavar="TOPIC", help="only read this topic, repeatable"
     )
@@ -56,6 +56,13 @@ def run(args: argparse.Namespace) -> int:
 
     if not Path(args.bag).exists():
         print(f"{PROG}: no recording at {args.bag}, name a bag directory or file", file=sys.stderr)
+        return 2
+    if _holds_no_recording(Path(args.bag)):
+        print(
+            f"{PROG}: {args.bag} holds no recording: a ROS 2 bag directory holds metadata.yaml "
+            "or a .db3 or .mcap file, name one of those or a ROS 1 .bag file",
+            file=sys.stderr,
+        )
         return 2
     try:
         report = read_topic_series_report(args.bag, topics=args.topics, limit=args.limit)
@@ -95,6 +102,14 @@ def run(args: argparse.Namespace) -> int:
     if verdict.level == "unknown":
         return 2
     return 1 if any(f.severity == "error" for f in findings) else 0
+
+
+def _holds_no_recording(path: Path) -> bool:
+    """A directory with nothing either reader opens. The reader's own refusal names a
+    metadata file the person never asked about."""
+    return path.is_dir() and not any(
+        any(path.glob(pattern)) for pattern in ("metadata.yaml", "*.db3", "*.mcap")
+    )
 
 
 def print_stats(series: dict[str, TopicSeries]) -> None:

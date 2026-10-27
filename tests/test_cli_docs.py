@@ -91,6 +91,43 @@ def test_the_readme_init_line_names_every_init_flag():
     assert flags - shared == published
 
 
+OUTPUT_FLAGS = ("[-h]", "[--out DIR]", "[--json]", "[--quiet]", "[--deterministic]")
+OUTPUT_FLAGS += ("[--no-deterministic]",)
+"""What the sentence under the Command reference names once instead of on every line."""
+
+
+def _usage(parser: argparse.ArgumentParser) -> str:
+    text = " ".join(parser.format_usage().split()).removeprefix("usage: ")
+    for flag in OUTPUT_FLAGS:
+        text = text.replace(f" {flag}", "")
+    return text
+
+
+def _parser_lines() -> list[str]:
+    """One usage line per verb, and one per action of a verb that has actions."""
+    lines = []
+    for action in cli.build_parser()._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for verb in action.choices.values():
+            nested = [a for a in verb._actions if isinstance(a, argparse._SubParsersAction)]
+            children = list(nested[0].choices.values()) if nested else [verb]
+            lines += [_usage(child) for child in children]
+    return lines
+
+
+def test_the_readme_command_reference_is_the_parser(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "1000")
+    published = [
+        line.split("  #", 1)[0].rstrip()
+        for line in block(doc("README.md"), "## Command reference")
+        if line.startswith("rosio ")
+    ]
+    assert sorted(published) == sorted(_parser_lines())
+    for flag in OUTPUT_FLAGS[1:]:
+        assert f"`{flag[1:-1]}`" in doc("README.md")
+
+
 def test_the_contract_verb_bullet_matches_the_cli():
     text = doc("AGENTS.md")
     bullet = text[text.index("**The verb set is committed here") :]

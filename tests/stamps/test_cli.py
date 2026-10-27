@@ -25,6 +25,15 @@ def test_missing_bag(capsys, tmp_path):
     assert "PosixPath" not in err and "WindowsPath" not in err
 
 
+def test_a_directory_that_holds_no_recording_is_named_in_our_words(capsys, tmp_path):
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+
+    assert main([str(tmp_path)]) == 2
+    err = capsys.readouterr().err
+    assert f"rosio stamps: {tmp_path} holds no recording" in err
+    assert "Expected metadata" not in err
+
+
 def test_malformed_bag(capsys, tmp_path):
     bag = tmp_path / "malformed"
     bag.mkdir()

@@ -66,6 +66,7 @@ class Successor:
     say: str
     source: str
     use: str | None = None
+    checked: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ class Catalog:
     packages: dict[str, Successor] = field(default_factory=dict)
     removed_modules: dict[tuple[int, ...], frozenset[str]] = field(default_factory=dict)
     header_prefixes: dict[str, Successor] = field(default_factory=dict)
+    parameters: dict[str, Successor] = field(default_factory=dict)
 
     def rule(self, rule_id: str) -> Rule:
         for rule in self.rules:
@@ -102,7 +104,13 @@ def catalog() -> Catalog:
     for name, entry in prefixes.items():
         if not name.endswith("/") or not entry.use or not entry.use.endswith("/"):
             raise ContractError(f"migration header prefix {name} needs directory prefixes")
-    return Catalog(rules, headers, packages, modules, prefixes)
+    parameters = {
+        name: _successor(name, entry) for name, entry in data.get("parameters", {}).items()
+    }
+    for name, entry in parameters.items():
+        if "." not in name or not entry.checked:
+            raise ContractError(f"migration parameter {name} needs <node>.<name> and checked")
+    return Catalog(rules, headers, packages, modules, prefixes, parameters)
 
 
 def _rule(entry: dict[str, Any]) -> Rule:
@@ -133,4 +141,7 @@ def _successor(name: str, entry: dict[str, Any]) -> Successor:
     if not entry.get("source") or not (entry.get("say") or entry.get("use")):
         raise ContractError(f"migration entry {name} needs a source and a use or say")
     say = entry.get("say") or f"use {entry['use']}"
-    return Successor(" ".join(say.split()), entry["source"], entry.get("use"))
+    checked = tuple(entry.get("checked") or ())
+    for release in checked:
+        distros.index(release)
+    return Successor(" ".join(say.split()), entry["source"], entry.get("use"), checked)

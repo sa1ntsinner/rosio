@@ -381,6 +381,44 @@ def test_yaml_defaults_are_manual_and_located_at_the_block_or_key(tmp_path, monk
     assert scan(source, "humble", "lyrical", tmp_path) == changes
 
 
+def test_a_parameter_jazzy_renamed_names_its_replacement(tmp_path):
+    path = write(
+        tmp_path / "params.yaml",
+        "controller_server:\n  ros__parameters:\n    progress_checker_plugin: progress_checker\n"
+        "behavior_server:\n  ros__parameters:\n"
+        "    costmap_topic: local_costmap/costmap_raw\n"
+        "    footprint_topic: local_costmap/published_footprint\n",
+    )
+    packages = [SourcePackage("robot", tmp_path, (path,))]
+
+    changes = {c.title: c for c in scan(packages, "humble", "jazzy", tmp_path)}
+
+    checker = changes["controller_server.progress_checker_plugin"]
+    assert "progress_checker_plugins" in checker.say and not checker.automatic
+    topic = changes["behavior_server.costmap_topic"]
+    assert topic.replacement == "local_costmap_topic"
+    assert "reads local_costmap_topic instead" in topic.say
+    assert changes["behavior_server.footprint_topic"].replacement == "local_footprint_topic"
+    migrate.apply(list(changes.values()), tmp_path, force=True)
+    text = path.read_text()
+    assert "    local_costmap_topic: local_costmap/costmap_raw\n" in text
+    assert "progress_checker_plugin: progress_checker" in text
+    assert not any(c.automatic for c in scan(packages, "humble", "kilted", tmp_path))
+
+
+def test_the_costmap_array_parser_names_the_header_that_took_it_over(tmp_path):
+    package(
+        tmp_path,
+        "footprints",
+        ["nav2_costmap_2d"],
+        {"src/footprint.cpp": "#include <nav2_costmap_2d/array_parser.hpp>\n"},
+    )
+    (change,) = scan(source(tmp_path), "humble", "jazzy", tmp_path)
+
+    assert not change.automatic
+    assert "nav2_util/array_parser.hpp" in change.say and "nav2_util::parseVVF" in change.say
+
+
 def test_measured_default_change_ignores_invalid_blocks_and_crossed_releases(tmp_path):
     path = write(
         tmp_path / "params.yaml",
@@ -813,7 +851,7 @@ def test_the_agent_tool_hands_rewrites_to_apply_and_lists_the_rest(humble_ws: Pa
         "rewrites: run `rosio migrate apply --from humble --to lyrical` once, do not retype them"
     )
     assert "src/driver/package.xml:11 removed in jazzy: gazebo_ros is not released" in answer
-    assert "target_link_libraries(driver" not in answer
+    assert "src/driver/src/driver.cpp:3 apply rewrites rclcpp/qos_event.hpp to" in answer
     assert len(answer.encode("utf-8")) <= tools.MAX_BYTES
     assert "0 changes" in tools.migrate(str(humble_ws), "lyrical", start="humble", package="x")
 

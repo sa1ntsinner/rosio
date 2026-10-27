@@ -211,9 +211,10 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         """Everything moving this workspace to another ROS 2 release asks, from measured
         release data and cited rules, never from memory of release notes. to is the target
         release such as lyrical, start the current one (from is accepted too). Lists the by
-        hand changes with file and line, and the one command that performs the exact
-        rewrites."""
-        return tools.migrate(workspace, to, start=start, package=package)
+        hand changes with file and line, the exact rewrites and the one command that
+        performs them. Over http, workspace stays inside the served workspace."""
+        within = store.workspace() if store.confined else None
+        return tools.migrate(workspace, to, start=start, package=package, within=within)
 
     store = source
     return [
@@ -456,7 +457,7 @@ def run(options: Options) -> None:
     """Serve until the caller stops it. Nothing is printed on stdout, which the stdio
     transport owns."""
     options.check()
-    server = build(tools.AtlasSource(options.atlas))
+    server = build(tools.AtlasSource(options.atlas, confined=options.http))
     if not options.http:
         _run_async(server.run_stdio_async)
         return

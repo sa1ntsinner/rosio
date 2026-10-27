@@ -94,9 +94,14 @@ it knows, what each looks like and how to reproduce it are in
 
 ## Get started
 
+rosio is not on PyPI yet, so it installs from a checkout of this repository. On a stock Ubuntu
+24.04 with ROS 2 jazzy:
+
 ```bash
-python3 -m venv --system-site-packages .venv && source .venv/bin/activate
-pip install "rosio[cpp,stamps,mcp]"
+sudo apt install git python3-venv    # Ubuntu ships python3 without the venv module
+git clone https://github.com/sa1ntsinner/rosio ~/rosio
+python3 -m venv --system-site-packages ~/.venvs/rosio && source ~/.venvs/rosio/bin/activate
+pip install "$HOME/rosio[cpp,stamps,mcp]"
 source /opt/ros/jazzy/setup.bash
 
 cd ~/ros2_ws
@@ -107,13 +112,19 @@ rosio render                   # ATLAS_REPORT.md, DRIFT.md and atlas.html
 rosio install claude-code      # register rosio with your assistant
 ```
 
+With uv instead of the apt package, `uv venv --system-site-packages ~/.venvs/rosio` makes the
+environment and `uv pip install "$HOME/rosio[cpp,stamps,mcp]"` installs into it, because a uv
+environment has no `pip`. Once a release is on PyPI, `pip install "rosio[cpp,stamps,mcp]"`
+replaces the clone.
+
 Every verb reads and writes `rosio-out` in the directory it runs in, and `rosio install` writes
 into it too, so run them from the workspace.
 
 Walking a launch tree runs `python3` from your PATH, which is the environment's own interpreter
 while it is active. ROS installs part of the `launch` dependency chain as operating system
 packages (`lark`, for one) that a plain virtual environment hides, so an active environment
-without `--system-site-packages` cannot walk anything, and rosio says so at the top of the run.
+without `--system-site-packages` cannot walk anything, and the run summary says so first, above
+the counts.
 `mcp` is the extra that `rosio serve` and the server entry `rosio install` writes need.
 
 `init` also takes an install tree, such as `/opt/ros/jazzy` or a built workspace's `install/`.
@@ -189,9 +200,9 @@ is unknown, not the root. Every rule skips facts whose confidence is unknown, an
 scoped to one profile, so a deliberate difference between simulation and the real robot is
 configuration rather than drift.
 
-**Silence is a bug, not a feature.** If the launch machinery cannot run, rosio refuses at the top
-of the run, marks every entry point unloadable, names the fix, and suppresses every rule that would
-otherwise draw a conclusion from a tree it never read.
+**Silence is a bug, not a feature.** If the launch machinery cannot run, the run summary says so
+first, every entry point is marked unloadable with the fix named, and every rule that would
+otherwise draw a conclusion from a tree it never read is suppressed.
 
 **Rules that cannot speak stay quiet.** A rule that needs the running system waits for the observed layer, because
 with only part of the sources read a missing subscriber usually means a file was not parsed.
@@ -231,6 +242,7 @@ Arguments carry the command line's names (`only` as in `--only`, `source` and `t
 `rosio path`), except that `migrate` takes `start` for `--from` and accepts `from` too. An
 argument a tool does not take is refused with the names it does.
 The server starts without an atlas, and each tool then names the extract command that builds one.
+Over `--http`, `migrate` reads only the workspace the served atlas was written in.
 A worst case answer is under 4 KB. On very small models prefer the command
 line, where the skill file is 3.3 KB and carries six commands, the waiver file and a worked example.
 
@@ -251,7 +263,7 @@ The default is `auto`. Only extract workspaces you would also `ros2 launch`.
 ## Troubleshooting
 
 **The atlas has almost no nodes and no parameters.** Your virtual environment hides the system
-packages, so the launch layer never ran. rosio says so at the top of the run and names the fix:
+packages, so the launch layer never ran. The run summary says so first and names the fix:
 recreate the environment with `--system-site-packages`.
 
 **`pytest` ends in a `PluginValidationError` before any test runs.** With a ROS setup sourced,
@@ -266,39 +278,48 @@ launch file that needs an argument you did not supply is the common one, and pro
 `rosio.yaml` are where arguments live. An environment variable such as a robot model name goes
 under `env` of the profile, and a package no root holds is installed or added as a root.
 
-**The C++ collector refuses.** `pip install 'rosio[cpp]'`. Without it the coded layer covers
-Python only, rosio records that rather than pretending otherwise, and the atlas carries one
-`extract.pass_incomplete` at error, so `rosio drift --fail-on error` exits 5.
+**The C++ collector refuses.** `pip install "$HOME/rosio[cpp]"`, from the checkout of Get
+started. Without it the coded layer covers Python only, rosio records that rather than pretending
+otherwise, and the atlas carries one `extract.pass_incomplete` at error, so
+`rosio drift --fail-on error` exits 5.
 
-**`rosio stamps` says it needs the stamps extra.** `pip install 'rosio[stamps]'`, which brings
-`rosbags`, the reader that needs no ROS installation.
+**`rosio stamps` says it needs the stamps extra.** `pip install "$HOME/rosio[stamps]"`, which
+brings `rosbags`, the reader that needs no ROS installation.
 
 ## Command reference
 
 ```
-rosio init [PATH] [--package PKG] [--config FILE] [--force] [--print]  # write rosio.yaml: roots, setup files, profiles to edit
-rosio extract <src> [--config rosio.yaml] [--out DIR] [--bag DIR] [--install-tree DIR]
-rosio stamps <bag> [--topics T] [--limit N] [--json-verdict] [--stats]
-rosio probe --domain-id 42 [--rmw NAME ...]
-rosio drift [--min-severity warn] [--fail-on error] [--only RULE] [--waivers FILE] [--limit N]
-rosio param <node> <name> [--profile SLUG]
-rosio explain <entity, finding fingerprint or rule id>
-rosio query <text>
-rosio path <source> <target>
-rosio unresolved [--want topic_name]
-rosio graph [--profile SLUG] [--focus NODE] [--depth N] [--wrappers] [--format text|dot|mermaid]
-rosio diff <atlas-a> <atlas-b>
-rosio render [--format md] [--format html] [--atlas FILE]
-rosio install [TARGET] [--list] [--scope project|user] [--dry-run] [--force]
-rosio uninstall [TARGET] [--scope project|user]
-rosio serve [--stdio | --http] [--host H] [--port P] [--api-key K]
-rosio hook install [--repo DIR] [--python PATH] [--config FILE] [--dry-run] [--force]
-rosio hook status | uninstall | run
-rosio bundle create [PATH] [--atlas FILE] [--out FILE] [--include findings|cited] [--note TEXT]
-rosio bundle open FILE [--into DIR] [--force]
-rosio migrate plan|apply|verify [PATH] --to RELEASE [--from RELEASE] [--force] [--image NAME]
+rosio init [--force] [--print] [--package NAME] [--config FILE] [PATH]  # write rosio.yaml: roots, setup files, profiles to edit
+rosio extract [--layer {declared,coded}] [--launch-sandbox {auto,required,off}] [--install-tree DIR] [--profile NAME] [--config FILE] [--collector NAME] [--bag PATH] [--no-runtime] [--fail-on-violation] [PATH]
+rosio stamps [--topics TOPIC] [--limit N] [--json-verdict] [--stats] [BAG]
+rosio probe [--stamps] [--duration SECONDS] [--settle SECONDS] [--domain-id N] [--localhost-only] [--rmw NAME] [--ros-setup FILE] [--profile NAME] [--config FILE] [--atlas FILE] [PATH]
+rosio drift [--fail-on {error,warn,info,never}] [--min-severity {error,warn,info}] [--only RULE] [--waivers FILE] [--config FILE] [--atlas FILE] [--limit N]
+rosio param [--profile NAME] [--atlas FILE] [--limit N] [SELECTOR ...]
+rosio explain [--atlas FILE] [--limit N] [SELECTOR]
+rosio query [--atlas FILE] [--limit N] [WORDS ...]
+rosio path [--max-hops N] [--atlas FILE] [--limit N] [SOURCE] [TARGET]
+rosio unresolved [--want WANT] [--atlas FILE] [--limit N]
+rosio graph [--profile NAME] [--focus NODE_OR_CHANNEL] [--depth N] [--wrappers] [--format {text,dot,mermaid}] [--atlas FILE] [--limit N]
+rosio diff [--profile NAME] [--rev REV] [--repo DIR] [--cache-rules] [--workspace PATH] [--atlas FILE] [--limit N] [BEFORE] [AFTER]
+rosio render [--format {md,html}] [--atlas FILE] [--limit N]
+rosio install [--list] [--scope SCOPE] [--root DIR] [--home DIR] [--dry-run] [--force] [TARGET]
+rosio uninstall [--scope SCOPE] [--root DIR] [--home DIR] [--dry-run] [--force] [TARGET]
+rosio serve [--atlas FILE] [--stdio | --http] [--host ADDR] [--port N] [--api-key KEY] [--path PATH] [--stateless]
+rosio hook install [--repo DIR] [--python PATH] [--workspace PATH] [--config FILE] [--force] [--dry-run] [--no-measure]
+rosio hook status [--repo DIR]
+rosio hook uninstall [--repo DIR] [--force] [--dry-run]
+rosio hook run [--repo DIR] [--event NAME] [--no-cache]
+rosio hook merge [--path PATH] [--result FILE] BASE OURS THEIRS  # the merge driver git calls for atlas.json
+rosio bundle create [--out FILE] [--atlas FILE] [--include {findings,cited}] [--note TEXT] [PATH]
+rosio bundle open [--into DIR] [--force] FILE
+rosio migrate plan [--config FILE] [--from RELEASE] --to RELEASE [PATH]
+rosio migrate apply [--config FILE] [--from RELEASE] --to RELEASE [--force] [PATH]
+rosio migrate verify [--config FILE] [--from RELEASE] --to RELEASE [--image NAME] [PATH]
 rosio version
 ```
+
+The output flags `--out DIR`, `--json`, `--quiet`, `--deterministic` and `--no-deterministic`
+are left out of the lines above; `rosio <verb> --help` says which of them a verb takes.
 
 Use `rosio probe --stamps --duration 10` to check header stamps in the running system.
 

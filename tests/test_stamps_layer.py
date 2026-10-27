@@ -11,6 +11,7 @@ from rosio import extract, ids, model, schema
 from rosio.collect import stamps
 from rosio.config import Config, RootSpec
 from rosio.drift import rules
+from rosio.errors import UsageError
 from tests.stamps.conftest import BASE_S, SCAN_TYPE, TYPESTORE, Writer, scan_message, write_bag
 
 
@@ -257,7 +258,8 @@ def test_the_stamps_tool_answers_from_the_atlas(recordings: Path, tmp_path: Path
     assert "/backward" in answer and "/tai" in answer
     assert len(answer.encode()) <= tools.MAX_BYTES
     assert "/backward" not in tools.stamps(atlas, bag="clean")
-    assert tools.stamps(atlas, bag="absent").startswith("no recording named absent")
+    with pytest.raises(UsageError, match="no recording named absent in this atlas"):
+        tools.stamps(atlas, bag="absent")
     (tmp_path / "none").mkdir()
     assert tools.stamps(_extract(tmp_path / "none", None)).startswith("no recording in this atlas")
 
