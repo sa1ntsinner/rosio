@@ -384,6 +384,20 @@ def test_a_probe_atlas_is_not_told_it_describes_no_running_system():
     assert "nothing below is a statement about a running system" not in text
 
 
+def test_a_workspace_that_starts_nothing_gets_no_zero_of_zero_sections():
+    """vision_opencv has no launch file, and the report printed "0 of 0 of the nodes" and
+    "0 of 0 resolve" bodies."""
+    builder = model.AtlasBuilder()
+    builder.declare_layer("declared", present=True)
+    builder.declare_layer("coded", present=True)
+    text = render_report(builder.build())
+
+    assert "0 of 0" not in text
+    assert "No profile of this atlas starts a node" in text
+    assert "No parameter is configured in this workspace." in text
+    assert "No frame is named in this atlas." in text
+
+
 def test_two_renders_of_one_atlas_are_byte_identical(atlas):
     assert render_report(atlas) == render_report(build())
     assert render_drift(atlas) == render_drift(build())

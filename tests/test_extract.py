@@ -1527,7 +1527,16 @@ def test_cli_fail_on_violation_reports_a_recorded_problem(tmp_path: Path, capsys
     from rosio.cli import main
     from rosio.errors import EXIT_CONTRACT
 
-    argv = ["extract", str(WS), "--out", str(tmp_path / "out"), "--profile", "legacy_ros1"]
+    # The fallback leaves a ROS 1 file out, so the profile that names it is written down.
+    config = tmp_path / "rosio.yaml"
+    config.write_text(
+        "profiles:\n"
+        "  - slug: legacy_ros1\n"
+        "    entrypoints:\n"
+        "      - launch: lx_bringup legacy_ros1.launch\n",
+        encoding="utf-8",
+    )
+    argv = ["extract", str(WS), "--config", str(config), "--out", str(tmp_path / "out")]
     assert main(argv) == 0
     assert main([*argv, "--fail-on-violation"]) == EXIT_CONTRACT
     assert "1 problem recorded during extraction" in capsys.readouterr().err

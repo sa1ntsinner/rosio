@@ -457,15 +457,19 @@ def create(
     *,
     atlas: str | Path | None = None,
     out: str | Path | None = None,
+    out_dir: str | Path | None = None,
     include: str = "findings",
     note: str = "",
 ) -> Path:
-    """Collect cited files without executing or extracting the workspace again."""
+    """Collect cited files without executing or extracting the workspace again. `out_dir`
+    is the output directory the atlas was written to, the workspace's rosio-out by default,
+    and the archive goes beside it unless `out` names one."""
     if include not in {"findings", "cited"}:
         raise UsageError("bundle include must be findings or cited")
     base = Path(path).expanduser().resolve()
-    target = Path(out) if out else base / DEFAULT_OUT_DIR / "bundle.rosio.zip"
-    source = Path(atlas) if atlas else base / DEFAULT_OUT_DIR / "atlas.json"
+    directory = Path(out_dir).expanduser() if out_dir else base / DEFAULT_OUT_DIR
+    target = Path(out) if out else directory / "bundle.rosio.zip"
+    source = Path(atlas) if atlas else directory / "atlas.json"
     if source.is_dir():
         source /= "atlas.json"
     try:

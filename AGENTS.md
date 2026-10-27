@@ -729,12 +729,35 @@ the expression and what was wanted, so two blind spots can neither merge nor mul
 9. Every evidence row carries its `root` (`src`, `install`, `runtime`, `bag`). The install
    tree here holds copies, not symlinks, and can be older than src, so a mixed root on one
    entity raises one `build.stale` finding instead of dozens of phantom content drifts.
-   A package a source root holds and no install root does is unbuilt, and the launch walk
-   answers its share lookup, after the ament index refused it, with the package source
-   directory, which is what `install(DIRECTORY ...)` and `data_files` copy in the common
-   case. Only the directory is assumed: a file the source does not hold at the same package
-   relative path stays the refusal it was. Every file read that way cites `src`, and the
-   launch file fact notes which share directories came from source.
+   A profile reads one tree. A package the roots hold is read where the roots hold it, its
+   install share when an install root has one, else its package source directory, and the
+   launch walk answers its share and prefix lookups from there before the ament index is
+   asked. A package a source root holds and no install root does is unbuilt, and its source
+   directory stands in for the share, which is what `install(DIRECTORY ...)` and
+   `data_files` copy in the common case. Only the directory is assumed: a file the source
+   does not hold at the same package relative path stays the refusal it was, and one the
+   source holds under another directory is `build.unbuilt`. The python packages such a
+   package installs (`ament_python_install_package`, or the modules beside an ament_python
+   `setup.py`) go ahead of any copy of the same name on the walk's python path, and the site
+   directories of the install roots go ahead of the rest, as sourcing those trees does.
+   Every file read that way cites `src`, and the launch file fact notes which share
+   directories came from source.
+
+   The other honest answer was the release. With only the release sourced, `ros2 launch`
+   runs the released copy of a package src also holds, until the workspace is built and
+   sourced. It was the rule until `1.25` and it is why it went: the entry point a profile
+   names resolves in the workspace, and every include, every parameters file and every
+   python module after it came from the release, so nav2 main over jazzy read main's
+   `bringup_launch.py` with jazzy's navigation launch files beside it, started lifecycle
+   managers of two releases on one controller server, cited jazzy values at the lines of
+   main's yaml, and raised ImportError on every file that imports a name main's
+   `nav2_common` added. Reading the release consistently would have needed the entry point
+   from the release too, and then no line the atlas cites is a line in a root: provenance has
+   to end at a file a person can edit, and the coded layer reads the workspace sources. So
+   the declared layer reads the same tree the coded layer reads. The ament index is still
+   asked for every lookup, and a package it answers from another tree is stated, not read:
+   the package carries `launch_runs_from`, and `build.underlay` says once for the workspace
+   which packages run from which tree until it is built and sourced.
 10. A root hash covers every name under the root and the content of every file worth
     reading, and the absolute prefix this machine holds the workspace at is replaced by the
     root label before those bytes are hashed. It is the one bounded exception to point 8,
@@ -786,7 +809,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.24`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.25`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -943,6 +966,13 @@ What was added, in the order it arrived:
   executable of the package no longer silences a key, and a shared line is silent only where
   another node is handed the same line and declares the name. No id form moved, so no stored
   id or waiver stopped matching.
+
+* in `1.25`, the package attribute `launch_runs_from`, which replaced `share_read_from`
+  and names the tree `ros2 launch` runs a package from while the walk read the workspace copy
+  (section 9 point 9), and the plugin manifest attribute `manifests_held`, the manifests a
+  package holds beside one an export names and it does not. `share_read_from` named the tree
+  the walk read, which is no longer another tree, so the key went rather than change its
+  meaning; no release had shipped, so no reader of it existed.
 
 One observed key was renamed in `1.17` without a major bump. The process table wrote the
 whole command line of a node under `argv`, the key under which the declared layer states only
@@ -1147,7 +1177,29 @@ there: a load into an existing container beside a new container, under a conditi
 false, minted a second node that published what the first did. No id form moved, so no
 stored id or waiver stopped matching; the endpoints, parameters and rates of such stacks did.
 
-A reader pinned to `1.0` still loads a `1.24` file: `Atlas.from_json` compares the major
+Inside `1.25` several ids and texts moved besides the new keys. A launch file of a package
+the roots hold is read from the roots, its includes, parameters files and python modules with
+it, so the nodes, parameters, values and blind spots of a workspace that holds a package a
+sourced release also ships moved, and `param` and `diff` no longer tag a value as read from a
+release. A configuration that states no `ignore` skips the `test` and `tests` directories,
+which moved the root hashes, the run ids and every entity a test source held, and `rosio init`
+leaves that default out of the file it writes. An explicit `profiles: []` is taken as written,
+and the fallback offers no ROS 1 or test launch file. A ROS 2 XML launch file with a
+`launch-prefix` is read rather than refused as ROS 1. A launch file that raised is
+`launch.raised` alone, and the reason of `launch.unloadable` is the refusal note alone.
+`build.underlay` is one finding about the workspace (`pkg:@repo`) instead of one per package.
+`plugin.inert_by_design` is one finding per file, owner and block with the profiles it is inert
+in, its discriminator the owner and block without the profile, and `param.restated_identical`
+is one finding per restated line and value with its profiles, its discriminator a digest over
+the line and the winning file. `plugin.unused` names only the profiles that start the node
+holding the selector list. An ImportError message names the tree the module was read from and
+the workspace copy when there is one, and a ModuleNotFoundError message says when the release
+installs a package of that name without the module, which moved the discriminators of those
+`launch.raised` findings. A file an unbuilt package's install rule puts in place and an include
+misses is `file_after_build`, so `build.unbuilt` takes it from `launch.raised`. No release had
+shipped, so no stored id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.25` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -1223,13 +1275,14 @@ source holds it, its subject is the first such package by name, and the fix is `
 and the install tree as a root. A missing file the source holds nowhere stays
 `extract.input_refused`, because a wrong path and a generated file read alike.
 
-`build.underlay` is `warn`. It fires once per package the roots hold whose share directory a
-launch walk looked up and the ament index answered from another tree: the release a sourced
-setup file provides, for a package only a src root holds, or for one an install root holds
-whose setup file is not sourced. The walk keeps reading that copy, because it is what
-`ros2 launch` runs, and the finding names the package, the tree read and the profiles, and
-says an edit in the workspace takes effect only once it is built and sourced. Its fix names an
-install tree beside src that no root names when there is one.
+`build.underlay` is `warn`. It fires once for the workspace, naming every package the roots
+hold whose share directory a launch walk looked up and the ament index answered from another
+tree: the release a sourced setup file provides, for a package only a src root holds, or for
+one an install root holds whose setup file is not sourced, or the build beside src that no
+root names. The walk reads the workspace copy, as section 9 point 9 states, and the finding
+names each package with the tree `ros2 launch` runs it from and the profiles, and says an
+edit in the workspace takes effect only once it is built and sourced. Its fix names the setup
+file to source, and an install tree beside src that no root names when there is one.
 
 `param.sim_time_mixed` is `warn`. It fires once per profile whose nodes state both values of
 `use_sim_time` in their winning candidates, names the minority side and the line that sets

@@ -191,26 +191,15 @@ def _coverage(atlas: Atlas) -> list[str]:
     lines = _section("Coverage, read this before the counts")
     for paragraph in _completeness(atlas):
         lines.extend([paragraph, ""])
-    lines.append(
-        f"{share(len(read), len(nodes))} of the nodes this atlas names have their source read. "
-        "Every endpoint, parameter default and frame below comes from that share, so an absent "
-        "publisher is more often a package outside the workspace than a missing publisher."
-    )
-    rows = []
-    for profile in _profile_ids(atlas):
-        here = [node for node in nodes if _in_profile(node, profile)]
-        rows.append(
-            [
-                _slug(profile),
-                len(here),
-                len([node for node in here if _read(node)]),
-                _percent(len([node for node in here if _read(node)]), len(here)),
-            ]
+    if not nodes:
+        lines.append(
+            "No profile of this atlas starts a node, so no node has its source read and no "
+            "endpoint, parameter default or frame of the code is bound to one."
         )
-    lines.append("")
-    lines.extend(table(["profile", "nodes launched", "source read", "share"], rows))
+    else:
+        lines.extend(_node_coverage(atlas, nodes, read))
     join = (atlas.x or {}).get("join") or {}
-    if join:
+    if join and nodes:
         lines.append("")
         lines.append(
             f"The join bound {join.get('endpoints_bound', 0)} code endpoints to a launched node, "
@@ -226,6 +215,28 @@ def _coverage(atlas: Atlas) -> list[str]:
             f"{plural(len(atlas.unresolved), 'value')} could not be resolved and none of them was "
             "guessed. The rate per want is in the blind spots section."
         )
+    return lines
+
+
+def _node_coverage(atlas: Atlas, nodes: list, read: list) -> list[str]:
+    lines = [
+        f"{share(len(read), len(nodes))} of the nodes this atlas names have their source read. "
+        "Every endpoint, parameter default and frame below comes from that share, so an absent "
+        "publisher is more often a package outside the workspace than a missing publisher."
+    ]
+    rows = []
+    for profile in _profile_ids(atlas):
+        here = [node for node in nodes if _in_profile(node, profile)]
+        rows.append(
+            [
+                _slug(profile),
+                len(here),
+                len([node for node in here if _read(node)]),
+                _percent(len([node for node in here if _read(node)]), len(here)),
+            ]
+        )
+    lines.append("")
+    lines.extend(table(["profile", "nodes launched", "source read", "share"], rows))
     return lines
 
 
@@ -373,6 +384,9 @@ def _parameters(atlas: Atlas) -> list[str]:
         by_state[str(entity.state)] = by_state.get(str(entity.state), 0) + 1
     effective = by_state.get("effective", 0)
     lines = _section("Parameter surface")
+    if not params:
+        lines.append("No parameter is configured in this workspace.")
+        return lines
     lines.append(
         f"{plural(len(params), 'parameter')} {_verb(len(params), 'is', 'are')} configured "
         "somewhere in this workspace. "
@@ -465,6 +479,9 @@ def _frames(atlas: Atlas) -> list[str]:
     connected = set(parents) | set(children)
     roots = sorted(frame for frame in connected if frame not in parents)
     lines = _section("Frames")
+    if not frames:
+        lines.append("No frame is named in this atlas.")
+        return lines
     lines.append(
         f"{plural(len(frames), 'frame')} are named in this atlas and "
         f"{plural(len(edges), 'transform')} state a parent. The tree below is every frame some "

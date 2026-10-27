@@ -66,6 +66,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Any
 
 from rosio import ids, join, model
 from rosio.drift import plugins, rules
@@ -341,18 +342,26 @@ def shadowed(atlas: model.Atlas) -> list[model.Finding]:
 def restated_identical(atlas: model.Atlas) -> list[model.Finding]:
     """A line that repeats, byte for byte, a value another file already sets."""
     groups = _shadow_groups(atlas, model.ShadowKind.RESTATED_IDENTICAL.value)
-    discs = _discriminators(groups)
-    out: list[model.Finding] = []
+    # One deletable line restating one value is one finding, whatever profiles read it.
+    merged: dict[tuple[Any, ...], list[tuple[tuple[str, ...], list[_Row]]]] = defaultdict(list)
     for key, group in groups.items():
+        sig = tuple((row.param.id, repr(row.loser.value)) for row in group)
+        merged[(key[1], key[2], key[3], sig)].append((key, group))
+    out: list[model.Finding] = []
+    for sig in sorted(merged):
+        key, group = merged[sig][0]
+        profiles = sorted({item[0] for item, _rows in merged[sig]})
         head = group[0]
-        slug = rules.slug_of(head.profile)
+        slug = ("profile " if len(profiles) == 1 else "profiles ") + ", ".join(
+            rules.slug_of(item) for item in profiles
+        )
         lose_at = rules.where(head.loser.source)
         win_at = rules.where(head.winner.source)
         owner = rules.node_text(head.owner)
         if len(group) == 1:
             title = f"{head.name} at {lose_at} restates the value already in force"
             detail = (
-                f"{head.name} is {rules.value_text(head.winner.value)} for {owner} in profile "
+                f"{head.name} is {rules.value_text(head.winner.value)} for {owner} in "
                 f"{slug} whether or not {rules.path_of(head.loser.source.file)} states it, "
                 f"because {rules.path_of(head.winner.source.file)} sets the same value and "
                 "wins."
@@ -360,7 +369,7 @@ def restated_identical(atlas: model.Atlas) -> list[model.Finding]:
             say = (
                 f"{lose_at} sets {owner} {head.name} to "
                 f"{rules.value_text(head.loser.value)}, the same value {win_at} already gives "
-                f"it in profile {slug}. Delete the line at {lose_at}."
+                f"it in {slug}. Delete the line at {lose_at}."
             )
         else:
             names = ", ".join(row.name for row in group[:3])
@@ -368,11 +377,11 @@ def restated_identical(atlas: model.Atlas) -> list[model.Finding]:
             detail = (
                 f"{rules.path_of(head.loser.source.file)} restates {len(group)} parameters of "
                 f"{owner} that {rules.path_of(head.winner.source.file)} sets to the same "
-                f"values in profile {slug}. Affected: {names}."
+                f"values in {slug}. Affected: {names}."
             )
             say = (
                 f"{lose_at} restates {len(group)} parameters of {owner} that {win_at} already "
-                f"sets to the same values in profile {slug}, including {head.name} = "
+                f"sets to the same values in {slug}, including {head.name} = "
                 f"{rules.value_text(head.loser.value)}. Delete them at {lose_at}."
             )
         out.append(
@@ -380,12 +389,12 @@ def restated_identical(atlas: model.Atlas) -> list[model.Finding]:
                 rule="param.restated_identical",
                 severity=_restated_severity(head),
                 subject=_subject(atlas, key, group),
-                discriminator=discs[key],
+                discriminator=ids.digest(key[1], key[2], key[3]),
                 title=title,
                 detail=detail,
                 fix=f"Delete the restated line at {lose_at}.",
                 say=say,
-                profiles=[head.profile],
+                profiles=profiles,
                 layers=_layers(head.winner, head.loser),
                 where=[head.winner.source, head.loser.source],
             )
@@ -497,7 +506,28 @@ def _nearest_name(name: str, declared: set[str]) -> str:
     word of one or two letters, so naming one the misspelling of the other sends an engineer
     to rename a parameter that is merely undeclared.
     """
-    return next((item for item in sorted(declared - {name}) if _one_slip(name, item)), "")
+    return next(
+        (
+            item
+            for item in sorted(declared - {name})
+            if _one_slip(name, item) or _word_dropped(name, item)
+        ),
+        "",
+    )
+
+
+def _word_dropped(a: str, b: str) -> bool:
+    """One spelling is the other with an inner word left out: `simulation_step` for
+    `simulation_time_step`. A first or last word left out names another thing (`range`
+    beside `min_range`), so only a word between two kept ones counts."""
+    head_a, _, last_a = a.rpartition(".")
+    head_b, _, last_b = b.rpartition(".")
+    if head_a != head_b:
+        return False
+    shorter, longer = sorted((last_a.split("_"), last_b.split("_")), key=len)
+    if len(longer) != len(shorter) + 1 or len(shorter) < 2:
+        return False
+    return any(longer[:index] + longer[index + 1 :] == shorter for index in range(1, len(shorter)))
 
 
 def _one_slip(a: str, b: str) -> bool:

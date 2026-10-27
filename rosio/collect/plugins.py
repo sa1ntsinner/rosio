@@ -1022,6 +1022,25 @@ def _manifests(ws: Any, build: PackageBuild, libraries: set[str]) -> list[Manife
     return out
 
 
+def _held_manifests(build: PackageBuild, missing: str) -> list[str]:
+    """The pluginlib manifests a package does hold beside one an export names and it does
+    not, which is where that export was most likely meant to point."""
+    base = Path(build.base)
+    out: list[str] = []
+    for path in sorted([*base.glob("*.xml"), *base.glob("*/*.xml")]):
+        if path.name == "package.xml" or path.parent.name in ("test", "tests"):
+            continue
+        if str(path) == str(Path(missing)):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "<class_libraries" in text or ("<library" in text and "<class " in text):
+            out.append(str(path))
+    return out
+
+
 def _manifest_key(ws: Any, path: str) -> str:
     try:
         return ws.file_id(path)
@@ -1411,6 +1430,9 @@ class PluginsCollector:
                 attrs["loadable"] = False
                 attrs["refused_because"] = "plugin_manifest_missing"
                 attrs["note"] = "exported by package.xml and absent on disk"
+                held = _held_manifests(build, manifest.path)
+                if held:
+                    attrs["manifests_held"] = [ws.file_id(path) for path in held]
             elif manifest.unreadable:
                 attrs["loadable"] = False
                 attrs["refused_because"] = "plugin_manifest_unreadable"

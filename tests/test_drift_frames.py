@@ -1925,7 +1925,7 @@ def test_plugin_unused_fires_when_every_launch_file_was_read():
     assert plugin_rules.launch_tree_read(atlas) is True
     (found,) = plugin_rules.unused(atlas)
     # The key is named bare: "a operations list" and "a the selector list" read badly.
-    assert found.say.endswith("Add it to controller_plugins or stop exporting it.")
+    assert found.say.endswith("Add it to controller_plugins if a profile should run it.")
 
 
 def test_plugin_unused_is_silent_when_an_entry_point_never_loaded():
@@ -2079,9 +2079,28 @@ def test_extract_input_refused_says_an_exported_manifest_is_not_installed():
     (found,) = build_rules.extract_input_refused(builder.build())
     assert found.fix.startswith(
         "nav2_theta_star_planner/package.xml exports "
-        "nav2_theta_star_planner/global_planner_plugin.xml, which the package does not install"
+        "nav2_theta_star_planner/global_planner_plugin.xml, which does not exist in the package"
     )
     assert "readable" not in found.fix
+
+
+def test_extract_input_refused_names_the_manifest_the_package_does_hold():
+    """The export names global_planner_plugin.xml and the package holds
+    theta_star_planner.xml, which nothing exports."""
+    builder = _builder()
+    manifest = ids.build_file("nav2_theta_star_planner", "global_planner_plugin.xml")
+    builder.node(
+        manifest,
+        attrs={
+            "loadable": False,
+            "refused_because": "plugin_manifest_missing",
+            "exists": False,
+            "manifests_held": [ids.build_file("nav2_theta_star_planner", "theta_star_planner.xml")],
+        },
+    )
+    (found,) = build_rules.extract_input_refused(builder.build())
+    assert "which does not exist" in found.fix
+    assert "point it at theta_star_planner.xml" in found.fix
 
 
 def _xacro_refused(detail: str, *, expanded: bool = False) -> model.Atlas:

@@ -499,6 +499,43 @@ def test_param_restated_identical_names_the_line_to_delete():
     assert "Delete" in found[0].say
 
 
+def test_param_restated_identical_is_one_finding_for_one_line_in_every_profile():
+    """Autoware: one restated line read by six profiles gave six findings with one heading."""
+    builder = _builder()
+    rows = []
+    for profile in (PROFILE, OTHER_PROFILE):
+        rows += [
+            _candidate(
+                True,
+                model.Mechanism.LAUNCH_INLINE_DICT.value,
+                _source(LAUNCH, "parameters"),
+                rank=0,
+                wins=True,
+                profile=profile,
+            ),
+            _candidate(
+                True,
+                model.Mechanism.YAML_BASE.value,
+                _source(BASE, "demo_server.ros__parameters.use_sim_time", 9),
+                rank=1,
+                shadow_kind=model.ShadowKind.RESTATED_IDENTICAL.value,
+                profile=profile,
+            ),
+        ]
+    param_id = _param(builder, "use_sim_time", rows)
+    builder.fact(
+        param_id,
+        DECLARED,
+        profile=OTHER_PROFILE,
+        values={"name": "use_sim_time", "state": model.ParamState.EFFECTIVE.value},
+        evidence=[rows[0].source],
+    )
+    found = _run(builder.recompute(), "param.restated_identical")
+    assert len(found) == 1
+    assert found[0].profiles == sorted([PROFILE, OTHER_PROFILE])
+    assert "profiles " in found[0].say
+
+
 def test_param_restated_identical_is_silent_when_the_value_differs():
     builder = _builder()
     _param(
@@ -1592,6 +1629,40 @@ def test_plugin_inert_by_design_is_silent_when_the_block_is_selected():
     assert _run(builder.recompute(), "plugin.inert_by_design") == []
 
 
+def test_plugin_inert_by_design_is_one_finding_for_a_block_inert_in_every_profile():
+    """DRIFT.md printed six identical headings for one block, one per profile."""
+    builder = _builder()
+    for profile in (PROFILE, OTHER_PROFILE):
+        param_id = ids.build_param(NODE, "FollowPath_OFF.critic.weight")
+        builder.fact(
+            param_id,
+            DECLARED,
+            profile=profile,
+            values={
+                "state": model.ParamState.INERT_BY_DESIGN.value,
+                "block": "FollowPath_OFF",
+                "owner": "/demo_server",
+                "selector": "controller_plugins",
+            },
+        )
+        builder.set_param(
+            param_id,
+            state=model.ParamState.INERT_BY_DESIGN.value,
+            candidates=[
+                _candidate(
+                    1,
+                    model.Mechanism.YAML_BASE.value,
+                    _source(BASE, "demo_server.ros__parameters.FollowPath_OFF.critic.weight", 60),
+                    rank=0,
+                    profile=profile,
+                )
+            ],
+        )
+    (found,) = _run(builder.recompute(), "plugin.inert_by_design")
+    assert found.profiles == sorted([PROFILE, OTHER_PROFILE])
+    assert "profiles demo, other" in found.say
+
+
 def test_plugin_inert_by_design_finding_id_is_stable_across_two_runs():
     assert _ids(_inert_atlas(), "plugin.inert_by_design") == _ids(
         _inert_atlas(), "plugin.inert_by_design"
@@ -1603,9 +1674,24 @@ def test_plugin_inert_by_design_finding_id_is_stable_across_two_runs():
 
 
 def _plugin_atlas(
-    *, selected: bool, exported: bool = True, loaded: bool = True, installed: bool = False
+    *,
+    selected: bool,
+    exported: bool = True,
+    loaded: bool = True,
+    installed: bool = False,
+    shared: bool = False,
 ) -> model.Atlas:
     builder = _builder()
+    if shared:
+        # The file that names the list is handed to a profile that never starts the node.
+        builder.fact(NODE, DECLARED, profile=PROFILE, values={"name": "demo_server"})
+        builder.fact(
+            ids.build_param(NODE, "controller_plugins"),
+            DECLARED,
+            profile=OTHER_PROFILE,
+            values={"value": ["FollowPath"]},
+            evidence=[_source(BASE, "demo_server.ros__parameters.controller_plugins", 29)],
+        )
     if loaded:
         # A controller server runs in the profile and selects its controllers from a list.
         builder.fact(
@@ -1654,6 +1740,15 @@ def test_plugin_unused_fires_for_a_class_this_workspace_builds_and_never_selects
     assert found[0].severity == model.Severity.INFO.value
     assert "demo_controller/plugins.xml" in found[0].say
     assert "controller_plugins" in found[0].say
+
+
+def test_plugin_unused_speaks_for_the_profiles_that_load_the_kind_only():
+    """nav2: 61 infos covered profiles that never start a controller server, and told a
+    reader to stop exporting controllers nav2 ships as alternatives."""
+    (found,) = _run(_plugin_atlas(selected=False, shared=True), "plugin.unused")
+    assert found.profiles == [PROFILE]
+    assert "other" not in found.say
+    assert "stop" not in found.fix + found.say
 
 
 def test_plugin_unused_is_silent_when_one_profile_selects_it():
@@ -2287,6 +2382,23 @@ def test_param_set_undeclared_offers_a_name_one_slip_away():
     for typo, meant in (("stop_distnce", "stop_distance"), ("max_spede", "max_speed")):
         found = _run(_undeclared_atlas(typo, declared=(meant,)), "param.set_undeclared")
         assert f"declares {meant}, which is likely what was meant" in found[0].say
+
+
+def test_param_set_undeclared_offers_a_name_with_an_inner_word_left_out():
+    """nav2 main sets controller.simulation_step, and the dock controller declares
+    controller.simulation_time_step: no hint, because no letter slipped."""
+    found = _run(
+        _undeclared_atlas(
+            "controller.simulation_step", declared=("controller.simulation_time_step",)
+        ),
+        "param.set_undeclared",
+    )
+    assert "declares controller.simulation_time_step, which is likely what was meant" in (
+        found[0].say
+    )
+    for name, other in (("range", "min_range"), ("min_range", "min_range_x")):
+        found = _run(_undeclared_atlas(name, declared=(other,)), "param.set_undeclared")
+        assert "likely what was meant" not in found[0].say, name
 
 
 def test_param_set_undeclared_offers_no_name_whose_whole_word_changed():

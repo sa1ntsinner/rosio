@@ -31,7 +31,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -319,6 +319,8 @@ class LaunchDeclaredCollector:
                 }
                 if failure.exc_type == "ModuleNotFoundError":
                     row["message"] = relabel_module(row["message"], ctx.cfg.ros_setup)
+                elif failure.exc_type == "ImportError":
+                    row["message"] = relabel_import(ctx.ws, row["message"], ctx.cfg.ros_setup)
                 if failure.kept:
                     row["kept"] = failure.kept
                 if failure.env:
@@ -326,13 +328,17 @@ class LaunchDeclaredCollector:
                 absent = _missing_file(ctx.ws, failure)
                 if absent:
                     row["missing"] = absent
+                    _mark_built_only(ctx, absent)
                 if _unrun(failure):
                     # A file only a process writes is the walk's blind spot, stated by the
                     # unresolved entry of this file, and nothing the launch file can repair.
                     problems.append(row)
                     continue
                 problems.append({**row, "note": RULE_RAISED})
-            if not walk.loadable:
+            because = _refused_because(walk)
+            # A file that raised is a launch file that failed, and launch.raised says why.
+            if not walk.loadable and (because or not walk.exceptions):
+                refusal = _refusal_message(walk)
                 problems.append(
                     {
                         "path": _rel_or_path(ctx.ws, walk.entry_path),
@@ -340,18 +346,16 @@ class LaunchDeclaredCollector:
                         "exc_type": "Unloadable",
                         # The same sentence the finding carries. Two wordings for one
                         # refusal gave the collector and the rule two fingerprints.
-                        "message": ", ".join(walk.notes)
-                        or "the file is not a ROS 2 loadable launch file",
+                        "message": refusal,
                         "note": RULE_UNLOADABLE,
-                        "refused_because": _refused_because(walk),
+                        "refused_because": because,
                     }
                 )
                 refusals.append(
                     _Refusal(
                         file_id=_launchfile_id(ctx.ws, walk.entry_path),
                         label=_rel_or_path(ctx.ws, walk.entry_path),
-                        message=", ".join(walk.notes)
-                        or "the file is not a ROS 2 loadable launch file",
+                        message=refusal,
                         profile=profile_id,
                         source=_source(ctx.ws, walk.entry_path, "import"),
                         refused_because=_refused_because(walk),
@@ -390,9 +394,7 @@ class LaunchDeclaredCollector:
         for walk in walks:
             for package, share in sorted(walk.underlay.items()):
                 held = ctx.ws.packages.get(package)
-                attrs: dict[str, Any] = {
-                    "share_read_from": share_tree(ctx.ws, share, ctx.cfg.ros_setup)
-                }
+                attrs: dict[str, Any] = {RUNS_FROM: share_tree(ctx.ws, share, ctx.cfg.ros_setup)}
                 if held is not None and held.share_path:
                     attrs["install_not_sourced"] = True
                 built = ctx.ws.unnamed_build(share)
@@ -442,8 +444,9 @@ class LaunchDeclaredCollector:
                         "message": str(exc),
                     }
                 )
+        live = {row.identity.node_id for row in placed if not _site_off(row)}
         for row in placed:
-            self._emit_node(ctx, spec, run, row, late)
+            self._emit_node(ctx, spec, run, row, late, live)
         for entry_node in runs:
             self._emit_run_node(ctx, spec, run, entry_node, late)
         self._emit_lifecycle(ctx, spec, run, placed, late)
@@ -493,9 +496,7 @@ class LaunchDeclaredCollector:
         loaded: dict[tuple[str, tuple[tuple[str, str], ...]], model.Source] = {}
         for row in placed:
             # a site whose condition read false never loads its model in this profile
-            if row.node.attrs.get("unreachable") or any(
-                gate.outcome == "false" for gate in row.node.gates
-            ):
+            if _site_off(row):
                 continue
             for read in row.node.file_reads:
                 if read.role != "robot_model" or not _in_workspace(ctx.ws, read.path):
@@ -878,9 +879,10 @@ class LaunchDeclaredCollector:
         run: str,
         row: _Placed,
         late: list[dict[str, Any]],
+        live: Collection[str] = (),
     ) -> None:
         try:
-            self._emit_node_inner(ctx, spec, run, row)
+            self._emit_node_inner(ctx, spec, run, row, live)
         except ContractError as exc:
             late.append(
                 {
@@ -897,11 +899,16 @@ class LaunchDeclaredCollector:
         spec: ProfileSpec,
         run: str,
         row: _Placed,
+        live: Collection[str] = (),
     ) -> None:
         profile_id = ids.build_profile(spec.slug)
         node = row.node
         identity = row.identity
         builder = ctx.builder
+        # bringup_launch.py loads lifecycle_manager_nav2 as a component when use_composition
+        # holds and as a Node unless it does: the site that is off in this profile keeps its
+        # launch entity and its gate, and the node is what the live site states.
+        shadowed = _site_off(row) and identity.node_id in live
 
         builder.node(row.launchent_id, label=row.locator)
         builder.edge(
@@ -969,15 +976,16 @@ class LaunchDeclaredCollector:
             evidence.append(_table_source(node.pkg, node.executable))
             _file_entity_id(ctx, _TABLE_FILE)
         _name_node(builder, identity.node_id, identity.name_source)
-        builder.fact(
-            identity.node_id,
-            LAYER,
-            profile=profile_id,
-            run=run,
-            values=values,
-            confidence=row.confidence,
-            evidence=evidence,
-        )
+        if not shadowed:
+            builder.fact(
+                identity.node_id,
+                LAYER,
+                profile=profile_id,
+                run=run,
+                values=values,
+                confidence=row.confidence,
+                evidence=evidence,
+            )
         builder.edge(
             model.EdgeKind.LAUNCHES.value,
             row.launchent_id,
@@ -1547,15 +1555,77 @@ def missing_module(message: str) -> tuple[str, str] | None:
 
 
 def relabel_module(message: str, ros_setup: Sequence[str] = ()) -> str:
-    """A missing module, with the ROS release whose python path was searched for it."""
+    """A missing module, with the ROS release whose python path was searched for it, and
+    whether that release installs a package of the same name, which then ships no such
+    module: apt cannot add what an installed package does not hold."""
     distros = [
         found.group(1)
         for found in (_DISTRO_PREFIX.fullmatch(str(Path(setup).parent)) for setup in ros_setup)
         if found
     ]
-    if not distros or "searched:" in message:
+    text = message
+    if distros and "searched:" not in message:
+        text = f"{message}, searched: ROS {distros[0]}"
+    found = _MISSING_MODULE.search(message)
+    if (
+        found
+        and "installed without it" not in text
+        and any(
+            (Path(setup).parent / "share" / found.group(1) / "package.xml").is_file()
+            for setup in ros_setup
+        )
+    ):
+        text += f", {INSTALLED_WITHOUT_MODULE.format(found.group(1))}"
+    return text
+
+
+INSTALLED_WITHOUT_MODULE = "where the package {} is installed without it"
+
+_CANNOT_IMPORT = re.compile(r"cannot import name '(\w+)' from '([\w.]+)' \(([^)]*)\)")
+
+
+def cannot_import(message: str) -> tuple[str, str, str, str] | None:
+    """The name, the module, the tree it was imported from and the workspace copy of that
+    module, from a message `relabel_import` wrote."""
+    found = _CANNOT_IMPORT.search(message)
+    if found is None:
+        return None
+    tree, _, held = found.group(3).partition(WORKSPACE_COPY)
+    return found.group(1), found.group(2), tree.removeprefix("read from ").strip(" ,"), held
+
+
+WORKSPACE_COPY = ", the workspace holds it at "
+
+
+def relabel_import(ws: Workspace, message: str, ros_setup: Sequence[str] = ()) -> str:
+    """`cannot import name 'X' from 'm' (/opt/ros/jazzy/...)` with the path named by its
+    tree, and the copy of the module the workspace holds, when it holds one: two copies of
+    one module are two releases, and the message alone names only the one that was read."""
+    found = _CANNOT_IMPORT.search(message)
+    if found is None:
         return message
-    return f"{message}, searched: ROS {distros[0]}"
+    path = found.group(3)
+    distro = _DISTRO_PREFIX.match(path)
+    sourced = [
+        hit.group(1)
+        for hit in (_DISTRO_PREFIX.fullmatch(str(Path(setup).parent)) for setup in ros_setup)
+        if hit
+    ]
+    if distro:
+        tree = f"ROS {distro.group(1)}"
+    elif path.startswith(OUTSIDE) and sourced:
+        # The walk states a library path outside every root by this token, and the python
+        # path it searched is the one the sourced release set.
+        tree = f"ROS {sourced[0]}"
+    else:
+        tree = ws.stated_path(path, ros_setup) if path.startswith("/") else path
+    top = found.group(2).split(".")[0]
+    held = ws.python_packages().get(top)
+    if held is None and top in ws.packages and ws.packages[top].src_path:
+        candidate = Path(str(ws.packages[top].src_path), top)
+        held = str(candidate) if (candidate / "__init__.py").is_file() else None
+    where = f"{WORKSPACE_COPY}{ws.stated_path(held, ros_setup)}" if held else ""
+    return f"{message[: found.start(3)]}read from {tree}{where}{message[found.end(3) :]}"
 
 
 def relabel_searched(ws: Workspace, message: str, ros_setup: Sequence[str] = ()) -> str:
@@ -1762,6 +1832,33 @@ def _missing_file(ws: Workspace, failure: records.WalkException) -> str:
 
 
 _NO_SUCH_FILE = re.compile(r"No such file or directory: '([^']+)'")
+
+
+def _site_off(row: _Placed) -> bool:
+    """A launch site whose condition read false in this profile."""
+    return bool(row.node.attrs.get("unreachable")) or any(
+        gate.outcome == "false" for gate in row.node.gates
+    )
+
+
+def _mark_built_only(ctx: CollectContext, file_id: str) -> None:
+    """A file an unbuilt package's install rule puts in place, which its source holds under
+    another directory: `install(DIRECTORY launch/ DESTINATION share/...)` flattens it, and
+    `build.unbuilt` names the one build that repairs every such read."""
+    parsed = ids.parse_file(file_id)
+    package = ctx.ws.packages.get(parsed.package)
+    if package is None or not package.src_path or package.share_path:
+        return
+    elsewhere = same_name_in_package(ctx.ws, str(Path(package.src_path, parsed.relpath)))
+    held = ctx.builder.atlas.entities.get(file_id)
+    if not elsewhere or (held is not None and held.attrs.get("refused_because")):
+        return
+    ctx.builder.node(
+        file_id,
+        attrs={"loadable": False, "refused_because": BUILT_ONLY, "found_elsewhere": elsewhere},
+    )
+    ctx.builder.node(ids.build_pkg(parsed.package))
+    ctx.builder.edge(model.EdgeKind.CONTAINS.value, ids.build_pkg(parsed.package), file_id)
 
 
 def _unrun(failure: records.WalkException) -> bool:
@@ -2325,8 +2422,11 @@ def _predicates(ws: Workspace, walks: list[records.LaunchWalk]) -> dict[str, boo
 
 
 UNDERLAY_PREDICATE = "underlay:"
-"""A package a src root holds whose share the ament index answered from another tree in this
-profile, so the walk read the released copy and not the source."""
+"""A package the roots hold whose share the ament index answers from another tree in this
+profile. The walk read the workspace copy, and `ros2 launch` runs the other one."""
+
+RUNS_FROM = "launch_runs_from"
+"""The package attribute naming that other tree."""
 
 INSTALL_UNNAMED = "workspace:install_unnamed"
 """An install tree a build made sits beside a src root and no root names it."""
@@ -2396,6 +2496,25 @@ def _node_order(node: records.ResolvedNode) -> tuple[str, str, str, str, str]:
 _LAUNCH_LAYER_PATH = "@launch"
 """Subject of the row that reports the layer itself rather than one of its files. It is not
 a file id and never becomes one: nothing on disk failed here."""
+
+
+REFUSAL_NOTES = (
+    "ROS 1",
+    "launch frontend",
+    "no generate_launch_description",
+    "only a python launch file",
+)
+
+
+def _refusal_message(walk: records.LaunchWalk) -> str:
+    """The note that says why the file was not read, without the notes of a walk that was."""
+    unavailable = _launch_exec().NOTE_UNAVAILABLE
+    kept = [
+        note
+        for note in walk.notes
+        if note.startswith(unavailable) or any(head in note for head in REFUSAL_NOTES)
+    ]
+    return ", ".join(kept) or "the file is not a ROS 2 loadable launch file"
 
 
 def _refused_because(walk: records.LaunchWalk) -> str:

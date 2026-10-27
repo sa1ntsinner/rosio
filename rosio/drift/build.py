@@ -271,7 +271,14 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
         )
         argument = _REQUIRED_ARGUMENT.search(first.message)
         tag = _UNKNOWN_TAG.search(first.message)
-        if tag and not sandboxed:
+        imported = (
+            launch_declared.cannot_import(first.message)
+            if first.exc_type == "ImportError"
+            else None
+        )
+        if imported and not sandboxed:
+            fix, say = _import_fix(first.label, *imported)
+        elif tag and not sandboxed:
             fix = (
                 f"install the package whose launch frontend extension defines <{tag.group(1)}> "
                 "where the walk runs, or write the tag as a node the stock frontend knows"
@@ -313,10 +320,16 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
                     f"this atlas: {fix}."
                 )
         elif module and not sandboxed:
-            fix = _module_fix(*module)
+            installed = launch_declared.INSTALLED_WITHOUT_MODULE.format(module[0]) in first.message
+            fix = _shipped_fix(*module) if installed else _module_fix(*module)
+            has = (
+                f"which the release of {module[0]} installed here does not ship"
+                if installed
+                else "which this machine does not have"
+            )
             say = (
-                f"{first.label} imports the python module {module[0]}, which this machine "
-                f"does not have, so the nodes it starts are missing from this atlas: {fix}."
+                f"{first.label} imports the python module {module[0]}, {has}, so the nodes "
+                f"it starts are missing from this atlas: {fix}."
             )
         findings.append(
             Finding(
@@ -348,6 +361,61 @@ def _package_fix(package: str, distro: str) -> str:
     return (
         f"install {package} (sudo apt install {apt} when it is a released package), "
         "or add the tree that holds it as a root in rosio.yaml"
+    )
+
+
+LAUNCH_CORE = frozenset(
+    {"launch", "launch_ros", "launch_xml", "launch_yaml", "launch_testing", "launch_pytest"}
+)
+"""The launch system itself, which only a ROS release updates."""
+
+
+def _import_fix(label: str, name: str, module: str, tree: str, held: str) -> tuple[str, str]:
+    """An import of a name the module that was read does not define."""
+    top = module.split(".")[0]
+    if held:
+        fix = (
+            f"the workspace holds {top} at {held} and the walk imported the copy in {tree}: "
+            f"build and source the workspace, or put {held} first on the python path of the "
+            "walk"
+        )
+        say = (
+            f"{label} imports {name} from {module}, which the copy in {tree} does not define "
+            f"while the workspace copy at {held} may, so the nodes it starts are missing from "
+            f"this atlas: {fix}."
+        )
+        return fix, say
+    release = tree if tree.startswith("ROS ") else "the release the walk ran"
+    if top in LAUNCH_CORE:
+        fix = (
+            f"the file needs a newer ROS release than {release}: extract where that release is "
+            "sourced, naming its setup file under ros_setup in rosio.yaml, or delete the "
+            "profile that starts this file"
+        )
+        say = (
+            f"{label} imports {name} from {module}, which {module} of {release} does not "
+            f"define, so the nodes it starts are missing from this atlas: {fix}."
+        )
+        return fix, say
+    fix = (
+        f"install the version of {top} that defines {name}, or add the tree that holds it as "
+        "a root in rosio.yaml"
+    )
+    say = (
+        f"{label} imports {name} from {module}, which the copy in {tree} does not define, so "
+        f"the nodes it starts are missing from this atlas: {fix}."
+    )
+    return fix, say
+
+
+def _shipped_fix(module: str, distro: str) -> str:
+    """A module the installed package of the same name does not ship: installing it again
+    changes nothing."""
+    release = f"ROS {distro}" if distro else "the sourced release"
+    return (
+        f"{module} is installed from {release} and ships no python module {module}, so the "
+        f"launch file was written for a newer {module}: add the source of that {module} as a "
+        "root in rosio.yaml, or start the launch file the release ships"
     )
 
 
@@ -795,75 +863,102 @@ RULE_UNDERLAY = "build.underlay"
 
 @rules.register(RULE_UNDERLAY)
 def build_underlay(atlas: Atlas) -> list[Finding]:
-    """A package the roots hold that the launch walk read from another tree.
+    """Packages the atlas read from the workspace that `ros2 launch` runs from another tree.
 
-    A share lookup goes to the ament index, which answers from the sourced trees. For a
-    package only a src root holds, that is the released copy before the source tree is
-    asked, which is what `ros2 launch` runs before a build, so the walk keeps reading it. For
-    a package an install root holds whose setup file nobody sourced, it is the release again.
-    Either way every value of that package comes from a copy nobody in this workspace edits,
-    and an edit that changes nothing reads as a tool that is wrong, so one finding per
-    package says so. A share in the install tree beside src that no root names is the build of
-    the src package, sourced but not read by rosio, and the finding says so rather than
-    calling the package unbuilt.
+    The walk reads every package the roots hold where they hold it, so a profile is one tree
+    and its values are cited at the lines that were read. The ament index of the environment
+    the walk ran in is still asked, and a package it answers from elsewhere runs from that
+    tree today: a package only src holds runs from the release until a build, a package an
+    install root holds whose setup file nobody sourced runs from the release as well, and a
+    build beside src that no root names runs as built. One finding for the workspace names
+    every such package, because the cause is one build and one setup file, not one per
+    package.
     """
-    findings: list[Finding] = []
+    rows: list[tuple[str, str, str]] = []
     for node in atlas.by_kind(model.NodeKind.PKG.value):
-        tree = str(node.attrs.get("share_read_from") or "")
-        if not tree:
-            continue
-        package = ids.parse(node.id).segments[0]
-        if node.attrs.get("install_not_sourced"):
-            held = "an install root holds it and its setup file is not sourced"
-            fix = (
-                f"source the setup.bash of the install tree that holds {package}: list it "
-                "under ros_setup in rosio.yaml, or delete ros_setup so the default sources "
-                "it, then extract again"
-            )
-            say = (
-                f"{package} is built but its install tree is not sourced, so its launch files "
-                f"read the copy in {tree}: source that install tree's setup.bash."
-            )
-        elif node.attrs.get("share_build"):
-            held = (
-                "the install tree beside the source root holds a build of it and no root names "
-                "that tree, so rosio reads src while the launch walk reads the build"
-            )
-            fix = _build_fix(atlas, package)
-            took = (
-                "a file the build links back to src takes effect as soon as it is saved, and "
-                "one it copied only after colcon build."
-                if node.attrs["share_build"] == "symlinked"
-                else "edits in src take effect only after colcon build."
-            )
-            say = f"{package} is read from {tree}, the build of its src package: {took}"
-        else:
-            held = "only a source root holds it, which is what ros2 launch reads before a build"
-            fix = _build_fix(atlas, package)
-            say = (
-                f"{package} in src is not built, so its launch files read the copy in {tree}: "
-                "edits in src take effect only after colcon build and sourcing the overlay."
-            )
-        findings.append(
-            Finding(
-                rule=RULE_UNDERLAY,
-                severity=rules.severity_of(RULE_UNDERLAY),
-                subject=node.id,
-                title=f"{package} is read from {tree}, not from the workspace",
-                detail=(
-                    f"The launch files looked up the share directory of {package} and the "
-                    f"ament index answered with the copy in {tree}, because {held}. The files "
-                    f"and values of {package} in this atlas come from that copy."
-                ),
-                fix=fix,
-                say=say,
-                profiles=_predicate_profiles(
-                    atlas, f"{launch_declared.UNDERLAY_PREDICATE}{package}"
-                ),
-                layers=[model.Layer.DECLARED.value],
-            )
+        tree = str(node.attrs.get(launch_declared.RUNS_FROM) or "")
+        if tree:
+            package = ids.parse(node.id).segments[0]
+            rows.append((package, tree, _underlay_kind(node)))
+    if not rows:
+        return []
+    rows.sort()
+    names = [package for package, _tree, _kind in rows]
+    kinds = {kind for _package, _tree, kind in rows}
+    fixes: list[str] = []
+    if "not_sourced" in kinds:
+        fixes.append(
+            "source the setup.bash of the install tree that holds "
+            f"{_and([p for p, _t, k in rows if k == 'not_sourced'])}: list it under ros_setup "
+            "in rosio.yaml, or delete ros_setup so the default sources it"
         )
-    return findings
+    if kinds - {"not_sourced"}:
+        built = [p for p, _t, k in rows if k != "not_sourced"]
+        fixes.append(_build_fix(atlas, built[0] if len(built) == 1 else ""))
+    fix = "; ".join(fixes)
+    trees = sorted({tree for _package, tree, _kind in rows})
+    each = "; ".join(
+        f"{package} from {tree}, {_UNDERLAY_WHY[kind]}" for package, tree, kind in rows
+    )
+    one = len(rows) == 1
+    title = (
+        f"{names[0]} runs from {trees[0]}, and the atlas reads it from the workspace"
+        if one
+        else f"{len(rows)} packages run from another tree, and the atlas reads them from the "
+        "workspace"
+    )
+    took = (
+        "a file the build links back to src takes effect as soon as it is saved, and one it "
+        "copied only after colcon build"
+        if kinds == {"symlinked"}
+        else "an edit takes effect only once the workspace is built and sourced"
+    )
+    return [
+        Finding(
+            rule=RULE_UNDERLAY,
+            severity=rules.severity_of(RULE_UNDERLAY),
+            subject=_whole_run_subject(atlas),
+            title=title,
+            detail=(
+                "The atlas reads the launch files, parameters and python modules of every "
+                "package the roots hold from the workspace. The ament index of the environment "
+                f"the launch walk ran in answers {'this package' if one else 'these'} from "
+                f"another tree, which is what ros2 launch runs today: {each}. Values in this "
+                f"atlas are what the workspace states, and {took}."
+            ),
+            fix=fix,
+            say=(
+                f"rosio read {_and(names)} from the workspace, while ros2 launch runs "
+                f"{'it' if one else 'them'} from {_and(trees)}, so {took}: {fix}."
+            ),
+            profiles=sorted(
+                {
+                    profile
+                    for package in names
+                    for profile in _predicate_profiles(
+                        atlas, f"{launch_declared.UNDERLAY_PREDICATE}{package}"
+                    )
+                }
+            ),
+            layers=[model.Layer.DECLARED.value],
+        )
+    ]
+
+
+_UNDERLAY_WHY = {
+    "unbuilt": "because only src holds it and nothing is built",
+    "not_sourced": "because the setup file of the install tree that holds it is not sourced",
+    "copied": "the build of its src package in the install tree beside src, which no root names",
+    "symlinked": (
+        "the symlinked build of its src package in the install tree beside src, which no root names"
+    ),
+}
+
+
+def _underlay_kind(node: model.Node) -> str:
+    if node.attrs.get("install_not_sourced"):
+        return "not_sourced"
+    return str(node.attrs.get("share_build") or "unbuilt")
 
 
 def _built_only(node: model.Node) -> str:
@@ -1266,8 +1361,17 @@ def _refused_fix(
     """What repairs one refusal, in the words its own cause deserves."""
     if because == "plugin_manifest_missing" and node.kind == model.NodeKind.FILE.value:
         package = ids.parse_file(node.id).package
+        held = list(node.attrs.get("manifests_held") or [])
+        if held:
+            names = " or ".join(ids.parse_file(item).relpath for item in held)
+            return (
+                f"{package}/package.xml exports {label}, which does not exist, and the package "
+                f"holds the plugin manifest {names}: drop that export, or point it at {names} "
+                "when no other export names it, or report it upstream when it is a released "
+                "package, which nothing in this workspace can change"
+            )
         return (
-            f"{package}/package.xml exports {label}, which the package does not install: "
+            f"{package}/package.xml exports {label}, which does not exist in the package: "
             f"correct the export or the install rule of {package}, or report it upstream "
             "when it is a released package, which nothing in this workspace can change"
         )

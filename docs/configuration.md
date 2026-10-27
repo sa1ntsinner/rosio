@@ -15,11 +15,11 @@ list is refused, so a typing error never passes unnoticed.
 | key | value | default |
 | --- | --- | --- |
 | `roots` | the trees rosio reads, a list. Each item is a path, read as a source tree, or a root mapping (below). | `src` and the `install` beside it; a directory that is an installed ROS prefix, such as `/opt/ros/jazzy`, is one install root |
-| `ignore` | paths under a root that are skipped. A pattern holding a slash matches the path inside the root from its top, `/include` for one; a pattern without one matches a file or directory name anywhere. | for an installed ROS prefix read on its own: `/include`, `/opt` and `/lib/python*`, which hold headers, vendored libraries and python modules that rosio does not read |
+| `ignore` | paths under a root that are skipped. A pattern holding a slash matches the path inside the root from its top, `/include` for one; a pattern without one matches a file or directory name anywhere. | `test` and `tests`, the directories of test sources that no profile starts; for an installed ROS prefix read on its own: `/include`, `/opt` and `/lib/python*`, which hold headers, vendored libraries and python modules that rosio does not read. An empty list skips nothing. |
 | `ros_setup` | the setup files sourced before a launch file is walked, a path or a list. An empty list sources nothing. | `/opt/ros/$ROS_DISTRO/setup.bash` and `setup.bash` of the install root, when they exist |
 | `launch_timeout` | seconds one launch walk may take. | `60` |
 | `launch_sandbox` | `auto` walks launch files inside bubblewrap when it works, `required` refuses to walk without it, `off` (or `false`) never uses it. `--launch-sandbox` overrides it. | `auto` |
-| `profiles` | one per system you actually run, a list of profile mappings (below). | one profile per launch file |
+| `profiles` | one per system you actually run, a list of profile mappings (below). | one profile per launch file, leaving out ROS 1 and test launch files; an empty list is taken as written and extracts no profile |
 | `out` | the output directory, relative to the working directory. `--out` overrides it. | `rosio-out` |
 | `out_dir` | the older spelling of `out`. | |
 | `deterministic` | accepted for older files. `rosio extract` is deterministic unless `--no-deterministic` is passed. | |

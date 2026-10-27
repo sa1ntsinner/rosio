@@ -1354,7 +1354,7 @@ def _tree_atlas(attrs: dict, pkg_attrs: dict, root: str) -> model.Atlas:
 @pytest.mark.parametrize(
     ("attrs", "pkg_attrs", "root", "tag"),
     [
-        ({}, {"share_read_from": "ROS jazzy"}, "src", "value read from ROS jazzy"),
+        ({}, {"launch_runs_from": "ROS jazzy"}, "src", ""),
         ({"install_copy_differs": True}, {}, "install", "install, src differs"),
         ({"install_copy_differs": True}, {}, "src", "src, the install copy runs"),
         ({}, {}, "src", ""),
@@ -1365,36 +1365,60 @@ def test_param_says_which_tree_the_value_runs_from(attrs, pkg_attrs, root, tag):
     the release, with no tag, while build.underlay said the package came from ROS jazzy."""
     answer = query.param(_tree_atlas(attrs, pkg_attrs, root), "/slam_toolbox", "resolution")
     edit = next(line for line in answer.lines if line.strip().startswith("effective"))
-    if pkg_attrs:
-        # the src line is not what runs, so it is not offered as the edit that changes it
-        assert edit.endswith(
-            "runs from ROS jazzy, slam_toolbox/config/mapper.yaml:31 takes effect after "
-            "colcon build"
-        )
-    else:
-        assert edit.endswith(f"config/mapper.yaml:31 [{tag}]" if tag else "config/mapper.yaml:31")
+    # a package ros2 launch runs from a release was still read from src, at that line
+    assert edit.endswith(f"config/mapper.yaml:31 [{tag}]" if tag else "config/mapper.yaml:31")
     assert answer.data["profiles"]["profile:online_async"]["read_from"] == (tag or "src")
+
+
+def test_param_for_a_profile_where_nothing_wins_says_so_and_why():
+    """`param --profile composed /controller_server controller_frequency` printed state
+    effective, which came from another profile, with no winner and no reason."""
+    builder = model.AtlasBuilder()
+    owner = ids.build_node("/controller_server")
+    source = ids.build_file("nav2_bringup", "params/nav2_params.yaml")
+    builder.node(owner)
+    builder.node(source)
+    builder.add_profile("composed")
+    builder.add_profile("plain")
+    param_id = ids.build_param(owner, "controller_frequency")
+    builder.node(param_id)
+    rows = [
+        Candidate(
+            value=20.0,
+            value_type="double",
+            mechanism="launch_params_file",
+            source=Source(file=source, locator="controller_frequency", line_hint=12),
+            rank=0,
+            wins=profile == "profile:plain",
+            profile=profile,
+            note="" if profile == "profile:plain" else "the node ignores it",
+        )
+        for profile in ("profile:composed", "profile:plain")
+    ]
+    builder.set_param(param_id, state="effective", candidates=rows)
+    answer = query.param(
+        builder.build(), "/controller_server", "controller_frequency", profile="composed"
+    )
+    assert answer.lines[0].endswith("state effective in plain, no value wins in composed")
+    assert "  no value wins in composed: the node ignores it" in answer.lines
+    assert answer.data["profile_state"] == "no_winner"
+    whole = query.param(builder.build(), "/controller_server", "controller_frequency")
+    assert whole.lines[0].endswith("state effective")
+
+
+def test_a_name_from_rosios_own_table_is_not_cited_as_a_file_to_open():
+    """explain /controller_server cited rosio/resolve/known_names.py, a file of no tree of
+    the reader's."""
+    row = Source(file=query.NAME_TABLE, locator="nav2_controller/controller_server")
+    assert query.site(row) == (
+        "the node name rosio's table states for nav2_controller/controller_server"
+    )
+    assert "known_names" not in query.site(row)
 
 
 def test_a_reason_names_a_remap_only_for_a_name_a_remap_resolves():
     assert "remap" in query.reason_text("not_stated_in_source", "topic_name")
     assert "remap" not in query.reason_text("not_stated_in_source", "param_name")
-
-
-def test_diff_says_an_edit_to_a_package_read_from_another_tree_shows_only_after_a_build():
-    """slam_toolbox in src is not built, an edit to its yaml moved the root hash and nothing
-    else, and the diff read as if the edit had been read and changed nothing."""
-
-    def side(digest: str) -> model.Atlas:
-        atlas = _stamped(build(), digest)
-        atlas.entities[ids.build_pkg("slam_toolbox")] = model.Node(
-            id=ids.build_pkg("slam_toolbox"), kind="pkg", attrs={"share_read_from": "ROS jazzy"}
-        )
-        return atlas
-
-    answer = query.diff(side("aaaa1111"), side("bbbb2222"))
-    assert answer.data["read_from_underlay"] == ["slam_toolbox"]
-    assert "slam_toolbox is read from another tree" in texts(answer)
 
 
 def test_explain_says_where_the_rest_of_a_cut_fact_line_is():

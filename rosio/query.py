@@ -104,11 +104,17 @@ def _short_path(package: str, relpath: str) -> str:
     return relpath if package == ids.REPO_PKG else f"{package}/{relpath}"
 
 
+NAME_TABLE = ids.build_file(ids.REPO_PKG, "rosio/resolve/known_names.py")
+
+
 def site(source: Source | Mapping[str, Any] | None, *, locator: bool = False, tag: str = "") -> str:
     """One provenance row as a person reads it: the file, the line, and the key."""
     if source is None:
         return ""
     row = source.to_json() if isinstance(source, Source) else dict(source)
+    if row.get("file") == NAME_TABLE:
+        # The committed name table is data inside rosio, not a file of the workspace.
+        return f"the node name rosio's table states for {row.get('locator') or 'it'}"
     text = file_label(str(row.get("file", "")))
     line = row.get("line_hint")
     if line is not None:
@@ -125,9 +131,9 @@ def site(source: Source | Mapping[str, Any] | None, *, locator: bool = False, ta
 def tree_tag(atlas: Atlas, source: Source | None) -> str:
     """Which tree a cited value runs from, when the cited file alone would mislead.
 
-    A value read from the install tree while src holds an edit, a python default read from
-    src while the installed copy is what runs, and a package the launch walk read from a
-    released copy all cite a file a reader can open whose line is not what runs now.
+    A value read from the install tree while src holds an edit, and a python default read
+    from src while the installed copy is what runs, both cite a file a reader can open whose
+    line is not what runs now.
     """
     if source is None:
         return ""
@@ -135,16 +141,7 @@ def tree_tag(atlas: Atlas, source: Source | None) -> str:
     root = source.root or "src"
     if node is not None and node.attrs.get("install_copy_differs"):
         return "install, src differs" if root == "install" else "src, the install copy runs"
-    try:
-        package = ids.parse_file(source.file).package
-    except ContractError:
-        return ""
-    owner = atlas.entities.get(ids.build_pkg(package))
-    tree = str(owner.attrs.get("share_read_from") or "") if owner is not None else ""
-    return f"{UNDERLAY_TAG}{tree}" if tree and root == "src" else ""
-
-
-UNDERLAY_TAG = "value read from "
+    return ""
 
 
 _FILE_TOKEN = re.compile(r"\bfile:[^\s|'\"]+\|[^\s'\"]+")
@@ -702,7 +699,14 @@ def param(
         "matched_by": how,
         "profiles": {},
     }
-    lines = [f"{data['name']} on {data['node'] or label(param_id)}   state {entity.state}"]
+    state = f"state {entity.state}"
+    lost = bool(wanted) and entity.state == "effective" and wanted not in entity.effective
+    if lost:
+        # The entity keeps the strongest state of all profiles, which is not this one's.
+        others = ", ".join(profile_name(item) for item in sorted(entity.effective))
+        state = f"state effective in {others}, no value wins in {profile_name(wanted)}"
+        data["profile_state"] = "no_winner"
+    lines = [f"{data['name']} on {data['node'] or label(param_id)}   {state}"]
     if how == "substring":
         lines.append(substring_note(f"{node} {name or ''}".strip(), label(param_id)))
     if entity.state != "effective":
@@ -712,6 +716,14 @@ def param(
         profiles = [item for item in profiles if item == wanted]
         if not profiles:
             lines.append(f"  this parameter is not set in {profile_name(wanted)}")
+        elif lost:
+            notes = sorted(
+                {row.note for row in entity.candidates if row.profile == wanted and row.note}
+            )
+            lines.append(
+                f"  no value wins in {profile_name(wanted)}: "
+                + ("; ".join(notes) or "no candidate of this profile wins, see the chain")
+            )
     for item in profiles:
         chain = sorted(
             [row for row in entity.candidates if row.profile in (item, ANY_PROFILE)],
@@ -729,14 +741,7 @@ def param(
         if effective is not None:
             data["profiles"][item]["read_from"] = tag or effective.source.root or "src"
         lines.append(f"  profile {profile_name(item)}")
-        if effective is not None and tag.startswith(UNDERLAY_TAG):
-            # The line in src is not what runs, so it is not offered as the edit that changes it.
-            lines.append(
-                f"    effective {_value(effective.value)} ({effective.value_type})"
-                f"   runs from {tag.removeprefix(UNDERLAY_TAG)}, "
-                f"{site(effective.source)} takes effect after colcon build"
-            )
-        elif effective is not None:
+        if effective is not None:
             lines.append(
                 f"    effective {_value(effective.value)} ({effective.value_type})"
                 f"   edit {site(effective.source, tag=tag)}"
@@ -1360,20 +1365,6 @@ def diff(
                 lines.append(f"    {key} {_clip(entry['label'], 120)}{fields}")
             _more(lines, counts[key] - len(kept), f"{key} {what}")
     lines.extend(_build_lines(build))
-    underlay = sorted(
-        {
-            label(node.id)
-            for atlas in (left, other)
-            for node in atlas.by_kind("pkg")
-            if node.attrs.get("share_read_from")
-        }
-    )
-    if underlay and any(sum(row.values()) for row in (build["entities"], build["edges"])):
-        data["read_from_underlay"] = underlay
-        lines.append(
-            f"  {', '.join(underlay)} {'is' if len(underlay) == 1 else 'are'} read from another "
-            "tree, so an edit to their files in src shows here only after colcon build"
-        )
     return Answer(verb="diff", data=data, lines=lines)
 
 

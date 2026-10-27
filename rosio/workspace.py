@@ -198,6 +198,8 @@ class Workspace:
         self._selections: dict[Any, tuple[str, ...]] = {}
         self._twins: dict[str, str | None] = {}
         self._share_reads: dict[str, ShareRead] = {}
+        self._python: dict[str, str] | None = None
+        self._sites: list[str] | None = None
         self._real_roots: list[tuple[str, str]] | None = None
         self._localised: dict[str, str] = {}
         self._rels: dict[str, tuple[str | None, str]] = {}
@@ -703,6 +705,38 @@ class Workspace:
             return str(twin) if twin.is_file() else None
         return None
 
+    def python_packages(self) -> dict[str, str]:
+        """The python packages the workspace's own packages install, module name to
+        directory: the source directory of an unbuilt package, by its
+        `ament_python_install_package` calls or, for an ament_python package, by the
+        directories beside its setup.py that hold an `__init__.py`. A launch file of that
+        package imports these and not the copy a release ships under the same name."""
+        if self._python is None:
+            out: dict[str, str] = {}
+            for name, package in sorted(self.packages.items()):
+                if not package.src_path or package.share_path:
+                    continue
+                for module, directory in _python_modules(Path(package.src_path), name):
+                    out.setdefault(module, str(directory))
+            self._python = dict(sorted(out.items()))
+        return dict(self._python)
+
+    def python_sites(self) -> list[str]:
+        """The site directories under the install prefixes the roots hold, which a sourced
+        install tree puts on the python path."""
+        if self._sites is None:
+            prefixes = {
+                Path(package.share_path).parent.parent
+                for package in self.packages.values()
+                if package.share_path
+            }
+            self._sites = sorted(
+                str(site)
+                for prefix in prefixes
+                for site in prefix.glob("lib/python3*/site-packages")
+            )
+        return list(self._sites)
+
     def share(self, pkg: str) -> str | None:
         """Share directory, install first then src, because get_package_share_directory
         reads the install tree and that is what a launch file will have opened."""
@@ -1134,6 +1168,32 @@ def _cmake_executables(text: str) -> set[str]:
         for name in _cmake_names(text)
     }
     return {name for name in out if name and "$" not in name}
+
+
+_PYTHON_INSTALL = re.compile(r"\bament_python_install_package\(([^)]*)\)", re.IGNORECASE)
+
+
+def _python_modules(base: Path, name: str) -> list[tuple[str, Path]]:
+    """The modules one package source installs, each with the directory that holds it."""
+    out: list[tuple[str, Path]] = []
+    cmake = base / "CMakeLists.txt"
+    if cmake.is_file():
+        text = _read_text(cmake)
+        for call in _PYTHON_INSTALL.findall(text):
+            words = call.split()
+            if not words:
+                continue
+            module = words[0].replace("${PROJECT_NAME}", name).strip("\"'")
+            directory = base / module
+            if "PACKAGE_DIR" in words[1:-1]:
+                directory = base / words[words.index("PACKAGE_DIR", 1) + 1].strip("\"'")
+            if (directory / "__init__.py").is_file():
+                out.append((module, directory))
+    elif (base / "setup.py").is_file() or (base / "setup.cfg").is_file():
+        for child in sorted(base.iterdir()):
+            if child.name not in ("test", "tests") and (child / "__init__.py").is_file():
+                out.append((child.name, child))
+    return out
 
 
 _CMAKE_TARGET = re.compile(r"\badd_executable\(\s*([^\s()]+)|\bEXECUTABLE\s+([^\s()]+)")

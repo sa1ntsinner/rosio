@@ -157,6 +157,34 @@ def test_config_without_profiles_falls_back_to_launch_files(bench: Path) -> None
     ]
 
 
+def test_an_empty_profile_list_is_taken_as_written(bench: Path) -> None:
+    """perception_pcl: init wrote `profiles: []`, extract read it as absent and walked one
+    profile per launch file, ROS 1 files among them."""
+    _write(bench / CONFIG_NAME, "roots:\n  - kind: src\n    path: src\nprofiles: []\n")
+    assert load_config(None, workspace=str(bench)).profiles == ()
+
+
+def test_the_fallback_leaves_out_ros1_and_test_launch_files(bench: Path) -> None:
+    _write(
+        bench / "src" / "beta_pkg" / "launch" / "legacy.launch",
+        '<launch>\n  <node pkg="beta_pkg" type="talker" name="talker"/>\n</launch>\n',
+    )
+    _write(
+        bench / "src" / "beta_pkg" / "test" / "smoke.launch.py",
+        "def generate_launch_description():\n    pass\n",
+    )
+    _write(bench / CONFIG_NAME, "roots:\n  - kind: src\n    path: src\n")
+    cfg = load_config(None, workspace=str(bench))
+    assert cfg.ignore == ("test", "tests")
+    assert [profile.slug for profile in cfg.profiles] == [
+        "alpha_pkg.mapping",
+        "beta_pkg.mapping",
+        "nx_navigation",
+    ]
+    stated = _write(bench / "other.yaml", "roots:\n  - kind: src\n    path: src\nignore: []\n")
+    assert load_config(str(stated), workspace=str(bench)).ignore == ()
+
+
 def test_a_bare_string_root_is_a_source_root(bench: Path) -> None:
     _write(bench / CONFIG_NAME, "roots:\n  - src\n")
     cfg = load_config(None, workspace=str(bench))

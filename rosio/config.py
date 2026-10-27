@@ -24,6 +24,7 @@ import re
 import shlex
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,16 @@ INSTALL_PREFIX_IGNORE = ("/include", "/opt", "/lib/python*")
 party prefixes and python libraries. The coded layer reads sources only, and a launch file,
 a parameters file or a model sits under share. On /opt/ros/<distro> these are most of the
 files, and every extract indexed and hashed them."""
+
+TEST_DIRS = frozenset({"test", "tests"})
+TEST_NAME = "*_test*.launch.py"
+"""Where a package keeps its tests by convention, which is left out whatever the file holds:
+robot_localization keeps nine test launch files under test/ that read a bag and a csv."""
+
+TEST_IGNORE = tuple(sorted(TEST_DIRS))
+"""What a configuration that states no `ignore` skips. Test sources build fixtures, fake
+frames and gtest helpers that no profile starts, and read as blind spots, refusals and
+internal errors of the workspace."""
 
 _ROOT_KEYS = frozenset({"kind", "path"})
 
@@ -339,13 +350,14 @@ def default_config(workspace: Any, packages: Sequence[str] = ()) -> Config:
 
 
 def _default_ignore(roots: Sequence[RootSpec]) -> tuple[str, ...]:
-    """`INSTALL_PREFIX_IGNORE` for an installed prefix read alone. A source root beside it
-    could hold a directory of the same name that is worth reading."""
+    """`INSTALL_PREFIX_IGNORE` for an installed prefix read alone, `TEST_IGNORE` otherwise. A
+    source root beside a prefix could hold a directory of the same name that is worth
+    reading."""
     if any(spec.kind != INSTALL for spec in roots):
-        return ()
+        return TEST_IGNORE
     if any((Path(spec.path) / AMENT_INDEX).is_dir() for spec in roots):
         return INSTALL_PREFIX_IGNORE
-    return ()
+    return TEST_IGNORE
 
 
 def with_install_tree(cfg: Config, path: str) -> Config:
@@ -395,9 +407,12 @@ def _from_payload(payload: dict[str, Any], target: Path, workspace: Any) -> Conf
                 f"{target}: {spec.kind} root does not exist: {spec.path}. "
                 f"{ways}, or delete that root from {target}"
             )
-    ignore = _strings(payload.get("ignore"), "ignore")
+    ignore = (
+        _strings(payload.get("ignore"), "ignore") if "ignore" in payload else _default_ignore(roots)
+    )
     profiles = _profiles(payload.get("profiles"), base)
-    if not profiles:
+    # An empty list is a decision: this workspace starts nothing anybody named.
+    if payload.get("profiles") is None:
         ws = _as_workspace(workspace, roots=roots, ignore=ignore)
         profiles = tuple(
             ProfileSpec(slug=slug, label=label, entrypoints=(entry,))
@@ -824,6 +839,8 @@ def _launch_profiles(ws: Workspace) -> list[tuple[str, str, Entrypoint]]:
         if package is None and ws.root_of(path) == INSTALL:
             # Outside every package share, so no `ros2 launch` reaches it.
             continue
+        if _not_a_profile(path):
+            continue
         rows.append((package or "repo", relative, path))
     out: list[tuple[str, str, Entrypoint]] = []
     for package, relative, path in sorted(rows):
@@ -836,6 +853,18 @@ def _launch_profiles(ws: Workspace) -> list[tuple[str, str, Entrypoint]]:
         )
         out.append((_unique_slug(package, relative, rows), f"{package} {target}", entry))
     return sorted(out, key=lambda row: row[0])
+
+
+def _not_a_profile(path: str) -> bool:
+    """A test launch file or a ROS 1 one, which `rosio init` does not offer either."""
+    from rosio.resolve.launch_exec import is_ros1_launch
+
+    target = Path(path)
+    if TEST_DIRS & {target.parent.name, target.parent.parent.name}:
+        return True
+    if fnmatch(target.name, TEST_NAME):
+        return True
+    return target.suffix != ".py" and is_ros1_launch(path)
 
 
 def _slug_candidates(package: str, relative: str) -> tuple[str, ...]:

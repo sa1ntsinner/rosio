@@ -21,6 +21,9 @@ import yaml
 from rosio.config import (
     CONFIG_NAME,
     DEFAULT_LAUNCH_TIMEOUT,
+    TEST_DIRS,
+    TEST_IGNORE,
+    TEST_NAME,
     Config,
     Entrypoint,
     ProfileSpec,
@@ -34,7 +37,8 @@ from rosio.resolve import parse_python
 HEADER = """# rosio configuration, written by `rosio init`.
 #
 # roots      the trees rosio reads: src for sources, install for a built or installed tree
-# ignore     paths under a root that rosio skips, matched against the path inside the root
+# ignore     paths under a root that rosio skips, matched against the path inside the root.
+#            Left out, the test and tests directories are skipped.
 # ros_setup  the setup files a launch file needs sourced before rosio can walk it
 # profiles   one per system you actually run. Below is one per launch file rosio found.
 #            Merge the entry points that start together into one profile, state the
@@ -238,6 +242,8 @@ def render(cfg: Config, base: Path) -> str:
         defaults = DEFAULTS_NOTE + "".join(
             f"#   {line}\n" for line in yaml.safe_dump(shown, sort_keys=False).splitlines()
         )
+    if payload["ignore"] == list(TEST_IGNORE):
+        del payload["ignore"]
     for key in ("ignore", "ros_setup"):
         if key in payload and not payload[key]:
             del payload[key]
@@ -299,10 +305,6 @@ TEST_MARKERS = ("import launch_testing", "from launch_testing", "generate_test_d
 """What a launch_testing file holds. It describes a test run with its own assertions, which
 is not a system anybody starts, and as a profile it only reported its test dependencies."""
 
-TEST_DIRS = frozenset({"test", "tests"})
-TEST_NAME = "*_test*.launch.py"
-"""Where a package keeps its tests by convention, which is left out whatever the file holds:
-robot_localization keeps nine test launch files under test/ that read a bag and a csv."""
 
 FRONTENDS = {".xml": ("launch_xml",), ".yaml": ("launch_yaml",), ".yml": ("launch_yaml",)}
 

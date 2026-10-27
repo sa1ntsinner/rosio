@@ -382,6 +382,123 @@ def test_a_raised_description_is_recorded_and_the_file_stays_loadable(ws: Worksp
     assert ids.build_node("/sensors/lidar_driver") in node_ids(atlas)
 
 
+def test_a_file_that_raised_is_launch_raised_alone_and_not_also_unloadable(
+    ws: Workspace,
+) -> None:
+    """Autoware's preprocessor.launch.py raised, and launch.unloadable said the same thing
+    again with the walk's notes as its reason: the share directory of a package was read
+    from its source tree."""
+    walk = walk_for("plain_node", "broken")
+    walk.loadable = False
+    walk.nodes = []
+    walk.notes = ["the share directory of lx_sensors was read from its source tree"]
+    walk.exceptions = [
+        records.WalkException(
+            path=walk.entry_path, phase="import", exc_type="NameError", message="name 'x'"
+        )
+    ]
+    cfg = Config(
+        roots=tuple(RootSpec(kind=spec.kind, path=spec.path) for spec in ws.roots),
+        profiles=(ProfileSpec(slug="broken", entrypoints=(entry_for("plain_node"),)),),
+    )
+    builder = model.AtlasBuilder()
+    ctx = CollectContext(ws=ws, cfg=cfg, builder=builder)
+    ctx.declared.walks.append(walk)
+    get(launch_declared.NAME).collect(ctx)
+    exceptions = builder.build().by_kind("run")[0].attrs["exceptions"]
+    assert [(row["exc_type"], row["note"]) for row in exceptions] == [
+        ("NameError", "launch.raised")
+    ]
+
+
+def test_an_unloadable_reason_is_the_refusal_note_and_no_other_note() -> None:
+    walk = records.LaunchWalk(
+        entry_path="/x/old.launch",
+        notes=["the share directory of a was read from its source tree", "ROS 1 XML launch"],
+    )
+    assert launch_declared._refusal_message(walk) == "ROS 1 XML launch"
+
+
+def _collect_one(ws: Workspace, walk: records.LaunchWalk, slug: str) -> model.Atlas:
+    cfg = Config(
+        roots=tuple(RootSpec(kind=spec.kind, path=spec.path) for spec in ws.roots),
+        profiles=(ProfileSpec(slug=slug, entrypoints=(entry_for("plain_node"),)),),
+    )
+    builder = model.AtlasBuilder()
+    ctx = CollectContext(ws=ws, cfg=cfg, builder=builder)
+    ctx.declared.walks.append(walk)
+    get(launch_declared.NAME).collect(ctx)
+    return builder.build()
+
+
+def test_a_node_started_as_a_component_or_as_a_node_is_what_the_live_site_states(
+    ws: Workspace,
+) -> None:
+    """nav2 main bringup_launch.py loads lifecycle_manager_nav2 as a component if
+    use_composition and as a Node unless it, and the site that was off wrote its values into
+    the same slot: `key 'executable' already holds ''`."""
+    walk = walk_for("plain_node", "both")
+    live = walk.nodes[0]
+    walk.nodes.append(
+        dataclasses.replace(
+            live,
+            form="composable_node",
+            executable="",
+            plugin_class="lx_sensors::LidarDriver",
+            container="/sensors/container",
+            entity_path=("LoadComposableNodes", "ComposableNode(lidar_driver)"),
+            attrs={"unreachable": True},
+        )
+    )
+    atlas = _collect_one(ws, walk, "both")
+    rows = atlas.by_kind("run")[0].attrs["exceptions"]
+    assert not [row for row in rows if row["exc_type"] == "ContractError"]
+    fact = atlas.entities[ids.build_node("/sensors/lidar_driver")].fact(
+        LAYER, ids.build_profile("both")
+    )
+    assert fact.values["executable"] == "lidar_driver"
+    assert fact.values["form"] == "node"
+
+
+@pytest.mark.ros
+def test_a_flattened_include_of_an_unbuilt_package_is_left_to_build_unbuilt(
+    tmp_path: Path,
+) -> None:
+    """nav2_loopback_sim installs launch/ flat into its share, and an unbuilt workspace walks
+    the source, where the include misses: build.unbuilt names the build, and launch.raised
+    told a reader to supply an argument."""
+    package = tmp_path / "src" / "flat_pkg"
+    (package / "launch").mkdir(parents=True)
+    (package / "package.xml").write_text(
+        "<package format='3'><name>flat_pkg</name><version>0.0.1</version></package>"
+    )
+    (package / "launch" / "sim.launch.py").write_text(
+        "from launch import LaunchDescription\n"
+        "def generate_launch_description():\n    return LaunchDescription([])\n"
+    )
+    (package / "launch" / "top.launch.py").write_text(
+        "import os\n"
+        "from ament_index_python.packages import get_package_share_directory\n"
+        "from launch import LaunchDescription\n"
+        "from launch.actions import IncludeLaunchDescription\n"
+        "from launch.launch_description_sources import PythonLaunchDescriptionSource\n"
+        "def generate_launch_description():\n"
+        "    share = get_package_share_directory('flat_pkg')\n"
+        "    return LaunchDescription([IncludeLaunchDescription(\n"
+        "        PythonLaunchDescriptionSource(os.path.join(share, 'sim.launch.py')))])\n"
+    )
+    ws = Workspace.discover([RootSpec("src", str(tmp_path / "src"))])
+    atlas, _ctx = _run_profile(
+        ws, "flat", Entrypoint(verb="launch", pkg="flat_pkg", target="top.launch.py")
+    )
+    missing = atlas.entities[ids.build_file("flat_pkg", "sim.launch.py")]
+    assert missing.attrs["refused_because"] == "file_after_build"
+    assert missing.attrs["found_elsewhere"] == ["launch/sim.launch.py"]
+    assert drift_build.launch_raised(atlas) == []
+    (unbuilt,) = drift_build.build_unbuilt(atlas)
+    assert "flat_pkg" in unbuilt.say
+
+
 def test_a_required_argument_is_reported_not_skipped(ws: Workspace) -> None:
     """The walk stopped at a declaration with no default, and says so.
 

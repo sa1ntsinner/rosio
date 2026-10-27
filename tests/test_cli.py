@@ -1318,6 +1318,26 @@ def test_a_problem_line_names_paths_and_never_the_tokens_the_atlas_stores():
     assert '<outside the workspace>/lib/python3.12/site-packages/xacro/__init__.py".' in text
 
 
+def test_a_collector_refusal_is_one_sentence_and_not_its_class_and_prefix():
+    """`CollectorError: declared.urdf: xacro refused <the same path>: error: ...`"""
+    path = "file:demo_10|description/urdf/rrbot.urdf.xacro"
+    rows = [
+        {
+            "file": path,
+            "exc_type": "CollectorError",
+            "message": f"declared.urdf: xacro refused {path}: error: No such file or directory: "
+            "file:demo_10|ros2_control/rrbot.ros2_control.xacro",
+        }
+    ]
+
+    ((text, _),) = cli._problem_lines(rows)
+
+    assert text == (
+        "demo_10/description/urdf/rrbot.urdf.xacro: xacro refused it: error: No such file or "
+        "directory: demo_10/ros2_control/rrbot.ros2_control.xacro"
+    )
+
+
 def test_a_name_joined_to_a_substitution_reads_as_one_path():
     from rosio.query import readable
 

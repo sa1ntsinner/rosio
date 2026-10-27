@@ -182,9 +182,10 @@ PUBLIC_SOURCES = {
     "demos_src": {
         "unresolved": 13,
         "findings": {"extract.input_refused": 1},
-        # One of them is pkg:@repo, the workspace every extraction writes.
-        "entities": 1883,
-        "edges": 2404,
+        # One of them is pkg:@repo, the workspace every extraction writes. The test
+        # directories a configuration that states no ignore skips hold no entity any more.
+        "entities": 1868,
+        "edges": 2389,
     },
     "rl_src": {
         # The C++ reading of the fifth trial left fewer blind spots and lifted the rate over
@@ -198,8 +199,8 @@ PUBLIC_SOURCES = {
         # false in four node profiles, so four publishes edges, the uses_type edge and the
         # /accel/filtered topic are not bound.
         # Each of the three filters declares its two covariances through that lambda.
-        "entities": 1684,
-        "edges": 2334,
+        "entities": 1646,
+        "edges": 2296,
     },
 }
 

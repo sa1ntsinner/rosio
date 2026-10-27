@@ -97,6 +97,25 @@ def test_create_cli_honors_atlas_output_and_note(problem, tmp_path, capsys):
         assert json.loads(archive.read("manifest.json"))["note"] == "Inspect this robot"
 
 
+def test_the_global_out_names_the_directory_that_holds_the_atlas(problem, tmp_path, capsys):
+    """`rosio --out rosio-shim bundle create` failed with Is a directory: the bundle's own
+    --out FILE took the value the global --out DIR was given."""
+    root, source, _atlas = problem
+    elsewhere = root / "rosio-shim"
+    elsewhere.mkdir()
+    (elsewhere / "atlas.json").write_bytes(source.read_bytes())
+    source.unlink()
+    assert cli.main(["--out", str(elsewhere), "bundle", "create", str(root), "--json"]) == 0
+    written = json.loads(capsys.readouterr().out)["data"]["written"]
+    assert written == str(elsewhere / "bundle.rosio.zip")
+    target = tmp_path / "named.rosio.zip"
+    assert (
+        cli.main(["--out", str(elsewhere), "bundle", "create", str(root), "--out", str(target)])
+        == 0
+    )
+    assert target.is_file()
+
+
 def test_open_and_query_with_readable_citations(problem, tmp_path, capsys):
     root, _source, original = problem
     archive = bundle.create(root)

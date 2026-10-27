@@ -1808,3 +1808,137 @@ def test_required_arguments_are_the_ones_declared_with_no_default():
     )
     assert launch_exec.required_arguments(source) == ("description_file", "namespace")
     assert launch_exec.required_arguments("def broken(:") == ()
+
+
+MANIFEST = "<package format='3'><name>{}</name><version>0.0.1</version></package>\n"
+
+TOP_LAUNCH = """
+from demo_common import NEW
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
+
+
+def generate_launch_description():
+    child = PathJoinSubstitution([FindPackageShare('demo_bringup'), 'launch', 'child.launch.py'])
+    return LaunchDescription([IncludeLaunchDescription(PythonLaunchDescriptionSource(child))])
+"""
+
+CHILD_LAUNCH = """
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    return LaunchDescription([Node(package='demo_nodes_cpp', executable='talker', name='{}')])
+"""
+
+
+def _shadowed_release(tmp_path: Path) -> tuple[str, Path]:
+    """demo_bringup and demo_common in src, unbuilt, over an older release of both that the
+    sourced setup file provides: the release child starts old_node and its demo_common has
+    no NEW."""
+    release = tmp_path / "release"
+    index = release / "share" / "ament_index" / "resource_index" / "packages"
+    index.mkdir(parents=True)
+    for name in ("demo_bringup", "demo_common"):
+        (index / name).write_text("")
+        (release / "share" / name).mkdir(parents=True)
+        (release / "share" / name / "package.xml").write_text(MANIFEST.format(name))
+    (release / "share/demo_bringup/launch").mkdir()
+    (release / "share/demo_bringup/launch/child.launch.py").write_text(
+        CHILD_LAUNCH.format("old_node")
+    )
+    site = release / "lib" / "python3" / "site-packages"
+    (site / "demo_common").mkdir(parents=True)
+    (site / "demo_common" / "__init__.py").write_text("OLD = 1\n")
+    setup = tmp_path / "release.bash"
+    setup.write_text(
+        f"export AMENT_PREFIX_PATH={release}:$AMENT_PREFIX_PATH\n"
+        f"export PYTHONPATH={site}:$PYTHONPATH\n"
+    )
+    src = tmp_path / "src"
+    bringup = src / "demo_bringup"
+    (bringup / "launch").mkdir(parents=True)
+    (bringup / "package.xml").write_text(MANIFEST.format("demo_bringup"))
+    (bringup / "CMakeLists.txt").write_text("project(demo_bringup)\n")
+    (bringup / "launch" / "top.launch.py").write_text(TOP_LAUNCH)
+    (bringup / "launch" / "child.launch.py").write_text(CHILD_LAUNCH.format("new_node"))
+    common = src / "demo_common"
+    (common / "demo_common").mkdir(parents=True)
+    (common / "package.xml").write_text(MANIFEST.format("demo_common"))
+    (common / "CMakeLists.txt").write_text(
+        "project(demo_common NONE)\nament_python_install_package(${PROJECT_NAME})\n"
+    )
+    (common / "demo_common" / "__init__.py").write_text("NEW = 'src'\n")
+    return str(setup), src
+
+
+@pytest.mark.ros
+def test_a_profile_reads_one_tree_when_src_shadows_a_release(tmp_path: Path) -> None:
+    """nav2 main on jazzy: the entry point came from src, its includes and its nav2_common
+    from the release, so every profile mixed two releases and most raised ImportError."""
+    from rosio.config import RootSpec
+    from rosio.workspace import Workspace
+
+    setup, src = _shadowed_release(tmp_path)
+    workspace = Workspace.discover([RootSpec("src", str(src))])
+    assert workspace.python_packages() == {"demo_common": str(src / "demo_common/demo_common")}
+    walk = launch_exec.walk(
+        str(src / "demo_bringup/launch/top.launch.py"),
+        workspace=workspace,
+        ros_setup=(setup,),
+        launch_sandbox="off",
+    )
+    assert not walk.exceptions
+    assert [node.name for node in walk.nodes] == ["new_node"]
+    assert [include.path for include in walk.includes] == [
+        str(src / "demo_bringup/launch/child.launch.py")
+    ]
+    assert walk.underlay == {"demo_bringup": str(tmp_path / "release/share/demo_bringup")}
+
+
+@pytest.mark.ros
+def test_the_prefix_of_a_package_only_src_holds_is_answered(tmp_path: Path) -> None:
+    """test_updown_launch.py asks get_package_prefix('nav2_system_tests') while it builds its
+    description, and the walk said no root holds the package that src holds."""
+    from rosio.config import RootSpec
+    from rosio.workspace import Workspace
+
+    package = tmp_path / "src" / "demo_tests"
+    package.mkdir(parents=True)
+    (package / "package.xml").write_text(MANIFEST.format("demo_tests"))
+    entry = package / "updown.launch.py"
+    entry.write_text(
+        "import os\n"
+        "from ament_index_python.packages import get_package_prefix\n"
+        "from launch import LaunchDescription\n"
+        "from launch_ros.actions import Node\n"
+        "def generate_launch_description():\n"
+        "    tool = os.path.join(get_package_prefix('demo_tests'), 'lib', 'demo_tests')\n"
+        "    return LaunchDescription([Node(package='demo_tests', executable='updown',\n"
+        "        name='updown', arguments=[tool])])\n"
+    )
+    workspace = Workspace.discover([RootSpec("src", str(tmp_path / "src"))])
+    walk = launch_exec.walk(str(entry), workspace=workspace, launch_sandbox="off")
+    assert not walk.exceptions
+    assert [node.name for node in walk.nodes] == ["updown"]
+
+
+def test_a_ros2_xml_launch_file_with_a_launch_prefix_is_not_ros1(tmp_path: Path) -> None:
+    """Autoware's cuda filters use launch-prefix, which ROS 2 XML has too, beside exec= and
+    $(var ...), and were refused as ROS 1."""
+    ros2 = tmp_path / "filter.launch.xml"
+    ros2.write_text(
+        '<launch>\n  <arg name="input"/>\n'
+        '  <node pkg="demo" exec="filter" launch-prefix="$(var prefix)">\n'
+        '    <param from="$(find-pkg-share demo)/config/filter.yaml"/>\n  </node>\n</launch>\n'
+    )
+    ros1 = tmp_path / "old.launch"
+    ros1.write_text(
+        '<launch>\n  <node pkg="demo" type="filter" name="f" launch-prefix="gdb"/>\n</launch>\n'
+    )
+    assert not launch_exec.is_ros1_launch(str(ros2))
+    assert launch_exec.is_ros1_launch(str(ros1))

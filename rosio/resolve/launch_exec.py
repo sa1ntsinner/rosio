@@ -96,7 +96,10 @@ def probe_sandbox(ros_setup: Sequence[str] = ()) -> str:
     return command if done.returncode == 0 else ""
 
 
-ROS1_MARKERS = ("<rosparam", "clear_params", "launch-prefix", "$(find ", "$(arg ")
+ROS1_MARKERS = ("<rosparam", "clear_params", "$(find ", "$(arg ")
+ROS2_MARKERS = ("exec=", "$(var ", "$(find-pkg-share ", "<let ")
+"""`launch-prefix` is an attribute of both, so it decides nothing. A ROS 2 spelling decides
+before any ROS 1 one does."""
 
 NODE_CALLS = ("Node", "LifecycleNode")
 
@@ -375,11 +378,11 @@ PACKAGE_NOT_FOUND = "package_not_found"
 def source_shares(workspace: Workspace | None) -> dict[str, str]:
     """The packages a source root holds and no install root does, by name.
 
-    The child answers a share lookup the ament index cannot with the package source
-    directory, which is the layout `install(DIRECTORY ...)` and `data_files` copy in the
-    common case. Only the directory is assumed: a file the source does not hold at the same
-    package relative path stays missing, so a flattening or generating install rule reads
-    as the refusal it would have been.
+    The child answers a share lookup of such a package with its source directory before
+    the ament index is asked, which is the layout `install(DIRECTORY ...)` and `data_files`
+    copy in the common case. Only the directory is assumed: a file the source does not hold
+    at the same package relative path stays missing, so a flattening or generating install
+    rule reads as the refusal it would have been.
     """
     return {
         name: package.src_path
@@ -388,9 +391,16 @@ def source_shares(workspace: Workspace | None) -> dict[str, str]:
     }
 
 
+def _ask(workspace: Workspace | None, name: str, default: Any) -> Any:
+    """A workspace answer, or the default for a caller that hands in a stand in."""
+    method = getattr(workspace, name, None)
+    return method() if callable(method) else default
+
+
 def installed_shares(workspace: Workspace | None) -> dict[str, str]:
-    """The share directory of every package an install root holds, by name. A lookup the
-    ament index answers from anywhere else read a copy the configured roots do not hold."""
+    """The share directory of every package an install root holds, by name. The child
+    answers a lookup of such a package from there, and a lookup the ament index answers from
+    anywhere else names the copy `ros2 launch` runs while the roots hold another."""
     return {
         name: package.share_path
         for name, package in getattr(workspace, "packages", {}).items()
@@ -427,6 +437,8 @@ def walk(
         "roots": [root.path for root in getattr(workspace, "roots", ())],
         "source_shares": source_shares(workspace),
         "installed_shares": installed_shares(workspace),
+        "python_packages": _ask(workspace, "python_packages", {}),
+        "python_sites": _ask(workspace, "python_sites", []),
         "timeout": float(timeout),
         "sandbox": bool(sandbox),
     }
@@ -949,6 +961,8 @@ def _is_ros1_xml(text: str) -> bool:
     if not stripped.startswith("<"):
         return False
     if "<launch" not in stripped:
+        return False
+    if any(marker in text for marker in ROS2_MARKERS):
         return False
     if any(marker in text for marker in ROS1_MARKERS):
         return True

@@ -778,11 +778,13 @@ def build_parser() -> argparse.ArgumentParser:
         "configuration and the git revision into one archive.",
     )
     _add_global_flags(create, root=False, flags=("json", "quiet"))
+    # Its own dest: the global --out names the output directory, which holds the atlas.
     create.add_argument(
         "--out",
-        default=argparse.SUPPRESS,
+        dest="archive",
+        default=None,
         metavar="FILE",
-        help="archive to write, default rosio-out/bundle.rosio.zip in the workspace",
+        help="archive to write, default bundle.rosio.zip in the output directory",
     )
     create.add_argument(
         "workspace",
@@ -1343,6 +1345,12 @@ def _problem_lines(problems: list, atlas=None) -> list[tuple[str, int]]:
             # A broken invariant inside rosio, not a property of the file it was reading.
             text = f"{where}: rosio hit an internal error here, please report it: "
             text += str(row.get("message", ""))
+        elif row.get("exc_type") == "CollectorError":
+            # A collector's own refusal, said once: no class name, no collector prefix and
+            # no second copy of the path the line starts with.
+            message = re.sub(r"^[a-z_]+\.[a-z_]+: ", "", str(row.get("message", "")))
+            message = message.replace(f" {where}: ", " it: ") if where else message
+            text = f"{where}: {message}".strip(": ")
         else:
             text = f"{where} {row.get('exc_type', '')}: {row.get('message', '')}".strip()
         text = re.sub(OPAQUE, "an OpaqueFunction", text)
@@ -2072,7 +2080,12 @@ def cmd_bundle(args: argparse.Namespace) -> int:
     action = args.bundle_command
     if action == "create":
         target = bundle.create(
-            args.workspace, atlas=args.atlas, out=args.out, include=args.include, note=args.note
+            args.workspace,
+            atlas=args.atlas,
+            out=args.archive,
+            out_dir=args.out,
+            include=args.include,
+            note=args.note,
         )
         return _answer(
             args,

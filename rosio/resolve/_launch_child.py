@@ -134,10 +134,15 @@ class _Probes:
 
 
 class _SourceShares:
-    """Answers a share lookup the ament index cannot with the package source directory.
+    """Answers the share and prefix lookups of a package the roots hold from the roots.
 
-    Only a package that a source root holds and no install root does is answered here, and
-    only after the index refused it, so an installed copy wins as it does at run time.
+    A profile reads one tree. A package the roots hold is read where they hold it, its
+    install share when an install root has one, else its source directory, whatever the
+    ament index says: a launch file of the workspace that includes its siblings from a
+    release mixed two releases in one profile, with the values of one cited at the lines of
+    the other. The index is still asked, and a tree it answers with that the roots do not
+    hold is kept in `underlay`, which is the copy `ros2 launch` runs until the workspace is
+    built and sourced.
 
     When a launch file raised while it built its description after a lookup missed, it is built
     again, and then a package nothing holds is answered too, with a directory that does not
@@ -165,29 +170,46 @@ class _SourceShares:
             return
 
         original = packages.get_package_share_directory
+        original_prefix = packages.get_package_prefix
 
         def lookup(package_name, *rest, **kwargs):
+            held = self.installed.get(package_name) or self.shares.get(package_name)
+            if held is None:
+                try:
+                    return original(package_name, *rest, **kwargs)
+                except packages.PackageNotFoundError as exc:
+                    self.missing.setdefault(package_name, exc)
+                    if not self.lenient:
+                        raise
+                    return f"{launch_exec.MISSING_SHARE}/{package_name}"
+            # The index itself, past the prefix lookup this walk answers from the roots.
             try:
-                found = original(package_name, *rest, **kwargs)
-            except packages.PackageNotFoundError as exc:
-                if package_name in self.shares:
-                    self.used.add(package_name)
-                    return self.shares[package_name]
-                self.missing.setdefault(package_name, exc)
-                if not self.lenient:
-                    raise
-                return f"{launch_exec.MISSING_SHARE}/{package_name}"
-            installed = self.installed.get(package_name)
-            if package_name in self.shares or (
-                installed is not None
-                and not _under(os.path.realpath(found), os.path.realpath(installed))
-            ):
+                found = str(Path(original_prefix(package_name), "share", package_name))
+            except packages.PackageNotFoundError:
+                found = None
+            if found is not None and not _under(os.path.realpath(found), os.path.realpath(held)):
                 self.underlay.setdefault(package_name, str(found))
-            return found
+            if package_name in self.shares:
+                self.used.add(package_name)
+            return held
+
+        def prefix(package_name, *rest, **kwargs):
+            # A package only src holds has no prefix yet, and what a launch file joins to its
+            # source directory is missing until a build, as it is at run time.
+            installed = self.installed.get(package_name)
+            if installed is not None:
+                return str(Path(installed).parent.parent)
+            if package_name in self.shares:
+                return self.shares[package_name]
+            return original_prefix(package_name, *rest, **kwargs)
 
         for owner in (packages, ament_index_python, find_package):
             self._saved.append((owner, "get_package_share_directory", original))
             owner.get_package_share_directory = lookup
+        for owner in (packages, ament_index_python, find_package):
+            if getattr(owner, "get_package_prefix", None) is original_prefix:
+                self._saved.append((owner, "get_package_prefix", original_prefix))
+                owner.get_package_prefix = prefix
 
     def restore(self) -> None:
         for owner, name, original in reversed(self._saved):
@@ -196,6 +218,51 @@ class _SourceShares:
 
     def notes(self) -> list[str]:
         return [launch_exec.NOTE_SOURCE_SHARE.format(name) for name in sorted(self.used)]
+
+
+class _SourceModules:
+    """Puts the python packages of the workspace ahead of a release copy of the same name.
+
+    `ament_python_install_package(nav2_bringup PACKAGE_DIR launch)` makes a module of a
+    directory under another name, so a source directory is not a path entry and a finder
+    answers for the module name instead. The site directories of the install roots go first
+    on the path, which is what sourcing those trees does.
+    """
+
+    def __init__(self, packages: dict[str, str], sites: Sequence[str] = ()) -> None:
+        self.packages = {str(k): str(v) for k, v in packages.items()}
+        self.sites = [str(site) for site in sites]
+        self._finder: Any = None
+
+    def install(self) -> None:
+        import importlib.abc
+        import importlib.util
+
+        sys.path[:0] = [site for site in self.sites if site not in sys.path]
+        if not self.packages:
+            return
+        packages = self.packages
+
+        class Finder(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, *_where):
+                directory = packages.get(fullname)
+                if directory is None:
+                    return None
+                return importlib.util.spec_from_file_location(
+                    fullname,
+                    str(Path(directory, "__init__.py")),
+                    submodule_search_locations=[directory],
+                )
+
+        self._finder = Finder()
+        sys.meta_path.insert(0, self._finder)
+
+    def restore(self) -> None:
+        if self._finder in sys.meta_path:
+            sys.meta_path.remove(self._finder)
+        for site in self.sites:
+            with contextlib.suppress(ValueError):
+                sys.path.remove(site)
 
 
 def _capped(value: Any) -> str:
@@ -636,6 +703,9 @@ class Walker:
         self.shares = _SourceShares(
             request.get("source_shares") or {}, request.get("installed_shares") or {}
         )
+        self.modules = _SourceModules(
+            request.get("python_packages") or {}, request.get("python_sites") or ()
+        )
         self.guard = _NoProcesses(sandbox=bool(request.get("sandbox")))
         self.sites = _ConstructionSites()
         self.commands = _Commands()
@@ -678,6 +748,7 @@ class Walker:
         module = None
         self.probes.install()
         self.shares.install()
+        self.modules.install()
         self.guard.install()
         self.sites.install()
         self.commands.install()
@@ -696,6 +767,7 @@ class Walker:
             self.commands.restore()
             self.sites.restore()
             self.guard.restore()
+            self.modules.restore()
             self.shares.restore()
             self.probes.restore()
             self.result.notes.extend(self.shares.notes())

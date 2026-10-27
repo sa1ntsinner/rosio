@@ -347,7 +347,8 @@ def test_an_install_prefix_skips_the_trees_rosio_reads_nothing_from(
     assert cfg.ignore == scaffold_ignore()
     payload = yaml.safe_load(scaffold.render(cfg, merged))
     assert payload["ignore"] == list(scaffold_ignore())
-    assert load_config(None, workspace=str(workspace)).ignore == ()
+    # a workspace that states no ignore skips its test directories
+    assert load_config(None, workspace=str(workspace)).ignore == ("test", "tests")
     assert "ignore" not in yaml.safe_load(
         scaffold.render(default_config(str(workspace)), workspace)
     )

@@ -259,8 +259,15 @@ def inert_by_design(atlas: model.Atlas) -> list[model.Finding]:
     and names none.
     """
     out: list[model.Finding] = []
-    for block in _inert_blocks(atlas):
-        slug = rules.slug_of(block.profile)
+    grouped: dict[tuple[str, str, str], list] = {}
+    for item in _inert_blocks(atlas):
+        grouped.setdefault((item.file, item.owner, item.block), []).append(item)
+    # One deletable block is one finding, with the profiles it is inert in.
+    for key in sorted(grouped):
+        blocks = sorted(grouped[key], key=lambda item: item.profile)
+        block = blocks[0]
+        profiles = sorted({item.profile for item in blocks})
+        slug = ", ".join(rules.slug_of(item) for item in profiles)
         at = rules.where(block.source)
         named = bool(block.selector)
         misses = (
@@ -275,11 +282,12 @@ def inert_by_design(atlas: model.Atlas) -> list[model.Finding]:
                 rule="plugin.inert_by_design",
                 severity=rules.severity_of("plugin.inert_by_design"),
                 subject=block.file,
-                discriminator=f"{slug}.{block.owner.strip('/').replace('/', '.')}.{block.block}",
+                discriminator=f"{block.owner.strip('/').replace('/', '.')}.{block.block}",
                 title=f"block {block.block} is configured and not selected in {slug}",
                 detail=(
                     f"{block.owner} carries {_keys(len(block.keys))} under {block.block}, and "
-                    f"{misses}, so none of them is loaded in profile {slug}.{loads}"
+                    f"{misses}, so none of them is loaded in {_profile_word(profiles)} "
+                    f"{slug}.{loads}"
                 ),
                 fix=(
                     f"Add {block.block} to {target} to switch it on, or delete the block to "
@@ -288,15 +296,19 @@ def inert_by_design(atlas: model.Atlas) -> list[model.Finding]:
                 say=(
                     f"{at} configures {block.owner} block {block.block} with "
                     f"{_keys(len(block.keys))}, and {misses}, so none of it is loaded in "
-                    f"profile {slug}. Add {block.block} to {target} at "
+                    f"{_profile_word(profiles)} {slug}. Add {block.block} to {target} at "
                     f"{rules.path_of(block.file)} or delete the block."
                 ),
-                profiles=[block.profile],
+                profiles=profiles,
                 layers=[DECLARED],
                 where=[block.source],
             )
         )
     return out
+
+
+def _profile_word(profiles: list[str]) -> str:
+    return "profile" if len(profiles) == 1 else "profiles"
 
 
 def _plugins(atlas: model.Atlas) -> list[model.Node]:
@@ -362,7 +374,6 @@ def unused(atlas: model.Atlas) -> list[model.Finding]:
     read, blind = profile_coverage(atlas)
     if not read:
         return out
-    covers = _profile_text(read)
     unread = (
         ""
         if not blind
@@ -376,6 +387,8 @@ def unused(atlas: model.Atlas) -> list[model.Finding]:
         parsed = ids.parse_plugin(plugin.id)
         if parsed.base_class not in loaded:
             continue
+        # Only the profiles that load this base class could have selected it.
+        covers = _profile_text(loaded[parsed.base_class])
         package = _exported(atlas, plugin.id)
         if not package or _instantiated(atlas, plugin.id):
             continue
@@ -399,13 +412,16 @@ def unused(atlas: model.Atlas) -> list[model.Finding]:
                     f"{selector} entry of {covers} names it, so nothing loads the "
                     f"library.{unread}"
                 ),
-                fix=f"Add {parsed.lookup} to {add_to}, or stop building and exporting it.",
+                fix=(
+                    f"Add {parsed.lookup} to {add_to} of the profile that should run it. A "
+                    "plugin a package offers as one choice among several needs no change."
+                ),
                 say=(
                     f"{package} exports the plugin {parsed.lookup} at {at} and no {selector} "
-                    f"list of {covers} selects it, so nothing loads it. Add it to "
-                    f"{add_to} or stop exporting it."
+                    f"list of {covers} selects it, so nothing loads it there. Add it to "
+                    f"{add_to} if a profile should run it."
                 ),
-                profiles=list(read),
+                profiles=list(loaded[parsed.base_class]),
                 layers=plugin.layers,
                 where=[source] if source else [],
             )
@@ -413,20 +429,27 @@ def unused(atlas: model.Atlas) -> list[model.Finding]:
     return out
 
 
-def _loaded_bases(atlas: model.Atlas, profiles: list[str]) -> set[str]:
-    """The base classes some node of these profiles loads from a selector list.
+def _loaded_bases(atlas: model.Atlas, profiles: list[str]) -> dict[str, list[str]]:
+    """The base classes some node of these profiles loads from a selector list, each with
+    the profiles that load it.
 
     A profile that runs no controller server has no `controller_plugins` list, and a
     controller nothing could load is not unused, it is out of scope: robot_localization
     launched next to an installed nav2 tree would otherwise call every nav2 plugin unused.
     """
     wanted = set(profiles)
-    out: set[str] = set()
+    out: dict[str, set[str]] = {}
     for param in atlas.by_kind(PARAM):
         base = SELECTOR_BASE_CLASS.get(ids.parse_param(param.id).name.split(".")[-1])
-        if base and wanted & set(param.profiles):
-            out.add(base)
-    return out
+        if not base:
+            continue
+        # A shared file names the list in profiles that never start its node.
+        owner = atlas.entities.get(ids.parse_param(param.id).owner)
+        running = {item for item in (owner.profiles if owner else ()) if item != "*"} or wanted
+        found = wanted & set(param.profiles) & running
+        if found:
+            out.setdefault(base, set()).update(found)
+    return {base: sorted(found) for base, found in out.items()}
 
 
 def _package_of(lookup: str) -> str:

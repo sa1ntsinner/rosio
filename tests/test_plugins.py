@@ -310,6 +310,31 @@ def test_an_unreadable_manifest_is_refused_and_the_package_survives(tmp_path: Pa
     assert edge in atlas.edges
 
 
+def test_a_missing_manifest_names_the_manifest_the_package_holds(tmp_path: Path) -> None:
+    """nav2_theta_star_planner/package.xml exports global_planner_plugin.xml, and the file
+    the package holds is theta_star_planner.xml."""
+    package = _package(
+        tmp_path,
+        "zz_planner",
+        {
+            "CMakeLists.txt": "project(zz_planner)\nadd_library(zz_lib src/x.cpp)\n"
+            "pluginlib_export_plugin_description_file(nav2_core global_planner_plugin.xml)\n",
+            "theta_star_planner.xml": '<library path="zz_lib"><class type="a::B" '
+            'base_class_type="nav2_core::GlobalPlanner"/></library>\n',
+            "src/x.cpp": "int helper() { return 0; }\n",
+        },
+    )
+    roots = (RootSpec("src", str(tmp_path / "src")),)
+    ws = Workspace.discover(roots)
+    builder = model.AtlasBuilder()
+    plugins_collect.PluginsCollector().collect(
+        CollectContext(ws=ws, cfg=Config(roots=roots, profiles=()), builder=builder)
+    )
+    missing = builder.build().entities[ws.file_id(str(package / "global_planner_plugin.xml"))]
+    assert missing.attrs["refused_because"] == "plugin_manifest_missing"
+    assert missing.attrs["manifests_held"] == [ws.file_id(str(package / "theta_star_planner.xml"))]
+
+
 def test_a_class_with_no_library_path_claims_no_build_state(tmp_path: Path) -> None:
     _package(
         tmp_path,
