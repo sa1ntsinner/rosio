@@ -1587,3 +1587,22 @@ def test_a_file_launch_code_opened_is_read_once_per_walk(tmp_path: Path) -> None
     for _node in range(3):
         assert models.texts() == {"<robot/>": {str(model_file)}}
     assert reads == [str(model_file)]
+
+
+def test_only_a_package_no_install_root_holds_is_read_from_source(tmp_path: Path) -> None:
+    from rosio.config import RootSpec
+    from rosio.workspace import Workspace
+
+    manifest = "<package format='3'><name>{}</name><version>0.0.1</version></package>"
+    for directory, name in (
+        ("src/built", "built"),
+        ("src/unbuilt", "unbuilt"),
+        ("install/share/built", "built"),
+    ):
+        (tmp_path / directory).mkdir(parents=True)
+        (tmp_path / directory / "package.xml").write_text(manifest.format(name))
+    workspace = Workspace.discover(
+        [RootSpec("src", str(tmp_path / "src")), RootSpec("install", str(tmp_path / "install"))]
+    )
+    assert launch_exec.source_shares(workspace) == {"unbuilt": str(tmp_path / "src/unbuilt")}
+    assert launch_exec.source_shares(None) == {}

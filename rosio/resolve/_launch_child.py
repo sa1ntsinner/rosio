@@ -133,6 +133,49 @@ class _Probes:
         return identity.relative_path(path, self.roots)
 
 
+class _SourceShares:
+    """Answers a share lookup the ament index cannot with the package source directory.
+
+    Only a package that a source root holds and no install root does is answered here, and
+    only after the index refused it, so an installed copy wins as it does at run time.
+    """
+
+    def __init__(self, shares: dict[str, str]) -> None:
+        self.shares = dict(shares)
+        self.used: set[str] = set()
+        self._saved: list[tuple[Any, str, Any]] = []
+
+    def install(self) -> None:
+        if not self.shares:
+            return
+        import ament_index_python
+        from ament_index_python import packages
+        from launch_ros.substitutions import find_package
+
+        original = packages.get_package_share_directory
+
+        def lookup(package_name, *rest, **kwargs):
+            try:
+                return original(package_name, *rest, **kwargs)
+            except packages.PackageNotFoundError:
+                if package_name not in self.shares:
+                    raise
+                self.used.add(package_name)
+                return self.shares[package_name]
+
+        for owner in (packages, ament_index_python, find_package):
+            self._saved.append((owner, "get_package_share_directory", original))
+            owner.get_package_share_directory = lookup
+
+    def restore(self) -> None:
+        for owner, name, original in reversed(self._saved):
+            setattr(owner, name, original)
+        self._saved.clear()
+
+    def notes(self) -> list[str]:
+        return [launch_exec.NOTE_SOURCE_SHARE.format(name) for name in sorted(self.used)]
+
+
 def _capped(value: Any) -> str:
     """The value an environment probe read, short enough to sit in a key."""
     if value is None:
@@ -531,6 +574,7 @@ class Walker:
         self.env = [(str(k), str(v)) for k, v in request.get("env", ())]
         self.roots = [str(path) for path in request.get("roots", ())]
         self.probes = _Probes(self.roots, sandbox=bool(request.get("sandbox")))
+        self.shares = _SourceShares(request.get("source_shares") or {})
         self.guard = _NoProcesses(sandbox=bool(request.get("sandbox")))
         self.sites = _ConstructionSites()
         self.commands = _Commands()
@@ -572,6 +616,7 @@ class Walker:
         )
         module = None
         self.probes.install()
+        self.shares.install()
         self.guard.install()
         self.sites.install()
         self.commands.install()
@@ -588,7 +633,9 @@ class Walker:
             self.commands.restore()
             self.sites.restore()
             self.guard.restore()
+            self.shares.restore()
             self.probes.restore()
+            self.result.notes.extend(self.shares.notes())
             self.result.predicates = dict(sorted(self.probes.seen.items()))
             if self.guard.blocked:
                 blocked = ", ".join(sorted(set(self.guard.blocked)))

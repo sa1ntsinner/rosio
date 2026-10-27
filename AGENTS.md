@@ -615,6 +615,12 @@ the expression and what was wanted, so two blind spots can neither merge nor mul
 9. Every evidence row carries its `root` (`src`, `install`, `runtime`, `bag`). The install
    tree here holds copies, not symlinks, and can be older than src, so a mixed root on one
    entity raises one `build.stale` finding instead of dozens of phantom content drifts.
+   A package a source root holds and no install root does is unbuilt, and the launch walk
+   answers its share lookup, after the ament index refused it, with the package source
+   directory, which is what `install(DIRECTORY ...)` and `data_files` copy in the common
+   case. Only the directory is assumed: a file the source does not hold at the same package
+   relative path stays the refusal it was. Every file read that way cites `src`, and the
+   launch file fact notes which share directories came from source.
 10. A root hash covers every name under the root and the content of every file worth
     reading, and the absolute prefix this machine holds the workspace at is replaced by the
     root label before those bytes are hashed. It is the one bounded exception to point 8,

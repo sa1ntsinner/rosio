@@ -1,0 +1,8 @@
+roots:
+  - kind: src
+    path: src
+
+profiles:
+  - slug: demo
+    entrypoints:
+      - launch: demo_bringup bringup.launch.py

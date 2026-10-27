@@ -332,6 +332,25 @@ class Children:
                 process.kill()
 
 
+NOTE_SOURCE_SHARE = "the share directory of {} was read from its source tree"
+
+
+def source_shares(workspace: Workspace | None) -> dict[str, str]:
+    """The packages a source root holds and no install root does, by name.
+
+    The child answers a share lookup the ament index cannot with the package source
+    directory, which is the layout `install(DIRECTORY ...)` and `data_files` copy in the
+    common case. Only the directory is assumed: a file the source does not hold at the same
+    package relative path stays missing, so a flattening or generating install rule reads
+    as the refusal it would have been.
+    """
+    return {
+        name: package.src_path
+        for name, package in getattr(workspace, "packages", {}).items()
+        if package.src_path and not package.share_path
+    }
+
+
 def walk(
     entry_path: str,
     *,
@@ -359,6 +378,7 @@ def walk(
         "args": [list(pair) for pair in args],
         "env": [list(pair) for pair in env],
         "roots": [root.path for root in getattr(workspace, "roots", ())],
+        "source_shares": source_shares(workspace),
         "timeout": float(timeout),
         "sandbox": bool(sandbox),
     }

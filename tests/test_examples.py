@@ -134,3 +134,42 @@ def test_a_parameters_file_the_build_does_not_install_is_reported_at_the_launch_
     assert [f.rule for f in atlas.findings if f.rule == "extract.input_refused"] == [
         "extract.input_refused"
     ]
+
+
+@pytest.mark.ros
+@pytest.mark.slow
+def test_an_unbuilt_workspace_reads_its_own_packages_from_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "src_only_ws"
+    shutil.copytree(FIXTURES / "src_only_ws", workspace)
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+
+    atlas = _extract(workspace, tmp_path / "out")
+    nodes = {
+        node.id
+        for node in atlas.by_kind("node")
+        if any(fact.profile == "profile:demo" for fact in node.facts)
+    }
+    assert nodes == {"node:/planner", "node:/controller", "node:/recovery"}
+    assert not [f for f in atlas.findings if f.rule in ("launch.raised", "launch.unloadable")]
+    for name in ("planner|tolerance", "controller|frequency"):
+        parameter = atlas.entities[f"param:/{name}"]
+        assert parameter.state == "effective"
+        assert [(c.source.file, c.source.root) for c in parameter.candidates] == [
+            ("file:demo_nav|params/nav.yaml", "src")
+        ]
+    notes = {
+        note
+        for entity in atlas.by_kind("launchfile")
+        for fact in entity.facts
+        for note in fact.values.get("notes", ())
+    }
+    assert "the share directory of demo_nav was read from its source tree" in notes
+
+    # A path the source does not hold is the refusal it always was, never a guess.
+    refused = [f for f in atlas.findings if f.rule == "extract.input_refused"]
+    assert [f.subject_key for f in refused] == ["file:demo_nav|params/recovery.yaml"]
+    assert not [f for f in atlas.findings if f.rule == "launch.file_not_installed"]
+    assert not list((workspace / "src").rglob("__pycache__")), "extract wrote into the sources"
+    assert str(workspace) not in atlas.canonical_bytes().decode("utf-8")
