@@ -536,6 +536,65 @@ def test_param_restated_identical_is_one_finding_for_one_line_in_every_profile()
     assert "profiles " in found[0].say
 
 
+def _restated_by_profile(sets: dict[str, dict[str, Any]]) -> model.Atlas:
+    """One wildcard line restating, per profile, a value for each node that profile starts."""
+    builder = _builder()
+    owners = sorted({owner for chosen in sets.values() for owner in chosen})
+    for owner in owners:
+        node = ids.build_node(owner)
+        builder.node(node, name_source=model.NameSource.LITERAL.value)
+        rows = []
+        for profile, chosen in sets.items():
+            if owner not in chosen:
+                continue
+            rows += [
+                _candidate(
+                    chosen[owner],
+                    model.Mechanism.YAML_BASE.value,
+                    _source(OVERLAY, "/**.ros__parameters.use_sim_time"),
+                    rank=0,
+                    wins=True,
+                    profile=profile,
+                ),
+                _candidate(
+                    chosen[owner],
+                    model.Mechanism.YAML_BASE.value,
+                    _source(BASE, "/**.ros__parameters.use_sim_time", 3),
+                    rank=1,
+                    shadow_kind=model.ShadowKind.RESTATED_IDENTICAL.value,
+                    profile=profile,
+                ),
+            ]
+        profiles = sorted({row.profile for row in rows})
+        param_id = _param(builder, "use_sim_time", rows, owner=node, profile=profiles[0])
+        for profile in profiles[1:]:
+            builder.fact(
+                param_id,
+                DECLARED,
+                profile=profile,
+                values={"name": "use_sim_time", "state": model.ParamState.EFFECTIVE.value},
+                evidence=[rows[0].source],
+            )
+    return builder.recompute()
+
+
+@pytest.mark.parametrize(
+    "sets",
+    [
+        {PROFILE: {"/a": True, "/b": True}, OTHER_PROFILE: {"/a": True, "/c": True}},
+        {PROFILE: {"/a": True}, OTHER_PROFILE: {"/a": False}},
+    ],
+)
+def test_param_restated_identical_is_one_finding_when_profiles_restate_different_content(sets):
+    """The line was merged per restated content and named by the line alone, so two profiles
+    starting different node sets, or reading true in one and false in the other, wrote two
+    findings under one id and the rule landed in counters.drift.failed."""
+    found = _run(_restated_by_profile(sets), "param.restated_identical")
+    assert len(found) == 1
+    assert found[0].profiles == sorted([PROFILE, OTHER_PROFILE])
+    assert "differs by profile" in found[0].detail
+
+
 def test_param_restated_identical_is_silent_when_the_value_differs():
     builder = _builder()
     _param(

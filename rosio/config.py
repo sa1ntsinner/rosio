@@ -349,12 +349,22 @@ def default_config(workspace: Any, packages: Sequence[str] = ()) -> Config:
     )
 
 
-def _default_ignore(roots: Sequence[RootSpec]) -> tuple[str, ...]:
+def _default_ignore(
+    roots: Sequence[RootSpec], profiles: Sequence[ProfileSpec] = ()
+) -> tuple[str, ...]:
     """`INSTALL_PREFIX_IGNORE` for an installed prefix read alone, `TEST_IGNORE` otherwise. A
     source root beside a prefix could hold a directory of the same name that is worth
-    reading."""
+    reading. A test directory a profile names a launch file through is read, because that
+    profile starts it."""
     if any(spec.kind != INSTALL for spec in roots):
-        return TEST_IGNORE
+        named = {
+            part
+            for profile in profiles
+            for entry in profile.entrypoints
+            if entry.verb == VERBS[0]
+            for part in Path(entry.target).parts[:-1]
+        }
+        return tuple(pattern for pattern in TEST_IGNORE if pattern not in named)
     if any((Path(spec.path) / AMENT_INDEX).is_dir() for spec in roots):
         return INSTALL_PREFIX_IGNORE
     return TEST_IGNORE
@@ -407,10 +417,12 @@ def _from_payload(payload: dict[str, Any], target: Path, workspace: Any) -> Conf
                 f"{target}: {spec.kind} root does not exist: {spec.path}. "
                 f"{ways}, or delete that root from {target}"
             )
-    ignore = (
-        _strings(payload.get("ignore"), "ignore") if "ignore" in payload else _default_ignore(roots)
-    )
     profiles = _profiles(payload.get("profiles"), base)
+    ignore = (
+        _strings(payload.get("ignore"), "ignore")
+        if "ignore" in payload
+        else _default_ignore(roots, profiles)
+    )
     # An empty list is a decision: this workspace starts nothing anybody named.
     if payload.get("profiles") is None:
         ws = _as_workspace(workspace, roots=roots, ignore=ignore)

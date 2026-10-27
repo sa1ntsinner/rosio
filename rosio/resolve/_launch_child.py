@@ -232,13 +232,15 @@ class _SourceModules:
     def __init__(self, packages: dict[str, str], sites: Sequence[str] = ()) -> None:
         self.packages = {str(k): str(v) for k, v in packages.items()}
         self.sites = [str(site) for site in sites]
+        self._added: list[str] = []
         self._finder: Any = None
 
     def install(self) -> None:
         import importlib.abc
         import importlib.util
 
-        sys.path[:0] = [site for site in self.sites if site not in sys.path]
+        self._added = [site for site in self.sites if site not in sys.path]
+        sys.path[:0] = self._added
         if not self.packages:
             return
         packages = self.packages
@@ -260,9 +262,10 @@ class _SourceModules:
     def restore(self) -> None:
         if self._finder in sys.meta_path:
             sys.meta_path.remove(self._finder)
-        for site in self.sites:
+        for site in self._added:
             with contextlib.suppress(ValueError):
                 sys.path.remove(site)
+        self._added = []
 
 
 def _capped(value: Any) -> str:

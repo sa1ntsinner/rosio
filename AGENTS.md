@@ -943,8 +943,8 @@ What was added, in the order it arrived:
   hold whose share lookup the ament index answered from another tree (the release under
   `/opt/ros` for a package only src holds, or for one whose install tree is not sourced) is
   still read there, because that is what `ros2 launch` runs, and the package names the tree
-  in `share_read_from`. A parameters file read that way is cited at the same package
-  relative path in the workspace, at that file's own line. `missing` is the file id of a
+  in `share_read_from` (gone in `1.25`, see below). A parameters file read that way is cited
+  at the same package relative path in the workspace, at that file's own line. `missing` is the file id of a
   workspace file a walk step did not find.
 
 * in `1.22`, the package attribute `share_build`, `copied` or `symlinked`, on a package whose
@@ -978,6 +978,12 @@ What was added, in the order it arrived:
   package holds beside one an export names and it does not. `share_read_from` named the tree
   the walk read, which is no longer another tree, so the key went rather than change its
   meaning; no release had shipped, so no reader of it existed.
+
+One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
+`1.21`, named the tree the walk read a package from, and since the walk reads the workspace
+copy of a package the roots hold that is no longer another tree. `launch_runs_from` names the
+tree `ros2 launch` runs the package from instead, which is a different meaning, so the key
+went rather than change what it says. No release had shipped, so no reader of it existed.
 
 One observed key was renamed in `1.17` without a major bump. The process table wrote the
 whole command line of a node under `argv`, the key under which the declared layer states only
@@ -1182,21 +1188,6 @@ there: a load into an existing container beside a new container, under a conditi
 false, minted a second node that published what the first did. No id form moved, so no
 stored id or waiver stopped matching; the endpoints, parameters and rates of such stacks did.
 
-Inside `1.24` the C++ reader closed four gaps with no new key. A member a node class
-initializes with itself in a constructor's initializer list (`fitter_(this)`) is a class it
-hands itself to, typed from the field its header declares. A known wrapper member a header
-declares and a source initializes (`diagnostics_(this)`) is a construction, so its endpoints
-reach the node, and a C++ name that nests a wrapper's symbol in a namespace of its own
-(`vendor::wrapper::diagnostic_updater::Updater`) is that wrapper. The wrapper table states the
-parameters a library declares, which count for `param.set_undeclared` and are no atlas key. An
-`.ipp` file is read as a C++ source of its package wherever a header is, and its content enters
-the root hash, which moved the run ids of a tree that holds one. An all caps identifier between
-`class` or `struct` and the class name (`class FOO_PUBLIC Controller`) is an export macro and
-no part of the name, and a function name a formatter wraps after `::` is one name, which moved
-the `sym` ids of such functions. An unqualified class a node hands itself to is looked up in
-the enclosing namespaces first, so a name several packages define no longer reaches all of
-them. No release had shipped, so no stored id or waiver existed.
-
 Inside `1.25` several ids and texts moved besides the new keys. A launch file of a package
 the roots hold is read from the roots, its includes, parameters files and python modules with
 it, so the nodes, parameters, values and blind spots of a workspace that holds a package a
@@ -1217,6 +1208,38 @@ the workspace copy when there is one, and a ModuleNotFoundError message says whe
 installs a package of that name without the module, which moved the discriminators of those
 `launch.raised` findings. A file an unbuilt package's install rule puts in place and an include
 misses is `file_after_build`, so `build.unbuilt` takes it from `launch.raised`. No release had
+shipped, so no stored id or waiver existed.
+
+Inside `1.25` the C++ reader closed eight gaps with no new key. A member a node class
+initializes with itself in a constructor's initializer list (`fitter_(this)`) is a class it
+hands itself to, typed from the field its header declares. A known wrapper member a header
+declares and a source initializes (`diagnostics_(this)`) is a construction, so its endpoints
+reach the node, and a C++ name that nests a wrapper's symbol in a namespace of its own
+(`vendor::wrapper::diagnostic_updater::Updater`) is that wrapper. The wrapper table states the
+parameters a library declares, which count for `param.set_undeclared` and are no atlas key. An
+`.ipp` file is read as a C++ source of its package wherever a header is, and its content enters
+the root hash, which moved the run ids of a tree that holds one. An all caps identifier between
+`class` or `struct` and the class name (`class FOO_PUBLIC Controller`) is an export macro and
+no part of the name when a base clause, `final` or a brace ending its line follows the name
+(`struct POINT origin{0, 0};` declares a variable), and a function name a formatter wraps
+after `::` is one name, which moved the `sym` ids of such functions. An unqualified class a node hands itself to is looked up in
+the enclosing namespaces first, so a name several packages define no longer reaches all of
+them. No release had shipped, so no stored id or waiver existed.
+
+Later inside `1.25` several ids and texts moved with no new key. `ids.digest` never returns
+a value made of digits alone: one short digest in about forty was, a finding or a launch step
+whose discriminator is such a digest was refused as an ordinal, and the rule that wrote it
+landed in `counters.drift.failed`. The first digit of such a value is now a letter, which
+moved every id, edge key and discriminator that held one, and only those.
+`param.restated_identical` is one finding per line whatever each profile restates there,
+where two profiles restating different parameters or values on one line wrote two findings
+under one id; its detail names what each profile restates when they differ, which moved
+those fingerprints. A test directory a profile names a launch file through is left out of the
+default `ignore`, which moved the root hashes and run ids of such a workspace. An ImportError
+read from the workspace copy of a module names that copy as the one lacking the name instead
+of naming it twice, which moved the discriminators of those `launch.raised` findings. The
+site directories of the install roots go on the python path of the walk in the order of the
+roots, and a CMake target lists its `.ipp` and `.hxx` files as sources. No release had
 shipped, so no stored id or waiver existed.
 
 A reader pinned to `1.0` still loads a `1.25` file: `Atlas.from_json` compares the major

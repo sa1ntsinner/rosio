@@ -241,6 +241,31 @@ def test_relabel_import_names_the_release_read_and_the_copy_the_workspace_holds(
     assert launch.cannot_import(plain)[2:] == ("@outside/x.py", "")
 
 
+def test_an_import_from_the_workspace_copy_says_that_copy_lacks_the_name(tmp_path):
+    """The walk read the workspace copy, and the advice said the workspace holds the module
+    and the walk imported another copy, naming one path twice."""
+    from rosio.config import RootSpec
+    from rosio.workspace import Workspace
+
+    package = tmp_path / "src" / "nav2_common"
+    (package / "nav2_common").mkdir(parents=True)
+    (package / "package.xml").write_text(
+        "<package format='3'><name>nav2_common</name><version>1</version></package>"
+    )
+    (package / "nav2_common" / "__init__.py").write_text("")
+    ws = Workspace.discover([RootSpec("src", str(tmp_path / "src"))])
+    read = package / "nav2_common" / "__init__.py"
+    message = launch.relabel_import(
+        ws, f"cannot import name 'LaunchConfigAsBool' from 'nav2_common' ({read.as_posix()})"
+    )
+    _name, _module, tree, held = launch.cannot_import(message)
+    assert held == ""
+    assert tree == f"{launch.WORKSPACE_READ}nav2_common/nav2_common/__init__.py"
+    (found,) = build_rules.launch_raised(_raised_atlas(_import_row("ImportError", message)))
+    assert "imported the copy" not in found.fix
+    assert "is missing from the workspace copy at nav2_common/nav2_common" in found.fix
+
+
 def test_relabel_module_says_when_the_release_installs_the_package_without_the_module(tmp_path):
     prefix = tmp_path / "opt" / "ros" / "jazzy"
     (prefix / "share" / "nav2_bringup").mkdir(parents=True)

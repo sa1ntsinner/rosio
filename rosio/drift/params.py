@@ -342,15 +342,16 @@ def shadowed(atlas: model.Atlas) -> list[model.Finding]:
 def restated_identical(atlas: model.Atlas) -> list[model.Finding]:
     """A line that repeats, byte for byte, a value another file already sets."""
     groups = _shadow_groups(atlas, model.ShadowKind.RESTATED_IDENTICAL.value)
-    # One deletable line restating one value is one finding, whatever profiles read it.
+    # One deletable line is one finding, whatever profiles read it and whatever each restates.
     merged: dict[tuple[Any, ...], list[tuple[tuple[str, ...], list[_Row]]]] = defaultdict(list)
     for key, group in groups.items():
-        sig = tuple((row.param.id, repr(row.loser.value)) for row in group)
-        merged[(key[1], key[2], key[3], sig)].append((key, group))
+        merged[(key[1], key[2], key[3])].append((key, group))
     out: list[model.Finding] = []
-    for sig in sorted(merged):
-        key, group = merged[sig][0]
-        profiles = sorted({item[0] for item, _rows in merged[sig]})
+    for line in sorted(merged):
+        key = merged[line][0][0]
+        rows = {(row.param.id, repr(row.loser.value)): row for _k, g in merged[line] for row in g}
+        group = [rows[item] for item in sorted(rows)]
+        profiles = sorted({item[0] for item, _rows in merged[line]})
         head = group[0]
         slug = ("profile " if len(profiles) == 1 else "profiles ") + ", ".join(
             rules.slug_of(item) for item in profiles
@@ -384,6 +385,18 @@ def restated_identical(atlas: model.Atlas) -> list[model.Finding]:
                 f"sets to the same values in {slug}, including {head.name} = "
                 f"{rules.value_text(head.loser.value)}. Delete them at {lose_at}."
             )
+        restated = {
+            item[0]: ", ".join(
+                f"{row.name} = {rules.value_text(row.loser.value)} for {rules.node_text(row.owner)}"
+                for row in found
+            )
+            for item, found in merged[line]
+        }
+        if len(set(restated.values())) > 1:
+            listed = "; ".join(
+                f"{rules.slug_of(profile)}, {text}" for profile, text in sorted(restated.items())
+            )
+            detail += f" What the line restates differs by profile: {listed}."
         out.append(
             model.Finding(
                 rule="param.restated_identical",

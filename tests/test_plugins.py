@@ -77,6 +77,17 @@ def test_commands_survive_wrapping_comments_and_variables() -> None:
     assert target.line_hint == 5
 
 
+def test_an_ipp_file_is_a_source_of_its_target() -> None:
+    scan = plugins_collect.scan_cmake(
+        "add_library(demo src/a.cpp include/demo/a_impl.ipp include/demo/b.hxx)\n", pkg="demo"
+    )
+    assert scan.targets["demo"].sources == (
+        "src/a.cpp",
+        "include/demo/a_impl.ipp",
+        "include/demo/b.hxx",
+    )
+
+
 def test_a_component_executable_is_not_an_add_executable_target() -> None:
     text = (
         "add_library(comp SHARED src/comp.cpp)\n"

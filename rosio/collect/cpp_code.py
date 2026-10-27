@@ -2851,10 +2851,11 @@ def _declares_with(body: Any, src: bytes, parameter: str) -> bool:
 
 _EXPORT_MACRO = re.compile(
     rb"(\b(?:class|struct)[ \t]+)([A-Z][A-Z0-9_]*)"
-    rb"(?=[ \t]+(?!final\b)[A-Za-z_]\w*\s*(?::(?!:)|\{|final\b))"
+    rb"(?=[ \t]+(?!final\b)[A-Za-z_]\w*\s*(?::(?!:)|\{[ \t]*(?:\r?\n|\Z)|final\b))"
 )
 """`class FOO_PUBLIC Controller : public rclcpp::Node`: the grammar takes the export macro for
-the class name, so it is blanked to spaces of its own length, which keeps every offset."""
+the class name, so it is blanked to spaces of its own length, which keeps every offset. A
+brace that does not end its line opens an initializer, `struct POINT origin{0, 0};`."""
 
 
 def parse_text(

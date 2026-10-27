@@ -373,6 +373,16 @@ LAUNCH_CORE = frozenset(
 def _import_fix(label: str, name: str, module: str, tree: str, held: str) -> tuple[str, str]:
     """An import of a name the module that was read does not define."""
     top = module.split(".")[0]
+    if tree.startswith(launch_declared.WORKSPACE_READ):
+        fix = (
+            f"{name} is missing from {tree}, which is the {top} the walk imported: add it "
+            f"there, or import it from the module that defines it"
+        )
+        say = (
+            f"{label} imports {name} from {module}, which {tree} does not define, so the "
+            f"nodes it starts are missing from this atlas: {fix}."
+        )
+        return fix, say
     if held:
         fix = (
             f"the workspace holds {top} at {held} and the walk imported the copy in {tree}: "

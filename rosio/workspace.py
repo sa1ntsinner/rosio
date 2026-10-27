@@ -724,18 +724,25 @@ class Workspace:
 
     def python_sites(self) -> list[str]:
         """The site directories under the install prefixes the roots hold, which a sourced
-        install tree puts on the python path."""
+        install tree puts on the python path, in the order of the roots that hold them."""
         if self._sites is None:
             prefixes = {
                 Path(package.share_path).parent.parent
                 for package in self.packages.values()
                 if package.share_path
             }
-            self._sites = sorted(
+            found = {
                 str(site)
                 for prefix in prefixes
                 for site in prefix.glob("lib/python3*/site-packages")
-            )
+            }
+            order = [str(spec.path) for spec in self.roots]
+
+            def rank(site: str) -> tuple[int, str]:
+                held = [index for index, root in enumerate(order) if _under(site, root)]
+                return (held[0] if held else len(order), site)
+
+            self._sites = sorted(found, key=rank)
         return list(self._sites)
 
     def share(self, pkg: str) -> str | None:

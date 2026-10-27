@@ -185,6 +185,28 @@ def test_the_fallback_leaves_out_ros1_and_test_launch_files(bench: Path) -> None
     assert load_config(str(stated), workspace=str(bench)).ignore == ()
 
 
+def test_the_default_ignore_keeps_a_test_launch_file_a_profile_names(tmp_path: Path) -> None:
+    """`ros2 launch bot test/launch/hil.launch.py` was skipped by the default ignore and
+    reported as launch.unloadable with a launch_file_missing blind spot."""
+    from rosio.collect.launch_declared import _launch_index
+    from rosio.config import _as_workspace
+
+    _write(tmp_path / "src" / "bot" / "package.xml", MANIFEST.format(name="bot"))
+    _write(
+        tmp_path / "src" / "bot" / "test" / "launch" / "hil.launch.py",
+        "def generate_launch_description():\n    pass\n",
+    )
+    _write(
+        tmp_path / CONFIG_NAME,
+        "roots:\n  - kind: src\n    path: src\nprofiles:\n  - slug: hil\n"
+        "    entrypoints: ['ros2 launch bot test/launch/hil.launch.py']\n",
+    )
+    cfg = load_config(None, workspace=str(tmp_path))
+    assert cfg.ignore == ("tests",)
+    ws = _as_workspace(str(tmp_path), roots=cfg.roots, ignore=cfg.ignore)
+    assert ("bot", "test/launch/hil.launch.py") in _launch_index(ws)
+
+
 def test_a_bare_string_root_is_a_source_root(bench: Path) -> None:
     _write(bench / CONFIG_NAME, "roots:\n  - src\n")
     cfg = load_config(None, workspace=str(bench))

@@ -36,7 +36,7 @@ NAME = "plugins"
 
 _PROBLEM_KEYS = ("package", "phase", "exc_type", "message")
 
-SOURCE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".hpp", ".hh", ".h")
+SOURCE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".hpp", ".hh", ".hxx", ".h", ".ipp")
 
 TARGET_KEYWORDS = frozenset(
     {

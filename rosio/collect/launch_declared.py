@@ -1595,6 +1595,7 @@ def cannot_import(message: str) -> tuple[str, str, str, str] | None:
 
 
 WORKSPACE_COPY = ", the workspace holds it at "
+WORKSPACE_READ = "the workspace copy at "
 
 
 def relabel_import(ws: Workspace, message: str, ros_setup: Sequence[str] = ()) -> str:
@@ -1624,7 +1625,11 @@ def relabel_import(ws: Workspace, message: str, ros_setup: Sequence[str] = ()) -
     if held is None and top in ws.packages and ws.packages[top].src_path:
         candidate = Path(str(ws.packages[top].src_path), top)
         held = str(candidate) if (candidate / "__init__.py").is_file() else None
-    where = f"{WORKSPACE_COPY}{ws.stated_path(held, ros_setup)}" if held else ""
+    stated = ws.stated_path(held, ros_setup) if held else ""
+    if stated and (tree == stated or tree.startswith(stated + "/")):
+        # The walk read the workspace copy, so that copy is the one without the name.
+        tree, stated = f"{WORKSPACE_READ}{tree}", ""
+    where = f"{WORKSPACE_COPY}{stated}" if stated else ""
     return f"{message[: found.start(3)]}read from {tree}{where}{message[found.end(3) :]}"
 
 

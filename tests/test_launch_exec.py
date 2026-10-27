@@ -1942,3 +1942,38 @@ def test_a_ros2_xml_launch_file_with_a_launch_prefix_is_not_ros1(tmp_path: Path)
     )
     assert not launch_exec.is_ros1_launch(str(ros2))
     assert launch_exec.is_ros1_launch(str(ros1))
+
+
+def test_source_modules_restore_only_the_sites_they_added(monkeypatch, tmp_path: Path) -> None:
+    """A sourced install's site already on the path was removed by restore, and the sites
+    went first in sorted path order rather than in the order the roots state."""
+    import sys
+
+    from rosio.resolve import _launch_child
+
+    present, overlay, underlay = (str(tmp_path / name) for name in ("present", "z", "a"))
+    monkeypatch.setattr(sys, "path", [present, "/elsewhere"])
+    modules = _launch_child._SourceModules({}, [overlay, underlay, present])
+    modules.install()
+    assert sys.path == [overlay, underlay, present, "/elsewhere"]
+    modules.restore()
+    assert sys.path == [present, "/elsewhere"]
+
+
+def test_python_sites_follow_the_order_of_the_roots(tmp_path: Path) -> None:
+    from rosio.config import RootSpec
+    from rosio.workspace import Workspace
+
+    roots = []
+    for tree in ("z_overlay", "a_underlay"):
+        prefix = tmp_path / tree
+        (prefix / "share" / "ament_index" / "resource_index" / "packages").mkdir(parents=True)
+        (prefix / "share" / "ament_index" / "resource_index" / "packages" / tree).write_text("")
+        (prefix / "share" / tree).mkdir()
+        (prefix / "share" / tree / "package.xml").write_text(
+            f"<package format='3'><name>{tree}</name></package>"
+        )
+        (prefix / "lib" / "python3.12" / "site-packages").mkdir(parents=True)
+        roots.append(RootSpec("install", str(prefix)))
+    sites = Workspace.discover(roots).python_sites()
+    assert [Path(site).parts[-4] for site in sites] == ["z_overlay", "a_underlay"]

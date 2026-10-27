@@ -339,6 +339,18 @@ def test_digests_are_stable_and_field_order_free():
     assert len(ids.edge_key(site="launch", profile="p")) == ids.DIGEST_LENGTH
 
 
+def test_a_digest_is_never_all_digits_so_a_finding_built_on_it_is_never_an_ordinal():
+    """sha256 of 'site71' starts 30994766, and param.restated_identical, the
+    node.identity_regressed digest and the join's name collision digest each made such a
+    value the whole discriminator, which build_finding refuses as an ordinal."""
+    for parts in (("site71",), ("collision", "/n22")):
+        value = ids.digest(*parts)
+        assert not value.isdigit() and len(value) == ids.DIGEST_LENGTH
+        assert ids.build_finding("param.restated_identical", "file:p|x.yaml", value)
+    assert ids.build_launchent("p", "a.launch.py", (("Node", ids.digest("site71")),))
+    assert all(not ids.digest(f"n{index}").isdigit() for index in range(2000))
+
+
 def test_unresolved_ids_cannot_merge_two_sites():
     owner = ids.build_sym("nx_bringup", "src/motion_gate_bt_node.cpp", "MotionGate")
     first = ids.build_unresolved(owner, 'getInput("confirmation_topic")', "topic_name")

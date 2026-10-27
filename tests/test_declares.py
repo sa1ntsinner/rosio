@@ -358,6 +358,14 @@ def test_an_export_macro_in_a_class_head_is_not_the_class_name(head):
     assert {item.qualname for item in unit.classes} == {"a::Controller"}
 
 
+def test_a_brace_initialized_variable_of_an_all_caps_type_is_not_an_export_macro():
+    assert cpp._EXPORT_MACRO.sub(b"", b"struct POINT origin{0, 0};") == (
+        b"struct POINT origin{0, 0};"
+    )
+    head = b"class FOO_PUBLIC Controller\n{\n};\n"
+    assert cpp._EXPORT_MACRO.sub(lambda m: m.group(1), head) == b"class  Controller\n{\n};\n"
+
+
 def test_an_all_caps_class_name_is_kept():
     unit = cpp.parse_text("class ABC final : public rclcpp::Node {}; struct XYZ : Base {};")
     assert unit.class_names == ["ABC", "XYZ"]

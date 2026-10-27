@@ -140,10 +140,15 @@ def digest(*parts: object, length: int = DIGEST_LENGTH) -> str:
     parts. A command line value can hold a `\\x00` through an escape and reach here, so the
     boundary has to survive a member that spells it. Length framing is unambiguous for every
     input, which no reserved character is.
+
+    A digest is never all digits. Builders refuse a bare integer as a discriminator, and
+    one short hex digest in about forty is all digits, so the rule that held that
+    discriminator stopped and wrote nothing. The first digit takes a letter instead.
     """
     text = ["" if part is None else str(part) for part in parts]
     payload = "".join(f"{len(item)}\x00{item}" for item in text)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:length]
+    out = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:length]
+    return "abcdef"[int(out[0]) % 6] + out[1:] if out.isdigit() else out
 
 
 def digest_fields(fields: dict[str, object], length: int = DIGEST_LENGTH) -> str:
