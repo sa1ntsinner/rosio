@@ -44,8 +44,14 @@ the coded layer honest about what a C++ source does not state, so the budget sit
 below it and a real drop fails the build before any other finding does."""
 
 BUDGET_KEY = "resolution_budget"
-"""Key under `atlas.x['drift']` a configuration may set, as a number for the overall rate
-or as a mapping of want to number. The argument wins over the atlas when both are given."""
+"""Key under `atlas.x['drift']`, written there by extract from the `resolution_budget` key of
+rosio.yaml, as a number for the overall rate or as a mapping of want to number. The argument
+wins over the atlas when both are given."""
+
+BUDGET_FIX = (
+    "run rosio unresolved and resolve the sites it names, or set resolution_budget in "
+    "rosio.yaml to the rate this workspace can hold and record why the rest cannot be followed"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -203,16 +209,27 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
         )
         say = _raised_say(first.label, first.exc_type, first.phase, first.message, first.kept)
         slugs = ", ".join(ids.parse_profile(item) for item in _profile_ids(rows))
+        package = launch_declared.missing_package(first.message)
         if first.env and not first.kept and slugs:
+            names = _and(first.env.split())
+            variables = "variables" if " " in first.env else "variable"
             fix = (
-                f"set {first.env} under env of profile {slugs} in rosio.yaml, to the value "
+                f"set {names} under env of profile {slugs} in rosio.yaml, to the value "
                 "the robot is started with"
             )
             say = (
-                f"{first.label} reads the environment variable {first.env}, which profile "
+                f"{first.label} reads the environment {variables} {names}, which profile "
                 f"{slugs} does not set, so the nodes it starts are missing from this atlas: "
-                f"set {first.env} under env of that profile in rosio.yaml."
+                f"set {names} under env of that profile in rosio.yaml."
             )
+        elif package and not sandboxed:
+            fix = _package_fix(*package)
+            if not first.kept:
+                say = (
+                    f"{first.label} needs the package {package[0]}, which no root holds and "
+                    "no sourced setup file provides, so the nodes it starts are missing from "
+                    f"this atlas: {fix}."
+                )
         findings.append(
             Finding(
                 rule=RULE_RAISED,
@@ -231,6 +248,19 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
             )
         )
     return findings
+
+
+def _package_fix(package: str, distro: str) -> str:
+    """Install the package, by its apt name when the release is known, or read its tree."""
+    apt = f"ros-{distro or '$ROS_DISTRO'}-{package.replace('_', '-')}"
+    return (
+        f"install {package} (sudo apt install {apt} when it is a released package), "
+        "or add the tree that holds it as a root in rosio.yaml"
+    )
+
+
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def _raised_disc(phase: str, exc_type: str, message: str, kept: str = "") -> str:
@@ -573,21 +603,23 @@ def resolution_below_budget(
         count = len(owners.get(node.id, ()))
         if not count:
             continue
+        slug = ids.parse_profile(node.id)
         findings.append(
             Finding(
                 rule="resolution.below_budget",
                 severity=rules.severity_of("resolution.below_budget"),
                 subject=node.id,
-                title=f"the resolution rate {rate:.3f} is under the budget {overall:.3f}",
-                detail=_budget_detail(rate, overall, count, fallen, rates, resolved, unresolved),
-                fix=(
-                    "resolve the sites the unresolved list names, or state the budget this "
-                    "workspace can hold and record why the rest cannot be followed"
+                title=(
+                    f"profile {slug} holds {count} of the {len(atlas.unresolved)} unresolved "
+                    f"sites that keep the rate at {rate:.3f}, under the budget {overall:.3f}"
                 ),
+                detail=_budget_detail(rate, overall, count, fallen, rates, resolved, unresolved),
+                fix=BUDGET_FIX,
                 say=(
-                    f"the extraction resolved {rate:.3f} of what it read against a budget of "
-                    f"{overall:.3f}, and {count} of the unresolved sites belong to this "
-                    "profile, so the atlas is missing answers a rule needs."
+                    f"In profile {slug}, {count} names, values or frames stay unresolved, and "
+                    f"the run as a whole resolves {rate:.3f} against a budget of "
+                    f"{overall:.3f}; rosio unresolved lists each one with the line that asked "
+                    "for it."
                 ),
                 discriminator=_disc(f"{overall:.6f}", *fallen),
                 profiles=[node.id],
@@ -608,13 +640,11 @@ def resolution_below_budget(
             detail=_budget_detail(
                 rate, overall, len(atlas.unresolved), fallen, rates, resolved, unresolved
             ),
-            fix=(
-                "resolve the sites the unresolved list names, or state the budget this "
-                "workspace can hold and record why the rest cannot be followed"
-            ),
+            fix=BUDGET_FIX,
             say=(
                 f"the extraction resolved {rate:.3f} of what it read against a budget of "
-                f"{overall:.3f}, so the atlas is missing answers a rule needs."
+                f"{overall:.3f}, so the atlas is missing answers a rule needs; rosio "
+                "unresolved lists each one with the line that asked for it."
             ),
             discriminator=_disc(f"{overall:.6f}", *fallen),
             layers=sorted(atlas.counters.get("layers_present") or []),

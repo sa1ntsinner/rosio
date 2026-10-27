@@ -2712,3 +2712,70 @@ def test_one_node_that_fails_to_place_drops_none_of_its_siblings(
     assert [(row["path"], row["message"]) for row in rows] == [
         ("bot/launch/nav.launch.py", "no identity for planner_server")
     ]
+
+
+def test_one_walk_names_every_variable_the_file_reads_and_nothing_sets(
+    ws: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TurtleBot3 reads TURTLEBOT3_MODEL and LDS_MODEL, and the second used to surface only
+    after a second extract with the first one set."""
+    launch = tmp_path / "robot.launch.py"
+    launch.write_text(
+        "import os\n"
+        "MODEL = os.environ['ROBOT_MODEL']\n"
+        "LIDAR = os.environ['LIDAR_MODEL']\n"
+        "HOME = os.environ['HOME_SET_HERE']\n"
+        "ARM = os.environ['ARM_MODEL']\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("LIDAR_MODEL", raising=False)
+    monkeypatch.setenv("HOME_SET_HERE", "/home/robot")
+    monkeypatch.delenv("ARM_MODEL", raising=False)
+    failure = records.WalkException(
+        path=str(launch),
+        phase="describe",
+        exc_type="KeyError",
+        message="'ROBOT_MODEL'",
+        env="ROBOT_MODEL",
+    )
+    entry = WS / "src/lx_bringup/launch/plain_node.launch.py"
+    walk = records.LaunchWalk(entry_path=str(entry), profile="robot", exceptions=[failure])
+    builder = model.AtlasBuilder()
+    cfg = Config(
+        roots=tuple(RootSpec(kind=spec.kind, path=spec.path) for spec in ws.roots),
+        profiles=(
+            ProfileSpec(
+                slug="robot",
+                entrypoints=(
+                    Entrypoint(verb="launch", pkg="lx_bringup", target="plain_node.launch.py"),
+                ),
+                env=(("ARM_MODEL", "six_axis"),),
+            ),
+        ),
+    )
+    ctx = CollectContext(ws=ws, cfg=cfg, builder=builder)
+    ctx.declared.walks.append(walk)
+    get(launch_declared.NAME).collect(ctx)
+    (row,) = builder.build().by_kind("run")[0].attrs["exceptions"]
+    assert row["env"] == "ROBOT_MODEL LIDAR_MODEL"
+
+
+def test_a_missing_package_names_the_trees_it_searched_by_label(ws: Workspace) -> None:
+    message = (
+        "\"package 'hls_lfcd_lds_driver' not found, searching: "
+        f"['/opt/ros/jazzy', '{ws.roots[0].path}', '/elsewhere/install']\""
+    )
+    relabelled = launch_declared.relabel_searched(ws, message)
+    assert relabelled == (
+        "\"package 'hls_lfcd_lds_driver' not found, searched: ROS jazzy, the src root, "
+        'a prefix outside every root"'
+    )
+    assert launch_declared.missing_package(relabelled) == ("hls_lfcd_lds_driver", "jazzy")
+    stated = "\"package 'hls_lfcd_lds_driver' not found, searching: ['@outside', '@src']\""
+    setup = ["/opt/ros/jazzy/setup.bash"]
+    assert launch_declared.relabel_searched(ws, stated, setup).endswith(
+        'searched: ROS jazzy, the src root"'
+    )
+    assert "searched: the sourced setup files," in launch_declared.relabel_searched(ws, stated)
+    assert launch_declared.missing_package("Node: \"package 'absent' not found\"") == ("absent", "")
+    assert launch_declared.missing_package("'ROBOT_MODEL'") is None

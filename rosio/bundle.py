@@ -26,6 +26,7 @@ from rosio.model import Atlas, Finding, dumps
 from rosio.query import site
 from rosio.render.drift_md import render_drift
 from rosio.render.report import render_report
+from rosio.resolve import parse_python
 from rosio.workspace import Workspace
 
 MAX_FILES = 2000
@@ -179,7 +180,7 @@ def redact(text: str, counts: Counter, secrets: set[str] | None = None) -> str:
 
     walk(document, set())
     try:
-        tree = ast.parse(text)
+        tree = parse_python(text)
     except (SyntaxError, ValueError):
         tree = None
     lines = text.splitlines(keepends=True)

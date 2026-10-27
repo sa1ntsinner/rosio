@@ -215,7 +215,7 @@ def run(
     instances: Mapping[str, Any] | None = None,
     atlas: model.Atlas | None = None,
     opt_in: Sequence[str] = (),
-    progress: Callable[[str], None] | None = None,
+    progress: Callable[..., None] | None = None,
 ) -> model.Atlas:
     """Collect every selected layer, recompute once, validate, then write the atlas.
 
@@ -224,9 +224,10 @@ def run(
     registry builds with its defaults. `atlas` extends an atlas that already exists instead
     of starting an empty one. `opt_in` names the collectors in `OPT_IN` this caller is
     allowed to reach, and nothing else can reach them. `progress` is told the name of each
-    phase as it ends, and nothing it hears reaches the atlas.
+    phase as it ends, with `step=True` for each profile of a phase that repeats per profile,
+    and nothing it hears reaches the atlas.
     """
-    say = progress or (lambda _label: None)
+    say = progress or (lambda _label, **_kwargs: None)
     _register()
     selected = _select(collectors, opt_in)
     builder = _builder(cfg, ws, selected, atlas)
@@ -243,7 +244,10 @@ def run(
             passes.append((step.layer, _run_pass(ctx, cfg, step, roots, instances or {}, each)))
             if step.profile:
                 done += 1
-                say(f"{', '.join(step.names)} for profile {step.profile} ({done}/{scoped})")
+                say(
+                    f"{', '.join(step.names)}, profile {done} of {scoped}: {step.profile}",
+                    step=True,
+                )
     finally:
         ctx.close()
     _state_exceptions(builder, ws, cfg)
@@ -254,6 +258,12 @@ def run(
         say("join")
     _declare_capabilities(builder)
     built = builder.build()
+    from rosio.drift.build import BUDGET_KEY
+
+    if cfg.resolution_budget is not None:
+        built.x.setdefault("drift", {})[BUDGET_KEY] = cfg.resolution_budget
+    elif "drift" in built.x:
+        built.x["drift"].pop(BUDGET_KEY, None)
     drift(built)
     say("drift")
     payload = built.to_json()

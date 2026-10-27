@@ -2169,3 +2169,55 @@ def test_model_mesh_missing_keeps_its_ids_across_two_runs():
     first = _ids(build_rules.model_mesh_missing(_mesh_atlas()))
     second = _ids(build_rules.model_mesh_missing(_mesh_atlas()))
     assert first == second and len(first) == 2
+
+
+def test_launch_raised_on_a_missing_package_names_it_and_the_apt_name():
+    """TurtleBot3 robot.launch.py needs hls_lfcd_lds_driver, and the finding told the user to
+    supply an argument or an environment variable."""
+    message = "\"package 'hls_lfcd_lds_driver' not found, searched: ROS jazzy, the src root\""
+    row = dict(_RAISED_ROW, phase="describe", exc_type="PackageNotFoundError", message=message)
+    (found,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert "needs the package hls_lfcd_lds_driver" in found.say
+    assert "sudo apt install ros-jazzy-hls-lfcd-lds-driver" in found.fix
+    assert "add the tree that holds it as a root in rosio.yaml" in found.fix
+    assert "supply the argument" not in found.fix
+    assert "@outside" not in found.say + found.detail
+    unknown = dict(row, message="\"package 'absent_driver' not found\"")
+    (near,) = build_rules.launch_raised(_refusal_atlas([unknown]).build())
+    assert "ros-$ROS_DISTRO-absent-driver" in near.fix
+    (again,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert again.id == found.id
+
+
+def test_launch_raised_names_every_unset_variable_the_walk_saw():
+    row = dict(
+        _RAISED_ROW,
+        phase="describe",
+        exc_type="KeyError",
+        message="'TURTLEBOT3_MODEL'",
+        env="TURTLEBOT3_MODEL LDS_MODEL",
+    )
+    (found,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert "environment variables TURTLEBOT3_MODEL and LDS_MODEL" in found.say
+    assert found.fix.startswith("set TURTLEBOT3_MODEL and LDS_MODEL under env of profile")
+
+
+def test_below_budget_titles_differ_per_profile_and_point_at_unresolved():
+    """Four identical lines quoted the global rate and named no profile."""
+    builder = _budget_atlas(unresolved=4)
+    other = _node(builder, "/mapper", SIM, {"executable": "mapper"})
+    builder.unresolved(
+        Unresolved(
+            want=model.Want.TOPIC_NAME.value,
+            owner=other,
+            expr="topic_from_mapper",
+            reason="not_stated_in_source",
+            evidence=[Source(file=ids.build_file("mapper", "src/node.cpp"))],
+        )
+    )
+    found = build_rules.resolution_below_budget(builder.build())
+    titles = {item.subject: item.title for item in found}
+    assert titles[NAV].startswith("profile nx_navigation holds 4 of the 5 unresolved sites")
+    assert titles[SIM].startswith(f"profile {ids.parse_profile(SIM)} holds 1 of the 5")
+    assert all("rosio unresolved" in item.say for item in found)
+    assert all("resolution_budget in rosio.yaml" in item.fix for item in found)

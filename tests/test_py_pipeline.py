@@ -798,3 +798,27 @@ def test_the_launch_pipeline_is_stable_across_two_reads(launch_file: Path):
     left = _analyse_launch(launch_file).pipelines
     right = _analyse_launch(launch_file).pipelines
     assert left == right
+
+
+def test_a_third_party_file_parses_without_printing_its_warnings():
+    """`<unknown>:60: SyntaxWarning: invalid escape sequence` reached the extract output from
+    a script under /opt/ros that rosio only reads."""
+    import warnings
+
+    from rosio.resolve import parse_python
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        tree = parse_python('path = "C:\\program files"\n', "scraped.py")
+    assert tree.body
+
+
+def test_every_parse_of_python_source_goes_through_the_quiet_helper():
+    root = Path(__file__).resolve().parents[1] / "rosio"
+    helper = root / "resolve" / "__init__.py"
+    direct = [
+        str(path.relative_to(root))
+        for path in sorted(root.rglob("*.py"))
+        if path != helper and "ast.parse(" in path.read_text(encoding="utf-8")
+    ]
+    assert direct == []

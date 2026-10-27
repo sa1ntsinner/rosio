@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 
 from rosio import ids, model
 from rosio.errors import CollectorError
-from rosio.resolve import records, substitutions
+from rosio.resolve import parse_python, records, substitutions
 
 if TYPE_CHECKING:
     from rosio.workspace import Workspace
@@ -482,7 +482,9 @@ def walk_ast(
     if refusal is not None:
         return refusal
     try:
-        tree = ast.parse(Path(entry).read_text(encoding="utf-8", errors="replace"), filename=entry)
+        tree = parse_python(
+            Path(entry).read_text(encoding="utf-8", errors="replace"), filename=entry
+        )
     except (OSError, SyntaxError) as exc:
         result.exceptions.append(
             records.WalkException(
@@ -955,6 +957,47 @@ def _scope(tree: ast.AST) -> tuple[ast.AST, bool]:
     return tree, False
 
 
+def environment_reads(source: str) -> tuple[str, ...]:
+    """The environment variables a launch file reads with no default, in source order.
+
+    `os.environ[...]`, `os.environ.get` and `os.getenv` with one argument, and
+    `EnvironmentVariable` without `default_value`. A walk stops at the first one that is unset,
+    so this is how every other one the same file needs is named before a second extract.
+    """
+    try:
+        tree = parse_python(source)
+    except SyntaxError:
+        return ()
+    found: list[tuple[int, int, str]] = []
+    for node in ast.walk(tree):
+        name = None
+        if isinstance(node, ast.Subscript) and _environ(node.value):
+            name = node.slice
+        elif isinstance(node, ast.Call) and len(node.args) == 1 and not node.keywords:
+            func = node.func
+            if isinstance(func, ast.Attribute) and (
+                (func.attr == "get" and _environ(func.value))
+                or (func.attr == "getenv" and isinstance(func.value, ast.Name))
+            ):
+                name = node.args[0]
+        if (
+            isinstance(node, ast.Call)
+            and _call_name(node.func) == "EnvironmentVariable"
+            and _arg(node, "default_value", 1) is None
+        ):
+            name = _arg(node, "name", 0)
+        if isinstance(name, ast.Constant) and isinstance(name.value, str):
+            found.append((node.lineno, node.col_offset, name.value))
+    return tuple(dict.fromkeys(text for _line, _col, text in sorted(found)))
+
+
+def _environ(node: ast.AST) -> bool:
+    """`os.environ`, or `environ` imported from os."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == "environ"
+    return isinstance(node, ast.Name) and node.id == "environ"
+
+
 def _calls(tree: ast.AST, names: Sequence[str]):
     wanted = set(names)
     root, _found = _scope(tree)
@@ -1119,6 +1162,7 @@ __all__ = [
     "available",
     "decode_walk",
     "encode_walk",
+    "environment_reads",
     "import_report",
     "probe",
     "walk",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -173,3 +174,110 @@ def test_packages_beside_an_install_tree_are_read_as_sources(tmp_path: Path) -> 
     ]
     assert "binary_only bringup.launch.py" in _profiles(cfg).values()
     assert any(label.startswith("lx_bringup ") for label in _profiles(cfg).values())
+
+
+@pytest.fixture
+def read_only(merged: Path):
+    merged.chmod(0o555)
+    if os.access(merged, os.W_OK):
+        merged.chmod(0o755)
+        pytest.skip("this user writes into a read only directory anyway")
+    yield merged
+    merged.chmod(0o755)
+
+
+def test_init_on_a_tree_it_may_not_write_into_writes_here_and_says_so(
+    read_only: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """`rosio init /opt/ros/jazzy --package nav2_bringup` ended in a PermissionError traceback."""
+    here = tmp_path / "here"
+    here.mkdir()
+    monkeypatch.chdir(here)
+    assert cli.main(["init", str(read_only), "--package", "beta"]) == 0
+    out = capsys.readouterr().out
+    assert not (read_only / CONFIG_NAME).exists()
+    payload = yaml.safe_load((here / CONFIG_NAME).read_text(encoding="utf-8"))
+    assert payload["roots"] == [{"kind": "install", "path": str(read_only)}]
+    assert f"{read_only / CONFIG_NAME} is not writable" in out
+    assert f"rosio extract {read_only} --config {CONFIG_NAME}" in out
+
+
+def test_init_refuses_with_the_way_out_when_the_named_file_cannot_be_written(
+    read_only: Path, capsys
+) -> None:
+    assert cli.main(["init", str(read_only), "--config", str(read_only / CONFIG_NAME)]) == 2
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert "--config" in err and "--print" in err
+
+
+def test_init_on_a_tree_it_may_not_write_into_keeps_a_file_already_here(
+    read_only: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / CONFIG_NAME).write_text("roots: []\n", encoding="utf-8")
+    assert cli.main(["init", str(read_only)]) == 2
+    assert "already exists" in capsys.readouterr().err
+
+
+ENV_LAUNCH = """
+import os
+from launch import LaunchDescription
+
+
+def generate_launch_description():
+    model = os.environ['ROBOT_MODEL']
+    lidar = os.environ['LIDAR_MODEL']
+    distro = os.environ.get('ROS_DISTRO')
+    quiet = os.environ.get('QUIET', 'false')
+    return LaunchDescription([])
+"""
+
+
+def test_init_writes_a_commented_env_block_for_what_a_launch_file_reads_without_default(
+    tmp_path: Path,
+) -> None:
+    """TurtleBot3 reads TURTLEBOT3_MODEL and LDS_MODEL with no default, and the second only
+    showed up after a second extract with the first one set."""
+    package = tmp_path / "src" / "bot_bringup"
+    (package / "launch").mkdir(parents=True)
+    (package / "package.xml").write_text(
+        '<package format="3"><name>bot_bringup</name></package>', encoding="utf-8"
+    )
+    (package / "launch" / "robot.launch.py").write_text(ENV_LAUNCH, encoding="utf-8")
+    (package / "launch" / "plain.launch.py").write_text("", encoding="utf-8")
+    text = scaffold.render(default_config(str(tmp_path)), tmp_path)
+    robot = text[text.index("- slug: robot") :]
+    assert robot.splitlines()[4:8] == [
+        "  # robot.launch.py reads these with no default, set them to what the robot starts with:",
+        "  # env:",
+        "  #   ROBOT_MODEL: ''",
+        "  #   LIDAR_MODEL: ''",
+    ]
+    assert "ROS_DISTRO" not in text and "QUIET" not in text
+    plain = text[text.index("- slug: plain") : text.index("- slug: robot")]
+    assert "env" not in plain
+    payload = yaml.safe_load(text)
+    assert all("env" not in profile for profile in payload["profiles"])
+    assert "env" not in payload
+
+
+def test_an_install_prefix_skips_the_trees_rosio_reads_nothing_from(
+    merged: Path, workspace: Path
+) -> None:
+    """`init --package nav2_bringup` on /opt/ros/jazzy indexed and hashed every header and
+    vendored library of the distribution on every extract."""
+    cfg = default_config(str(merged))
+    assert cfg.ignore == scaffold_ignore()
+    payload = yaml.safe_load(scaffold.render(cfg, merged))
+    assert payload["ignore"] == list(scaffold_ignore())
+    assert load_config(None, workspace=str(workspace)).ignore == ()
+    assert "ignore" not in yaml.safe_load(
+        scaffold.render(default_config(str(workspace)), workspace)
+    )
+
+
+def scaffold_ignore() -> tuple[str, ...]:
+    from rosio.config import INSTALL_PREFIX_IGNORE
+
+    return INSTALL_PREFIX_IGNORE

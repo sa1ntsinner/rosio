@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,6 +41,10 @@ REMOVED = "removed"
 ABSENT = "absent"
 PRUNED = "pruned"
 
+WOULD = {CREATED: "create", UPDATED: "update", REMOVED: "remove", PRUNED: "prune"}
+"""What a dry run says it would do, per status. `kept`, `unchanged` and `absent` read the
+same either way."""
+
 
 @dataclass
 class Action:
@@ -52,7 +57,7 @@ class Action:
     undo: str = ""
 
     def line(self, *, dry_run: bool = False) -> str:
-        head = f"would {self.status}" if dry_run and self.status != UNCHANGED else self.status
+        head = f"would {WOULD[self.status]}" if dry_run and self.status in WOULD else self.status
         detail = f"   {self.detail}" if self.detail else ""
         return f"  {head:<9} {self.path}{detail}"
 
@@ -116,7 +121,7 @@ def _toml_value(value) -> str:
     return str(value)
 
 
-def _section_body(target: plat.Target, command: str) -> str:
+def _section_body(target: plat.Target, command: Sequence[str]) -> str:
     if target.mechanism == "mcp":
         entry = plat.server_entry(target, command)
         lines = [f"[{target.container}.{plat.SKILL_NAME}]"]
@@ -224,13 +229,19 @@ def install(
     home: Path | str | None = None,
     dry_run: bool = False,
     force: bool = False,
-    command: str = plat.SERVE_COMMAND,
+    command: Sequence[str] = (),
 ) -> Report:
-    """Write every file the platform reads at this scope."""
+    """Write every file the platform reads at this scope.
+
+    The MCP entry starts the interpreter running this install, by its absolute path, and at
+    project scope on the atlas the project already holds, so neither depends on the PATH or
+    the directory the assistant is started from. A user scope entry serves every project, so
+    it names no atlas."""
     row = plat.get(platform)
     plat.check_scope(scope)
     root = Path(root or Path.cwd()).resolve()
     home = Path(home or Path.home()).resolve()
+    command = tuple(command) or plat.serve_command(_atlas(root) if scope == "project" else None)
     report = Report(row.key, scope, root, home, verb="install", dry_run=dry_run)
 
     for target, path in _paths(row, scope, root, home):
@@ -266,7 +277,17 @@ def _install_whole(target: plat.Target, path: Path, report: Report, *, force: bo
     report.actions.append(Action(path, target.mechanism, status, detail, undo))
 
 
-def _install_section(target: plat.Target, path: Path, report: Report, command: str) -> None:
+def _atlas(root: Path) -> Path | None:
+    from rosio.config import DEFAULT_OUT_DIR
+    from rosio.extract import ATLAS_NAME
+
+    atlas = root / DEFAULT_OUT_DIR / ATLAS_NAME
+    return atlas if atlas.is_file() else None
+
+
+def _install_section(
+    target: plat.Target, path: Path, report: Report, command: Sequence[str]
+) -> None:
     begin, end = _markers(target.fmt)
     block = f"{begin}\n{_section_body(target, command)}\n{end}\n"
     have = _read(path)
@@ -292,7 +313,7 @@ def _install_section(target: plat.Target, path: Path, report: Report, command: s
 
 
 def _install_json(
-    target: plat.Target, path: Path, report: Report, command: str, *, force: bool
+    target: plat.Target, path: Path, report: Report, command: Sequence[str], *, force: bool
 ) -> None:
     doc = _load_json(path)
     node = _container(doc, target.container, create=True)
@@ -310,7 +331,7 @@ def _install_json(
         return
     node[plat.SKILL_NAME] = entry
     status = UPDATED if path.is_file() else CREATED
-    detail = f"{key} set to {command} {' '.join(plat.SERVE_ARGS)}"
+    detail = f"{key} set to {' '.join(command)}"
     if not report.dry_run:
         _write(path, dumps(doc))
     report.actions.append(Action(path, target.mechanism, status, detail, undo))
@@ -428,7 +449,9 @@ def _add_notes(platform: plat.Platform, scope: str, report: Report) -> None:
         )
     for target in platform.targets_for(scope):
         if not target.verified:
-            report.notes.append(f"{target.mechanism} path is unverified: {target.note}")
+            report.notes.append(
+                f"{target.mechanism} path not yet seen read by {platform.key}: {target.note}"
+            )
     if platform.note:
         report.notes.append(platform.note)
 
@@ -462,13 +485,12 @@ def _table_lines() -> list[str]:
             f"{row['platform']:<13} {row['mechanism']:<13} "
             f"{row['project'] or '-':<32} {row['user'] or '-'}"
         )
-        lines.append(f"{'':<13} proof: {row['proof']}")
+        lines.append(f"{'':<13} checked: {row['proof']}")
     lines.append("")
     lines.append(
-        "Demonstrated means somebody started that tool and watched it read the file at that "
-        "path. A row not demonstrated at every path it offers stays unverified, and it is "
-        "installable anyway: the path then comes from that tool's documentation, and install "
-        "prints the same note per file."
+        "Seen read means somebody started that tool and watched it read the file at that "
+        "path. A path from the tool's documentation installs anyway, and install says so per "
+        "file."
     )
     return lines
 

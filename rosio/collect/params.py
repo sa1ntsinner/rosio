@@ -70,6 +70,7 @@ from rosio.errors import CollectorError, ContractError, UsageError
 from rosio.resolve import (
     identity,
     launch_exec,
+    parse_python,
     py_pipeline,
     records,
     rewritten_yaml,
@@ -807,7 +808,7 @@ def _tree(path: str) -> ast.Module | None:
     if key not in _trees:
         try:
             source = Path(path).read_text(encoding="utf-8", errors="replace")
-            _trees[key] = ast.parse(source, filename=path)
+            _trees[key] = parse_python(source, filename=path)
         except (OSError, SyntaxError, ValueError):
             _trees[key] = None
     return _trees[key]

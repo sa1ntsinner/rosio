@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -669,13 +671,55 @@ def test_extract_then_render_fills_the_output_directory(tmp_path: Path, capsys):
 def test_extract_names_each_phase_on_stderr_unless_quiet(tmp_path: Path, capsys):
     out = tmp_path / "rosio-out"
     assert main(["extract", str(WS), "--out", str(out)]) == EXIT_OK
-    lines = capsys.readouterr().err.splitlines()
+    first, *lines = capsys.readouterr().err.splitlines()
+    assert first.startswith(("rosio extract: config ", "rosio extract: no rosio.yaml found"))
     assert lines[0].startswith("rosio extract: indexed ")
     assert any(line.startswith("rosio extract: join, ") for line in lines)
     assert lines[-1].startswith("rosio extract: write, ")
     assert all(line.endswith("s elapsed)") for line in lines)
     assert main(["extract", str(WS), "--out", str(out), "--quiet"]) == EXIT_OK
     assert capsys.readouterr().err == ""
+
+
+def test_extract_collapses_the_per_profile_lines_when_stderr_is_not_a_terminal(
+    tmp_path: Path, capsys
+):
+    """Sixty one profiles were sixty one progress lines in a log."""
+    assert main(["extract", str(WS), "--out", str(tmp_path / "out")]) == EXIT_OK
+    lines = capsys.readouterr().err.splitlines()
+    per_profile = [line for line in lines if ", profile " in line]
+    assert len(per_profile) == 1
+    assert "\r" not in "".join(lines)
+
+
+def test_extract_names_the_config_it_read_and_where_it_wrote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    workspace = tmp_path / "ws"
+    shutil.copytree(WS, workspace)
+    here = tmp_path / "here"
+    here.mkdir()
+    (here / "rosio.yaml").write_text("profiles:\n  - slug: only\n", encoding="utf-8")
+    monkeypatch.chdir(here)
+    assert main(["extract", str(workspace)]) == EXIT_OK
+    captured = capsys.readouterr()
+    assert f"rosio extract: config {here / 'rosio.yaml'}" in captured.err
+    assert f"rosio extract: {here / 'rosio-out' / 'atlas.json'} (" in captured.out
+    assert "profiles 1: only" in captured.out
+
+
+def test_a_configured_root_that_is_not_there_names_the_ways_out(tmp_path: Path, capsys):
+    """The example rosio.yaml declared an install root nobody had built."""
+    shutil.copytree(WS / "src", tmp_path / "src")
+    config = tmp_path / "rosio.yaml"
+    config.write_text(
+        "roots:\n  - {kind: src, path: src}\n  - {kind: install, path: install}\n",
+        encoding="utf-8",
+    )
+    assert main(["extract", str(tmp_path), "--out", str(tmp_path / "out")]) == EXIT_USAGE
+    err = capsys.readouterr().err
+    assert f"install root does not exist: {tmp_path / 'install'}" in err
+    assert "colcon build" in err and f"delete that root from {config}" in err
 
 
 def test_install_tree_becomes_a_root_and_reaches_the_setup_file(tmp_path: Path):
@@ -1115,8 +1159,8 @@ def test_install_registers_the_command_the_serve_verb_answers(tmp_path: Path, ca
     home.mkdir()
     assert main(["install", "codex", "--scope", "user", "--home", str(home)]) == EXIT_OK
     config = (home / ".codex/config.toml").read_text(encoding="utf-8")
-    assert 'command = "rosio"' in config
-    assert 'args = ["serve"]' in config
+    assert f"command = {json.dumps(sys.executable)}" in config
+    assert 'args = ["-m", "rosio", "serve"]' in config
     assert "serve" in commands()
 
 
@@ -1124,7 +1168,7 @@ def test_install_dry_run_writes_nothing(tmp_path: Path, capsys):
     root = tmp_path / "project"
     root.mkdir()
     assert main(["install", "codex", "--root", str(root), "--dry-run"]) == EXIT_OK
-    assert "would created" in capsys.readouterr().out
+    assert "would create " in capsys.readouterr().out
     assert [p for p in root.rglob("*") if p.is_file()] == []
 
 
@@ -1132,7 +1176,7 @@ def test_install_with_no_platform_prints_the_table_and_reports_usage(capsys):
     assert main(["install"]) == EXIT_USAGE
     assert "claude-code" in capsys.readouterr().out
     assert main(["install", "--list"]) == EXIT_OK
-    assert "unverified" in capsys.readouterr().out
+    assert "from the tool's documentation" in capsys.readouterr().out
 
 
 def test_install_names_the_choices_when_the_platform_is_unknown(capsys):
@@ -1160,3 +1204,18 @@ def test_severity_words_take_colour_on_a_terminal_only(monkeypatch):
     assert painted.endswith("\x1b[1;31merror\x1b[0m rule: z")
     monkeypatch.setenv("NO_COLOR", "1")
     assert _paint(text, Tty()) == text
+
+
+def test_the_configured_resolution_budget_reaches_the_rule(tmp_path: Path):
+    shutil.copytree(WS / "src", tmp_path / "src")
+    config = tmp_path / "rosio.yaml"
+    budgets = {}
+    for budget in (0.0, 1.0):
+        config.write_text(f"roots: [src]\nresolution_budget: {budget}\n", encoding="utf-8")
+        out = tmp_path / f"out{budget}"
+        assert main(["extract", str(tmp_path), "--out", str(out), "--quiet"]) == EXIT_OK
+        atlas = model.Atlas.loads((out / "atlas.json").read_text(encoding="utf-8"))
+        assert atlas.x["drift"]["resolution_budget"] == budget
+        budgets[budget] = [f for f in atlas.findings if f.rule == "resolution.below_budget"]
+    assert not budgets[0.0]
+    assert budgets[1.0]

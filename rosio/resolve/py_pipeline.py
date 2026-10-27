@@ -51,7 +51,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from rosio.errors import CollectorError
-from rosio.resolve import records
+from rosio.resolve import parse_python, records
 
 YAML_LOADERS = ("safe_load", "load", "full_load", "unsafe_load")
 YAML_DUMPERS = ("dump", "safe_dump")
@@ -178,7 +178,7 @@ def analyse_source(
     """`tree` is the parse of `text` when the caller already holds it."""
     if tree is None:
         try:
-            tree = ast.parse(text)
+            tree = parse_python(text)
         except SyntaxError as exc:
             return ModuleResult(path=str(path), parse_error=f"{type(exc).__name__}: {exc}")
     registry = _Registry(packages)
@@ -218,7 +218,7 @@ def fold_constants(path: str, relpath: str = "", text: str | None = None) -> dic
         except OSError as exc:
             raise CollectorError(f"cannot read {path}: {exc}") from exc
     try:
-        tree = ast.parse(text)
+        tree = parse_python(text)
     except SyntaxError as exc:
         raise CollectorError(f"cannot parse {path}: {exc}") from exc
     registry = _Registry()
@@ -374,7 +374,7 @@ class _Registry:
         if found is not None:
             return found
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = parse_python(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, SyntaxError, ValueError):
             return None
         return self.adopt(key, tree, relpath)

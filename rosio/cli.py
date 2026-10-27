@@ -157,7 +157,9 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument(
         "--config",
         metavar="FILE",
-        help="configuration file, default is rosio.yaml beside the workspace if there is one",
+        help="configuration file. default: rosio.yaml in the workspace or the directory above "
+        "it, then in the working directory or the directory above it, then one profile per "
+        "launch file. the summary names the file it read",
     )
     extract.add_argument(
         "--collector",
@@ -910,7 +912,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     from pathlib import Path
 
     from rosio import scaffold
-    from rosio.config import default_config
+    from rosio.config import CONFIG_NAME, default_config
 
     workspace = Path(args.workspace).expanduser()
     if not workspace.is_dir():
@@ -921,12 +923,20 @@ def cmd_init(args: argparse.Namespace) -> int:
         base = target.parent if target else workspace
         print(scaffold.render(default_config(str(workspace), packages), base), end="")
         return EXIT_OK
+    wanted = target or workspace / CONFIG_NAME
     target, cfg = scaffold.write(workspace, force=args.force, packages=packages, target=target)
-    if not args.quiet:
-        print(
-            f"{PROG} init: wrote {target} with {len(cfg.roots)} roots and "
-            f"{len(cfg.profiles)} profiles. Edit the profiles, then run {PROG} extract."
-        )
+    if args.quiet:
+        return EXIT_OK
+    if target != wanted:
+        print(f"{PROG} init: {wanted} is not writable, so the file went here instead.")
+    command = f"{PROG} extract {args.workspace}"
+    if target.parent.absolute() != workspace.absolute():
+        here = target.parent.absolute() == Path.cwd()
+        command += f" --config {target.name if here else target}"
+    print(
+        f"{PROG} init: wrote {target} with {len(cfg.roots)} roots and "
+        f"{len(cfg.profiles)} profiles. Edit the profiles, then run: {command}"
+    )
     return EXIT_OK
 
 
@@ -960,7 +970,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
     from rosio import extract as extract_mod
     from rosio import model
-    from rosio.config import DEFAULT_OUT_DIR, load_config, with_install_tree
+    from rosio.config import DEFAULT_OUT_DIR, load_config, locate_config, with_install_tree
     from rosio.errors import EXIT_CONTRACT
     from rosio.workspace import Workspace
 
@@ -974,7 +984,16 @@ def cmd_extract(args: argparse.Namespace) -> int:
         raise UsageError(f"workspace directory does not exist: {workspace}")
 
     say = _progress("extract", quiet=args.quiet)
-    cfg = load_config(args.config, workspace=str(workspace))
+    source = locate_config(args.config, workspace=str(workspace))
+    if not args.quiet:
+        print(
+            f"{PROG} extract: config {source.absolute()}"
+            if source
+            else f"{PROG} extract: no rosio.yaml found, one profile per launch file "
+            f"({PROG} init writes that out to edit)",
+            file=sys.stderr,
+        )
+    cfg = load_config(str(source) if source else None, workspace=str(workspace))
     cfg = _with_overrides(cfg, args, DEFAULT_OUT_DIR)
     if args.install_tree:
         cfg = with_install_tree(cfg, args.install_tree)
@@ -1007,7 +1026,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         payload["volatile"] = {"wall_seconds": round(elapsed, 3)}
         print(model.dumps(payload), end="")
     elif not args.quiet:
-        print(f"{PROG} extract: {target} ({_bytes(target)})")
+        print(f"{PROG} extract: {target.absolute()} ({_bytes(target)})")
         _print_summary(report, elapsed)
 
     if args.fail_on_violation and report["exceptions"]:
@@ -1020,20 +1039,40 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
 
 def _progress(verb: str, *, quiet: bool):
-    """One stderr line per finished phase, with its seconds and the seconds so far."""
+    """One stderr line per finished phase, with its seconds and the seconds so far.
+
+    A step of a phase that repeats per profile (`step=True`) rewrites one line in a
+    terminal, and anywhere else stays quiet until the phase ends, which prints its last
+    step once with the time the whole phase took. Sixty one profiles were sixty one lines."""
     import time
 
     started = last = time.perf_counter()
+    terminal = sys.stderr.isatty()
+    phase_started: float | None = None
+    phase_label = ""
 
-    def say(label: str) -> None:
-        nonlocal last
+    def line(label: str, since: float, now: float) -> str:
+        return f"{PROG} {verb}: {label}, {now - since:.1f}s ({now - started:.1f}s elapsed)"
+
+    def say(label: str, *, step: bool = False) -> None:
+        nonlocal last, phase_started, phase_label
         now = time.perf_counter()
-        if not quiet:
-            print(
-                f"{PROG} {verb}: {label}, {now - last:.1f}s ({now - started:.1f}s elapsed)",
-                file=sys.stderr,
-                flush=True,
-            )
+        if quiet:
+            last = now
+            return
+        if step:
+            phase_started = last if phase_started is None else phase_started
+            phase_label = label
+            if terminal:
+                text = f"\r{line(label, phase_started, now)}\x1b[K"
+                print(text, end="", file=sys.stderr, flush=True)
+            last = now
+            return
+        if phase_started is not None:
+            done = line(phase_label, phase_started, last)
+            print(f"\r{done}\x1b[K" if terminal else done, file=sys.stderr)
+            phase_started = None
+        print(line(label, last, now), file=sys.stderr, flush=True)
         last = now
 
     return say

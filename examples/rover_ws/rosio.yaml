@@ -1,9 +1,4 @@
-roots:
-  - kind: src
-    path: src
-  - kind: install
-    path: install
-
+# No roots: rosio reads src, and install as well once colcon build has made one.
 profiles:
   - slug: rover
     label: the example rover as bringup.launch.py starts it

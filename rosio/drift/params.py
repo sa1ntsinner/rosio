@@ -925,6 +925,8 @@ def sim_time_mixed(atlas: model.Atlas) -> list[model.Finding]:
         if len(fewer) > 3:
             named += f" and {len(fewer) - 3} more"
         first_owner, first = sorted(fewer)[0]
+        include = _included_at(atlas, first.source, profile)
+        at = f", included at {rules.where(include)}" if include else ""
         out.append(
             model.Finding(
                 rule="param.sim_time_mixed",
@@ -941,20 +943,52 @@ def sim_time_mixed(atlas: model.Atlas) -> list[model.Finding]:
                     f"extrapolate. On {fewer_value}: {named}."
                 ),
                 fix=(
-                    f"Give every node of {slug} the same use_sim_time, for example with one "
-                    "SetParameter action at the top of the launch file that starts them."
+                    f"Give every node of {slug} the same use_sim_time, "
+                    + (
+                        f"for example by passing use_sim_time at {rules.where(include)}, or "
+                        if include
+                        else "for example "
+                    )
+                    + "with one SetParameter action at the top of the launch file that starts "
+                    "them."
                 ),
                 say=(
                     f"{named} run with use_sim_time {fewer_value} while {len(more)} other nodes "
                     f"of profile {slug} use {not fewer_value}; {rules.node_text(first_owner)} "
-                    f"gets it from {rules.where(first.source)}. Set one value for the profile."
+                    f"gets it from {rules.where(first.source)}{at}. Set one value for the "
+                    "profile."
                 ),
                 profiles=[profile],
                 layers=sorted({layer for _, row in fewer + more for layer in _layers(row)}),
-                where=rules.sources([row.source for _, row in sorted(fewer)]),
+                where=rules.sources(
+                    [row.source for _, row in sorted(fewer)] + ([include] if include else [])
+                ),
             )
         )
     return out
+
+
+def _included_at(
+    atlas: model.Atlas, source: model.Source | None, profile: str
+) -> model.Source | None:
+    """The include line that brought the launch file holding a value into the profile.
+
+    nav2 states rviz's use_sim_time as a default inside rviz_launch.py, and the line to edit
+    is the include that does not pass it, in the file that starts the profile."""
+    if source is None:
+        return None
+    try:
+        parsed = ids.parse_file(source.file)
+        target = ids.build_launchfile(parsed.package, parsed.relpath)
+    except ContractError:
+        return None
+    for edge in sorted(atlas.edges.values(), key=lambda item: item.id):
+        if edge.kind != "includes" or edge.dst != target:
+            continue
+        for fact in edge.facts:
+            if fact.profile == profile and fact.evidence:
+                return fact.evidence[0]
+    return None
 
 
 @rules.register("param.owner_name_mismatch")

@@ -1,14 +1,17 @@
 # rover_ws, an example with known faults
 
 A small ROS 2 jazzy workspace with faults planted on purpose, so `rosio` has something true to
-say about it. Build it, then extract:
+say about it. Extract it as it is, from the sources:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-colcon build
-rosio extract . --config rosio.yaml
+cd examples/rover_ws
+rosio extract
 rosio drift
 ```
+
+`rosio.yaml` names no roots, so rosio reads `src`, and `install` as well once `colcon build` has
+made one. The findings are the same either way.
 
 What is wrong in it, for checking what rosio reports:
 

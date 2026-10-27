@@ -840,6 +840,20 @@ document spelled as its command with the path relative to its root, so the synth
 and the launch entity id of that node moved once and stopped depending on the checkout. No
 release had shipped, so no stored id existed.
 
+Five changes inside `1.18` moved ids or text without a new key. A `PackageNotFoundError` row
+names the prefixes the walk searched by root label or ROS release (`searched: ROS jazzy (install
+root)`) instead of the paths, which `@outside` made unreadable, and the message is in the
+`launch.raised` discriminator, so those finding ids moved once. The `env` value of a launch
+exception row may name several variables, space separated, the one the walk stopped at first:
+the others are what the same file reads with no default and nothing sets, so one extract names
+them all. A configuration that states `resolution_budget` writes it under `x.drift`, where
+`resolution.below_budget` already read it, and enters the run input digest. A configuration
+`rosio extract` falls back to for an installed ROS prefix read alone ignores `/include`, `/opt`
+and `/lib/python*`, which moves the root hash and the run ids of such an atlas. A synthetic
+node whose executable is its package is named once in prose (`the rviz2 node in /robot1`),
+which changed the detail and the fingerprint of findings naming one. No release had shipped,
+so no stored id or waiver existed.
+
 A reader pinned to `1.0` still loads a `1.18` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

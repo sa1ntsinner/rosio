@@ -32,7 +32,7 @@ from typing import Any
 from rosio import ids, model, workspace
 from rosio.collect import CollectContext, register
 from rosio.errors import CollectorError, ContractError
-from rosio.resolve import wrappers
+from rosio.resolve import parse_python, wrappers
 
 LANGUAGE = "python"
 LAYER = model.Layer.CODED.value
@@ -348,7 +348,7 @@ class PyFile:
         self.executables = tuple(sorted(executables))
         self.module = self.relpath[:-3].replace("/", ".") if self.relpath.endswith(".py") else ""
         try:
-            self.tree = ast.parse(source)
+            self.tree = parse_python(source)
         except (SyntaxError, ValueError, RecursionError) as exc:
             raise CollectorError(
                 f"{path} is not parseable python: {exc}", layer="coded", collector="py_code"
@@ -2524,7 +2524,7 @@ def entry_points(package_dir: Path | None) -> dict[str, tuple[str, ...]]:
     setup = package_dir / "setup.py"
     if setup.is_file():
         try:
-            tree = ast.parse(setup.read_text(encoding="utf-8", errors="replace"))
+            tree = parse_python(setup.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
             tree = None
         if tree is not None:

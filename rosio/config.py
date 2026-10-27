@@ -55,11 +55,18 @@ _TOP_KEYS = frozenset(
         "out",
         "out_dir",
         "profiles",
+        "resolution_budget",
         "roots",
         "ros_setup",
         "waivers",
     }
 )
+
+INSTALL_PREFIX_IGNORE = ("/include", "/opt", "/lib/python*")
+"""What an installed ROS prefix holds that rosio reads nothing from: headers, vendored third
+party prefixes and python libraries. The coded layer reads sources only, and a launch file,
+a parameters file or a model sits under share. On /opt/ros/<distro> these are most of the
+files, and every extract indexed and hashed them."""
 
 _ROOT_KEYS = frozenset({"kind", "path"})
 
@@ -155,6 +162,7 @@ class Config:
     ignore: tuple[str, ...] = ()
     waivers: tuple[str, ...] = ()
     launch_sandbox: str = "auto"
+    resolution_budget: float | dict[str, float] | None = None
 
     def __post_init__(self) -> None:
         if self.launch_sandbox not in ("auto", "required", "off"):
@@ -186,12 +194,22 @@ class Config:
         a waiver grades a finding that is already in the atlas, so a machine that carries one
         and a machine that carries none must still produce the same bytes. Sandbox selection
         belongs to run predicates rather than identity. A profile, a root, an ignore rule,
-        a setup file or a timeout that moved is a different question asked of the same tree.
+        a setup file or a timeout that moved is a different question asked of the same tree,
+        and a resolution budget that moved grades the same tree differently.
         """
         from rosio import ids
 
+        stated: dict[str, Any] = {}
+        budget = self.resolution_budget
+        if isinstance(budget, dict):
+            stated["resolution_budget"] = [
+                f"{key}={value:.6f}" for key, value in sorted(budget.items())
+            ]
+        elif budget is not None:
+            stated["resolution_budget"] = f"{budget:.6f}"
         return ids.digest_fields(
             {
+                **stated,
                 "deterministic": str(bool(self.deterministic)),
                 "ignore": list(self.ignore),
                 "launch_timeout": f"{float(self.launch_timeout):.6f}",
@@ -226,20 +244,32 @@ class Config:
 def load_config(path: str | None, *, workspace: Any) -> Config:
     """Read `rosio.yaml`, or fall back to `default_config` when there is none.
 
-    `workspace` is a directory or an already discovered Workspace. An explicit path that
-    does not exist is a usage error, an implicit one that does not exist is not.
+    `workspace` is a directory or an already discovered Workspace. `locate_config` says which
+    file is read.
+    """
+    target = locate_config(path, workspace=workspace)
+    if target is None:
+        return default_config(workspace)
+    payload = _read_yaml(target)
+    return _from_payload(payload, target, workspace)
+
+
+def locate_config(path: str | None, *, workspace: Any) -> Path | None:
+    """The configuration file a verb reads, or None for the fallback.
+
+    In order: the file named on the command line, the one `ROSIO_CONFIG` names, `rosio.yaml`
+    in the workspace or the directory above it, then `rosio.yaml` in the working directory or
+    the directory above it. The last is where `rosio init` writes when the workspace is a tree
+    nobody may write into, such as /opt/ros/<distro>. A named file that does not exist is a
+    usage error, an absent implicit one is not.
     """
     explicit = path or os.environ.get(CONFIG_ENV) or None
     if explicit:
         target = Path(explicit)
         if not target.is_file():
             raise UsageError(f"config file not found: {explicit}")
-    else:
-        target = _find_config(_workspace_dir(workspace))
-        if target is None:
-            return default_config(workspace)
-    payload = _read_yaml(target)
-    return _from_payload(payload, target, workspace)
+        return target
+    return _find_config(_workspace_dir(workspace)) or _find_config(Path.cwd())
 
 
 def default_config(workspace: Any, packages: Sequence[str] = ()) -> Config:
@@ -268,7 +298,18 @@ def default_config(workspace: Any, packages: Sequence[str] = ()) -> Config:
         profiles=profiles,
         out_dir=DEFAULT_OUT_DIR,
         ros_setup=_default_ros_setup(ws),
+        ignore=_default_ignore(roots),
     )
+
+
+def _default_ignore(roots: Sequence[RootSpec]) -> tuple[str, ...]:
+    """`INSTALL_PREFIX_IGNORE` for an installed prefix read alone. A source root beside it
+    could hold a directory of the same name that is worth reading."""
+    if any(spec.kind != INSTALL for spec in roots):
+        return ()
+    if any((Path(spec.path) / AMENT_INDEX).is_dir() for spec in roots):
+        return INSTALL_PREFIX_IGNORE
+    return ()
 
 
 def with_install_tree(cfg: Config, path: str) -> Config:
@@ -302,9 +343,22 @@ def with_install_tree(cfg: Config, path: str) -> Config:
 def _from_payload(payload: dict[str, Any], target: Path, workspace: Any) -> Config:
     unknown = sorted(set(payload) - _TOP_KEYS)
     if unknown:
-        raise UsageError(f"{target}: unknown config keys: {', '.join(unknown)}")
+        hint = (
+            ". env goes under a profile, next to its entrypoints: "
+            "profiles: [{slug: robot, env: {NAME: value}}]"
+            if "env" in unknown
+            else ""
+        )
+        raise UsageError(f"{target}: unknown config keys: {', '.join(unknown)}{hint}")
     base = target.parent
     roots = _roots(payload.get("roots"), base, workspace)
+    for spec in roots:
+        if spec.kind in (records.ROOTS[0], INSTALL) and not Path(spec.path).is_dir():
+            ways = "build the workspace with colcon build" if spec.kind == INSTALL else "correct it"
+            raise UsageError(
+                f"{target}: {spec.kind} root does not exist: {spec.path}. "
+                f"{ways}, or delete that root from {target}"
+            )
     ignore = _strings(payload.get("ignore"), "ignore")
     profiles = _profiles(payload.get("profiles"), base)
     if not profiles:
@@ -334,7 +388,24 @@ def _from_payload(payload: dict[str, Any], target: Path, workspace: Any) -> Conf
         ros_setup=ros_setup,
         ignore=ignore,
         waivers=_strings(payload.get("waivers"), "waivers", base=base, always=True),
+        resolution_budget=_budget(payload.get("resolution_budget")),
     )
+
+
+def _budget(raw: Any) -> float | dict[str, float] | None:
+    """A number between 0 and 1 for the overall rate, or a mapping of want to number with an
+    optional `overall`, which is the shape `resolution.below_budget` reads."""
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return {str(key): _fraction(value) for key, value in raw.items()}
+    return _fraction(raw)
+
+
+def _fraction(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+        raise UsageError(f"resolution_budget must be a number between 0 and 1, got {value!r}")
+    return float(value)
 
 
 def _roots(raw: Any, base: Path, workspace: Any) -> tuple[RootSpec, ...]:
@@ -750,6 +821,7 @@ __all__ = [
     "CONFIG_NAME",
     "DEFAULT_LAUNCH_TIMEOUT",
     "DEFAULT_OUT_DIR",
+    "INSTALL_PREFIX_IGNORE",
     "VERBS",
     "WAIVERS_NAME",
     "WAIVER_PREFIXES",
@@ -761,6 +833,7 @@ __all__ = [
     "default_config",
     "load_config",
     "load_waivers",
+    "locate_config",
     "waiver_files",
     "with_install_tree",
 ]

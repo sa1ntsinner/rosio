@@ -25,7 +25,10 @@ other row is somebody reading a manual.
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from rosio.errors import UsageError
 
@@ -33,10 +36,15 @@ MECHANISMS = ("instructions", "mcp", "rules", "skill")
 SCOPES = ("project", "user")
 
 SKILL_NAME = "rosio"
-SERVE_COMMAND = "rosio"
-SERVE_ARGS = ("serve",)
-"""stdio is the default transport of `rosio serve` and of `python -m rosio.serve`,
-so the registration names no transport flag and works under either wiring."""
+SERVE_ARGS = ("-m", "rosio", "serve")
+"""stdio is the default transport of `rosio serve`, so the registration names no transport
+flag. The interpreter that runs install starts the server, by its absolute path: an assistant
+started outside the virtual environment has no `rosio` on its PATH."""
+
+
+def serve_command(atlas: Path | None = None) -> tuple[str, ...]:
+    """The command an assistant runs to start this rosio, on `atlas` when one is named."""
+    return (sys.executable, *SERVE_ARGS, *(("--atlas", str(atlas)) if atlas else ()))
 
 
 @dataclass(frozen=True)
@@ -76,10 +84,11 @@ class Target:
         watched = [scope for scope in self.offered if self.proven_at(scope)]
         rest = [scope for scope in self.offered if not self.proven_at(scope)]
         if not watched:
-            return "no scope demonstrated"
+            return "from the tool's documentation"
+        seen = f"seen read at {' and '.join(watched)} scope"
         if not rest:
-            return f"demonstrated at {' and '.join(watched)} scope"
-        return f"demonstrated at {' and '.join(watched)} scope, not at {' and '.join(rest)} scope"
+            return seen
+        return f"{seen}, {' and '.join(rest)} scope from the tool's documentation"
 
     @property
     def writer(self) -> str:
@@ -349,13 +358,14 @@ def check_scope(scope: str) -> str:
     return scope
 
 
-def server_entry(target: Target, command: str = SERVE_COMMAND) -> dict:
-    """The MCP server object this target's config format expects."""
+def server_entry(target: Target, command: Sequence[str]) -> dict:
+    """The MCP server object this target's config format expects, for one command line."""
+    program, *args = command
     if target.entry_style == "local_command":
-        return {"type": "local", "command": [command, *SERVE_ARGS], "enabled": True}
+        return {"type": "local", "command": [program, *args], "enabled": True}
     if target.fmt == "toml":
-        return {"command": command, "args": list(SERVE_ARGS)}
-    return {"type": "stdio", "command": command, "args": list(SERVE_ARGS)}
+        return {"command": program, "args": args}
+    return {"type": "stdio", "command": program, "args": args}
 
 
 def table() -> list[dict]:
@@ -383,7 +393,6 @@ __all__ = [
     "PLATFORMS",
     "SCOPES",
     "SERVE_ARGS",
-    "SERVE_COMMAND",
     "SKILL_NAME",
     "Platform",
     "Target",
@@ -391,6 +400,7 @@ __all__ = [
     "get",
     "keys",
     "platforms",
+    "serve_command",
     "server_entry",
     "table",
 ]

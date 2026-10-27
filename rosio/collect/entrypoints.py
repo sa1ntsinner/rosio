@@ -39,7 +39,7 @@ from pathlib import Path
 from rosio import ids, model
 from rosio.collect import CollectContext, register
 from rosio.errors import UsageError
-from rosio.resolve import py_pipeline, records
+from rosio.resolve import parse_python, py_pipeline, records
 
 LAYER = "declared"
 NAME = "entrypoints"
@@ -173,7 +173,7 @@ def _split(line: str) -> list[str]:
 def _scrape_python(path: str, text: str, tree: ast.Module | None = None) -> ScrapeResult:
     if tree is None:
         try:
-            tree = ast.parse(text)
+            tree = parse_python(text)
         except SyntaxError as exc:
             return ScrapeResult(path=path, parse_error=f"{type(exc).__name__}: {exc}")
     constants = _module_constants(tree)
@@ -553,7 +553,7 @@ def _scan(ws, path: str) -> tuple[ScrapeResult, tuple[records.ParamPipeline, ...
     if Path(path).suffix in PYTHON_SUFFIXES:
         try:
             text = Path(path).read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
+            tree = parse_python(text)
         except (OSError, SyntaxError, ValueError):
             text = tree = None
     relative = _repo_relative(ws, path)

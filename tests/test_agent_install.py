@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -100,12 +101,12 @@ def test_the_table_states_which_scope_was_demonstrated():
     the phrase as well, and the phrase and the flag never disagree."""
     rows = {(row["platform"], row["mechanism"]): row for row in plat.table()}
     assert rows[("claude-code", "skill")]["proof"] == (
-        "demonstrated at user scope, not at project scope"
+        "seen read at user scope, project scope from the tool's documentation"
     )
-    assert rows[("codex", "mcp")]["proof"] == "demonstrated at user scope"
-    assert rows[("copilot", "instructions")]["proof"] == "no scope demonstrated"
+    assert rows[("codex", "mcp")]["proof"] == "seen read at user scope"
+    assert rows[("copilot", "instructions")]["proof"] == "from the tool's documentation"
     for row in plat.table():
-        demonstrated = row["proof"].startswith("demonstrated") and ", not at" not in row["proof"]
+        demonstrated = row["proof"].startswith("seen read") and "documentation" not in row["proof"]
         assert demonstrated is row["verified"], row
         for scope in plat.SCOPES:
             if scope in row["proven"]:
@@ -114,7 +115,7 @@ def test_the_table_states_which_scope_was_demonstrated():
 
 def test_an_unverified_platform_says_so_in_the_install_report(tmp_path):
     report = ins.install("gemini-cli", "project", root=tmp_path, home=tmp_path / "home")
-    assert any("unverified" in note for note in report.notes)
+    assert any("not yet seen read by gemini-cli" in note for note in report.notes)
 
 
 def test_every_mechanism_is_used_by_at_least_one_platform():
@@ -289,9 +290,23 @@ def test_install_writes_the_three_files_claude_code_reads(tmp_path):
     doc = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
     assert doc["mcpServers"]["rosio"] == {
         "type": "stdio",
-        "command": "rosio",
-        "args": ["serve"],
+        "command": sys.executable,
+        "args": ["-m", "rosio", "serve"],
     }
+
+
+def test_the_server_entry_starts_this_rosio_on_this_atlas(tmp_path):
+    """An assistant started outside the virtual environment had no rosio on its PATH, and
+    the atlas it answered from depended on the directory it was started in."""
+    atlas = tmp_path / "rosio-out" / "atlas.json"
+    atlas.parent.mkdir()
+    atlas.write_text("{}", encoding="utf-8")
+    ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
+    entry = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]["rosio"]
+    assert Path(entry["command"]).is_absolute()
+    assert entry["args"] == ["-m", "rosio", "serve", "--atlas", str(atlas)]
+    ins.install("codex", "user", root=tmp_path, home=tmp_path / "home")
+    assert "--atlas" not in (tmp_path / "home/.codex/config.toml").read_text(encoding="utf-8")
 
 
 def test_install_is_idempotent(tmp_path):
@@ -306,7 +321,8 @@ def test_a_dry_run_writes_nothing_and_still_reports_every_file(tmp_path):
     report = ins.install("claude-code", "project", root=tmp_path, dry_run=True)
     assert len(report.actions) == 3
     assert snapshot(tmp_path) == {}
-    assert "would created" in report.text()
+    assert "would create " in report.text()
+    assert "would created" not in report.text()
 
 
 def test_two_roots_get_byte_identical_files(tmp_path):
@@ -458,8 +474,8 @@ def test_the_codex_toml_block_is_valid_and_names_the_serve_command(tmp_path):
     text = config.read_text(encoding="utf-8")
     assert text.startswith('model = "gpt-5"\n')
     assert "[mcp_servers.rosio]" in text
-    assert 'args = ["serve"]' in text
-    assert 'command = "rosio"' in text
+    assert 'args = ["-m", "rosio", "serve"]' in text
+    assert f"command = {json.dumps(sys.executable)}" in text
     assert "type" not in text.split("[mcp_servers.rosio]")[1]
 
 
@@ -468,7 +484,7 @@ def test_the_opencode_entry_uses_the_shape_that_config_expects(tmp_path):
     doc = json.loads((tmp_path / "opencode.json").read_text(encoding="utf-8"))
     assert doc["mcp"]["rosio"] == {
         "type": "local",
-        "command": ["rosio", "serve"],
+        "command": [sys.executable, "-m", "rosio", "serve"],
         "enabled": True,
     }
 
@@ -514,7 +530,7 @@ def test_the_command_line_lists_the_table(capsys):
     assert ins.main(["--list"]) == 0
     out = capsys.readouterr().out
     assert "claude-code" in out
-    assert "unverified" in out
+    assert "from the tool's documentation" in out
 
 
 def test_the_command_line_reports_an_unknown_platform_with_the_usage_exit_code(tmp_path, capsys):
@@ -538,19 +554,19 @@ def test_the_listed_table_prints_what_was_proven_and_not_one_flag_over_two_paths
     assert ins.main(["--list"]) == 0
     out = capsys.readouterr().out
 
-    assert "proof: demonstrated at user scope, not at project scope" in out
-    assert "proof: demonstrated at user scope\n" in out
-    assert "proof: no scope demonstrated" in out
+    assert "checked: seen read at user scope, project scope from the tool's documentation" in out
+    assert "checked: seen read at user scope\n" in out
+    assert "checked: from the tool's documentation" in out
 
 
 def test_every_row_of_the_listed_table_carries_its_own_proof(capsys):
     ins.main(["--list"])
     lines = capsys.readouterr().out.splitlines()
-    rows = [line for line in lines if line and not line.startswith((" ", "platform", "Demonstr"))]
-    proofs = [line.strip() for line in lines if line.strip().startswith("proof:")]
+    rows = [line for line in lines if line and not line.startswith((" ", "platform", "Seen read"))]
+    proofs = [line.strip() for line in lines if line.strip().startswith("checked:")]
 
     assert len(rows) == len(plat.table())
-    assert proofs == [f"proof: {row['proof']}" for row in plat.table()]
+    assert proofs == [f"checked: {row['proof']}" for row in plat.table()]
 
 
 def test_the_listed_table_says_what_demonstrated_means(capsys):
@@ -558,4 +574,4 @@ def test_the_listed_table_says_what_demonstrated_means(capsys):
     out = capsys.readouterr().out
 
     assert "watched it read the file at that path" in out
-    assert "installable anyway" in out
+    assert "installs anyway" in out

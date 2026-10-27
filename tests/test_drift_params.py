@@ -1200,11 +1200,14 @@ def test_param_sim_time_mixed_skips_a_node_the_profile_never_starts():
 
 
 def test_node_text_tells_two_unnamed_nodes_apart_by_namespace():
-    """Three rviz2 instances read as "the rviz2 rviz2 node" three times over."""
+    """Three rviz2 instances read as "the rviz2 rviz2 node" three times over, and a package
+    named after its one executable is named once."""
     one = ids.build_node_synthetic("rviz2", "rviz2", "/robot1", "13cae34e")
     root = ids.build_node_synthetic("rviz2", "rviz2", "/", "b8cfd988")
-    assert rules.node_text(one) == "the rviz2 rviz2 node in /robot1"
-    assert rules.node_text(root) == "the rviz2 rviz2 node"
+    other = ids.build_node_synthetic("nav2_map_server", "map_server", "/", "b8cfd988")
+    assert rules.node_text(one) == "the rviz2 node in /robot1"
+    assert rules.node_text(root) == "the rviz2 node"
+    assert rules.node_text(other) == "the nav2_map_server map_server node"
 
 
 def test_param_orphan_block_finding_id_is_stable_across_two_runs():
@@ -1918,3 +1921,24 @@ def test_param_sim_time_mixed_reachability_is_per_profile():
             profile=profile,
         )
     assert _run(builder.build(), "param.sim_time_mixed") == []
+
+
+def test_param_sim_time_mixed_names_the_include_that_brought_the_value_in():
+    """nav2 states rviz's use_sim_time as a default in rviz_launch.py, and the finding pointed
+    there instead of at the include in the file that starts the profile."""
+    atlas = _sim_time_atlas({"/amcl": True, "/planner": True, "/rviz": False})
+    builder = model.AtlasBuilder()
+    builder.atlas = atlas
+    parent = ids.build_launchfile("demo_bringup", "launch/multi.launch.py")
+    child = ids.build_launchfile("demo_bringup", "launch/demo.launch.py")
+    site = _source("file:demo_bringup|launch/multi.launch.py", "IncludeLaunchDescription", 158)
+    for node in (parent, child):
+        builder.node(node)
+    builder.edge("includes", parent, child, layer=DECLARED, profile=PROFILE, evidence=[site])
+    (found,) = _run(builder.build(), "param.sim_time_mixed")
+    assert (
+        "gets it from demo_bringup/launch/demo.launch.py:12, included at "
+        "demo_bringup/launch/multi.launch.py:158." in found.say
+    )
+    assert "passing use_sim_time at demo_bringup/launch/multi.launch.py:158" in found.fix
+    assert site in found.where

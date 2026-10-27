@@ -69,6 +69,24 @@ def test_the_rover_reports_exactly_the_faults_it_plants(
     assert not list((workspace / "src").rglob("__pycache__")), "extract wrote into the sources"
 
 
+@pytest.mark.ros
+@pytest.mark.slow
+def test_the_rover_extracts_as_shipped_without_a_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The example once declared an install root, so the README sequence stopped at
+    `install root does not exist` until somebody ran colcon build."""
+    workspace = tmp_path / "rover_ws"
+    shutil.copytree(EXAMPLES / "rover_ws", workspace)
+    monkeypatch.chdir(workspace)
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    assert cli.main(["extract", "--quiet"]) in (0, 1)
+    atlas = model.Atlas.loads((workspace / "rosio-out" / "atlas.json").read_text(encoding="utf-8"))
+    found = {(finding.rule, finding.subject_key) for finding in atlas.findings}
+    assert found == PLANTED, sorted(found ^ PLANTED)
+    assert [node.id for node in atlas.by_kind("profile")] == ["profile:rover"]
+
+
 def _extract(workspace: Path, out: Path) -> model.Atlas:
     code = cli.main(
         [

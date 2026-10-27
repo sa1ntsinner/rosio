@@ -1670,3 +1670,38 @@ def test_only_a_package_no_install_root_holds_is_read_from_source(tmp_path: Path
     )
     assert launch_exec.source_shares(workspace) == {"unbuilt": str(tmp_path / "src/unbuilt")}
     assert launch_exec.source_shares(None) == {}
+
+
+ENVIRONMENT_READS = """
+import os
+from os import environ
+from launch.substitutions import EnvironmentVariable
+
+MODEL = os.environ['ROBOT_MODEL']
+
+
+def generate_launch_description():
+    lidar = environ["LIDAR_MODEL"]
+    distro = os.environ.get('ROS_DISTRO')
+    quiet = os.environ.get('QUIET', 'false')
+    home = os.getenv('ROBOT_HOME')
+    port = os.getenv('PORT', '9090')
+    arm = EnvironmentVariable('ARM_MODEL')
+    gripper = EnvironmentVariable(name='GRIPPER', default_value='none')
+    again = os.environ['ROBOT_MODEL']
+    return [lidar, distro, quiet, home, port, arm, gripper, again]
+"""
+
+
+def test_environment_reads_name_every_variable_read_without_a_default():
+    assert launch_exec.environment_reads(ENVIRONMENT_READS) == (
+        "ROBOT_MODEL",
+        "LIDAR_MODEL",
+        "ROS_DISTRO",
+        "ROBOT_HOME",
+        "ARM_MODEL",
+    )
+
+
+def test_environment_reads_of_a_file_that_does_not_parse_are_empty():
+    assert launch_exec.environment_reads("def broken(:") == ()

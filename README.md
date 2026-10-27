@@ -71,11 +71,14 @@ $ rosio drift
 A best effort `SensorDataQoS()` publisher and a reliable subscriber in two languages, a frame
 name one word off, a parameter key one letter off, a yaml value the launch file overrides, a
 block for a node nothing starts. Each is a day lost on a real robot; each is one line here.
+`cd examples/rover_ws && rosio extract && rosio drift` reproduces it, with no build.
 
-Is the clock behind a recording sane? (an excerpt)
+Is the clock behind a recording sane? Put a known fault into a recording of your own and check
+it (an excerpt):
 
 ```
-$ rosio stamps tai
+$ rosio-bagmutate my_recording tai_recording --pathology tai --topic /scan
+$ rosio stamps tai_recording
 ERROR epoch_offset /scan: /scan offset 36.980 s matches the TAI to UTC offset (37 s), check the PTP timescale or a ptp_utc_tai_offset driver setting, stamps ahead of the receiver
 
 verdict:
@@ -84,7 +87,9 @@ verdict:
 
 The usual symptom of that fault is a TF error such as `the timestamp on the message is earlier
 than all the data in the transform cache`, printed by a node that is not at fault.
-`rosio stamps` reads ROS 1 and ROS 2 bags and needs no ROS installation.
+`rosio stamps` reads ROS 1 and ROS 2 bags and needs no ROS installation. The timestamp faults
+it knows, what each looks like and how to reproduce it are in
+[docs/stamps-failure-zoo.md](docs/stamps-failure-zoo.md).
 
 ## Get started
 
@@ -93,24 +98,33 @@ python3 -m venv --system-site-packages .venv && source .venv/bin/activate
 pip install "rosio[cpp,stamps]"
 source /opt/ros/jazzy/setup.bash
 
-rosio init ~/ros2_ws           # rosio.yaml with one profile per launch file, to edit
-rosio extract ~/ros2_ws
+cd ~/ros2_ws
+rosio init                     # rosio.yaml with one profile per launch file, to edit
+rosio extract                  # writes rosio-out/atlas.json here
 rosio drift                    # what is wrong, worst first, each with the line to edit
 rosio render                   # ATLAS_REPORT.md, DRIFT.md and atlas.html
 rosio install claude-code      # register rosio with your assistant
 ```
+
+Every verb reads and writes `rosio-out` in the directory it runs in, and `rosio install` writes
+into it too, so run them from the workspace.
 
 The `--system-site-packages` flag is not optional. Walking a launch tree imports the ROS `launch`
 package, and part of its dependency chain is installed as operating system packages that a plain
 virtual environment hides. Without it rosio refuses to walk anything and says so.
 
 `init` also takes an install tree, such as `/opt/ros/jazzy` or a built workspace's `install/`.
-An installed distribution holds a great many launch files, so name the packages you want:
+An installed distribution holds a great many launch files, so name the packages you want. Nobody
+writes into `/opt/ros`, so the file goes into the directory you run from:
 
 ```bash
-rosio init /opt/ros/jazzy --package nav2_bringup
-rosio extract ~/ros2_ws --install-tree ~/builds/ros2_ws/install   # a build kept apart from the sources
+mkdir nav2 && cd nav2
+rosio init /opt/ros/jazzy --package nav2_bringup --config rosio.yaml
+rosio extract /opt/ros/jazzy --config rosio.yaml
 ```
+
+A build kept apart from the sources is named with
+`rosio extract ~/ros2_ws --install-tree ~/builds/ros2_ws/install`.
 
 `extract` writes the model, `render` writes the three things you read:
 
@@ -236,8 +250,10 @@ accepts, so run the suite with `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`.
 **`rosio: command not found`.** The install directory is not on your PATH. `pipx ensurepath` or
 `uv tool update-shell`, then open a new shell.
 
-**A launch file raised.** Read the reason in the run summary. A launch file that needs an argument
-you did not supply is the common one, and profiles in `rosio.yaml` are where arguments live.
+**A launch file raised.** Read the reason in the run summary, and `rosio drift` names the fix. A
+launch file that needs an argument you did not supply is the common one, and profiles in
+`rosio.yaml` are where arguments live. An environment variable such as a robot model name goes
+under `env` of the profile, and a package no root holds is installed or added as a root.
 
 **The C++ collector refuses.** `pip install 'rosio[cpp]'`. Without it the coded layer covers
 Python only, rosio records that rather than pretending otherwise, and the atlas carries one
@@ -287,7 +303,8 @@ share no flag.
 
 Configuration lives in `rosio.yaml`: the roots to read, and one profile per system you actually
 run, each naming its entry points and their arguments. No single launch file describes a running
-robot, so a profile is an ordered set of entry points rather than one file.
+robot, so a profile is an ordered set of entry points rather than one file. Every key, its
+default and where the file is looked for are in [docs/configuration.md](docs/configuration.md).
 
 ```yaml
 roots:

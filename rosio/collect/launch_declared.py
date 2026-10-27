@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -311,12 +312,12 @@ class LaunchDeclaredCollector:
                     "path": _rel_or_path(ctx.ws, failure.path, ctx.cfg.ros_setup),
                     "phase": failure.phase,
                     "exc_type": failure.exc_type,
-                    "message": failure.message,
+                    "message": relabel_searched(ctx.ws, failure.message, ctx.cfg.ros_setup),
                 }
                 if failure.kept:
                     row["kept"] = failure.kept
                 if failure.env:
-                    row["env"] = failure.env
+                    row["env"] = _unset_variables(failure, spec)
                 if _unrun(failure):
                     # A file only a process writes is the walk's blind spot, stated by the
                     # unresolved entry of this file, and nothing the launch file can repair.
@@ -1476,6 +1477,76 @@ def _in_workspace(ws: Workspace, path: str) -> bool:
     return True
 
 
+_MISSING_PACKAGE = re.compile(r"package '([^']+)' not found")
+_SEARCHING = re.compile(r", searching: \[([^\]]*)\]")
+_SEARCHED_DISTRO = re.compile(r"searched: [^\"]*?\bROS ([A-Za-z0-9_]+)")
+_DISTRO_PREFIX = re.compile(r"/opt/ros/([A-Za-z0-9_]+)/?")
+
+
+def missing_package(message: str) -> tuple[str, str] | None:
+    """The package a `PackageNotFoundError` names and the ROS release it searched, when the
+    message says which. `relabel_searched` wrote the second half."""
+    found = _MISSING_PACKAGE.search(message)
+    if found is None:
+        return None
+    distro = _SEARCHED_DISTRO.search(message)
+    return found.group(1), distro.group(1) if distro else ""
+
+
+def relabel_searched(ws: Workspace, message: str, ros_setup: Sequence[str] = ()) -> str:
+    """`searching: ['@outside']` as the trees a person configured, by label.
+
+    The walk states the prefixes it was handed (`@install`, `@outside` for the directory of a
+    setup file), which names nothing a reader can act on, so each one is named by its root,
+    or by the ROS release that installed it."""
+    kinds = {str(spec.kind) for spec in ws.roots}
+
+    def label(prefix: str) -> str:
+        head = prefix[1:].split("/", 1)[0] if prefix.startswith("@") else ""
+        if head in kinds:
+            kind, paths = head, [str(spec.path) for spec in ws.roots if spec.kind == head]
+        elif prefix == OUTSIDE:
+            kind, paths = "", [str(Path(setup).parent) for setup in ros_setup]
+        else:
+            inside = [spec for spec in ws.roots if _under_path(prefix, str(spec.path))]
+            kind, paths = (str(inside[0].kind) if inside else ""), [prefix]
+        distros = [found.group(1) for found in map(_DISTRO_PREFIX.fullmatch, paths) if found]
+        if distros:
+            return f"ROS {distros[0]}" + (f" ({kind} root)" if kind else "")
+        if kind:
+            return f"the {kind} root"
+        return "the sourced setup files" if prefix == OUTSIDE else "a prefix outside every root"
+
+    def searched(match: re.Match[str]) -> str:
+        prefixes = re.findall(r"'([^']*)'", match.group(1))
+        labels = list(dict.fromkeys(label(prefix) for prefix in prefixes))
+        return f", searched: {', '.join(labels) or 'nothing'}"
+
+    return _SEARCHING.sub(searched, message)
+
+
+def _under_path(path: str, root: str) -> bool:
+    return (path.rstrip("/") + "/").startswith(root.rstrip("/") + "/")
+
+
+def _unset_variables(failure: records.WalkException, spec: ProfileSpec) -> str:
+    """The variable the walk stopped at, then every other one the same file reads with no
+    default that neither the profile nor this environment sets, so one extract names them
+    all. TurtleBot3 needs LDS_MODEL as well as TURTLEBOT3_MODEL, and the second used to
+    surface only after a second extract with the first one set."""
+    try:
+        source = Path(failure.path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return failure.env
+    stated = {key for key, _value in spec.env}
+    others = [
+        name
+        for name in _launch_exec().environment_reads(source)
+        if name != failure.env and name not in stated and name not in os.environ
+    ]
+    return " ".join([failure.env, *others])
+
+
 def unloadable_title(label: str, because: str = "") -> str:
     """One line for a file that produced no node, in the wording its own cause deserves."""
     if because == REFUSED_UNAVAILABLE:
@@ -2253,6 +2324,8 @@ __all__ = [
     "REFUSED_ROS1",
     "REFUSED_UNAVAILABLE",
     "LaunchDeclaredCollector",
+    "missing_package",
+    "relabel_searched",
     "unloadable_fix",
     "unloadable_say",
     "unloadable_title",

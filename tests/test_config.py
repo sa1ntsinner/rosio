@@ -15,6 +15,7 @@ from rosio.config import (
     RootSpec,
     default_config,
     load_config,
+    locate_config,
 )
 from rosio.errors import UsageError
 from rosio.workspace import Workspace
@@ -234,3 +235,46 @@ def test_entrypoint_and_profile_validation() -> None:
         ProfileSpec(slug="")
     with pytest.raises(UsageError):
         RootSpec("elsewhere", "/tmp")
+
+
+def test_a_top_level_env_says_it_belongs_under_a_profile(bench: Path) -> None:
+    _write(bench / CONFIG_NAME, "env:\n  TURTLEBOT3_MODEL: burger\n")
+    with pytest.raises(UsageError, match="env goes under a profile"):
+        load_config(None, workspace=str(bench))
+
+
+def test_a_config_in_the_working_directory_is_read_after_the_workspace_one(
+    bench: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`rosio init /opt/ros/jazzy --config ./rosio.yaml` then `rosio extract /opt/ros/jazzy`
+    from the same directory walked every launch file of the distribution."""
+    here = tmp_path_factory.mktemp("here")
+    monkeypatch.chdir(here)
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    assert locate_config(None, workspace=str(bench)) is None
+    _write(here / CONFIG_NAME, "profiles:\n  - slug: from_here\n")
+    assert locate_config(None, workspace=str(bench)) == here / CONFIG_NAME
+    assert [p.slug for p in load_config(None, workspace=str(bench)).profiles] == ["from_here"]
+    _write(bench / CONFIG_NAME, "profiles:\n  - slug: from_workspace\n")
+    assert locate_config(None, workspace=str(bench)) == bench / CONFIG_NAME
+    explicit = _write(here / "other.yaml", "profiles:\n  - slug: named\n")
+    assert locate_config(str(explicit), workspace=str(bench)) == explicit
+
+
+def test_the_resolution_budget_is_a_config_key_that_decides_the_atlas(bench: Path) -> None:
+    _write(bench / CONFIG_NAME, "resolution_budget: 0.8\n")
+    stated = load_config(None, workspace=str(bench))
+    assert stated.resolution_budget == 0.8
+    _write(bench / CONFIG_NAME, "resolution_budget: {overall: 0.8, topic_name: 0.5}\n")
+    per_want = load_config(None, workspace=str(bench))
+    assert per_want.resolution_budget == {"overall": 0.8, "topic_name": 0.5}
+    assert default_config(str(bench)).resolution_budget is None
+    assert (
+        len(
+            {stated.fingerprint(), per_want.fingerprint(), default_config(str(bench)).fingerprint()}
+        )
+        == 3
+    )
+    _write(bench / CONFIG_NAME, "resolution_budget: high\n")
+    with pytest.raises(UsageError, match="resolution_budget"):
+        load_config(None, workspace=str(bench))

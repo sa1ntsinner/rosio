@@ -29,7 +29,7 @@ from rosio.errors import CollectorError, ContractError
 from rosio.migrate import cmake, distros
 from rosio.migrate.rules import Catalog, Rule, catalog
 from rosio.model import dumps, dumps_line
-from rosio.resolve import yaml_lines
+from rosio.resolve import parse_python, yaml_lines
 
 CPP_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".ipp", ".tpp")
 DEPEND_TAGS = (
@@ -853,7 +853,7 @@ def _literal_end(text: str, i: int) -> int:
 
 def _python(context, package, path, text) -> Iterable[Change]:
     try:
-        tree = ast.parse(text)
+        tree = parse_python(text)
     except SyntaxError:
         return
     offsets = _Offsets(text)

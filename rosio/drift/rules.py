@@ -359,7 +359,12 @@ def node_text(node_id: str) -> str:
     parsed = ids.parse_node(node_id)
     if parsed.synthetic:
         where = f" in {parsed.namespace}" if parsed.namespace not in ("", "/") else ""
-        return f"the {parsed.package} {parsed.executable} node{where}"
+        name = (
+            parsed.executable
+            if parsed.executable == parsed.package
+            else f"{parsed.package} {parsed.executable}"
+        )
+        return f"the {name} node{where}"
     return parsed.fqn or node_id
 
 

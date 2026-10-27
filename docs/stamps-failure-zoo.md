@@ -6,10 +6,10 @@ Each entry has the same four parts.
 
 - **Symptom.** What you see first. Usually not a timestamp complaint at all, but a transform error, a localisation dropout or an odometry solver that refuses to initialise. Where a public report documents the exact text, it is quoted verbatim so the search that brought you here matches.
 - **Cause.** The mechanism underneath, in one paragraph.
-- **What stampdoctor reports.** The check name, the severity, and the wording stamplint prints. Run `stamplint /path/to/bag` on the recording, or run the `stampdoctor` node against the live system, and compare.
+- **What rosio reports.** The check name, the severity, and the wording `rosio stamps` prints. Run `rosio stamps /path/to/bag` on the recording, or `rosio probe --stamps --duration 10` against the live system, and compare.
 - **Reference.** Public issues, dataset documentation and standards text. Every link here was fetched and read while writing this page. Where a claim could not be confirmed in the source, the entry says so instead of quoting.
 
-Several entries end with a `bagmutate` line. That command injects the same fault into a clean recording of your own, so you can confirm what the failure looks like in your pipeline before you go hunting for it in a real bag. Where no preset reproduces the failure honestly, the entry says that too.
+Several entries end with a `rosio-bagmutate` line. That command injects the same fault into a clean recording of your own, so you can confirm what the failure looks like in your pipeline before you go hunting for it in a real bag. Where no preset reproduces the failure honestly, the entry says that too.
 
 A note on how the checks are built. `epoch_offset` compares the header stamp with the time the recorder wrote the message, classifies the difference against known constants, and separately tests whether the stamp is plausible in absolute terms. `inter_topic_skew` compares each topic against the median of the bag. `clock_drift` fits a slope through the offset over time. `monotonic`, `frozen_stamps`, `zero_stamps` and `stamp_gaps` look at one topic's stamp sequence on its own. Whatever the class, the reported severity is `error` when the recording cannot be trusted for fusion and `warning` when it merits a look.
 
@@ -29,7 +29,7 @@ In the more extreme form the offset is not 37 seconds at all. In ouster-ros issu
 
 The driver side of this is a configuration parameter. ouster-ros introduced `ptp_utc_tai_offset` with a default of `-37.0`, and issue 231 argues for changing that default because upgrading users had to "change the aforementioned parameter from `-37.0` to `0.0` for our synchronization to work properly again". Whichever value is right for a given rig, it is a manual constant that nothing validates, so it is a permanent source of this failure.
 
-**What stampdoctor reports.** `epoch_offset`, severity `error`, class `tai utc offset`:
+**What rosio reports.** `epoch_offset`, severity `error`, class `tai utc offset`:
 
 ```
 ERROR epoch_offset /os_cloud_node/points: /os_cloud_node/points offset 37.000 s matches the TAI to UTC offset (37 s), check the PTP timescale or a ptp_utc_tai_offset driver setting, stamps ahead of the receiver
@@ -43,7 +43,7 @@ ERROR epoch_offset /os_cloud_node/points: /os_cloud_node/points stamps are 74986
 
 If only the lidar carries the offset while the rest of the bag is clean, the verdict line names the fix directly: set the PTP timescale to UTC or correct a `ptp_utc_tai_offset` style setting on that driver. If every topic carries it, the verdict points at the recorder host clock instead of the sensors.
 
-Live, the `stampdoctor` node reaches the same classification from its rolling window, and its `ptp` time source status shows the grandmaster identity and the master offset that explain where the timescale came from.
+Live, `rosio probe --stamps` reaches the same classification from its sampling window.
 
 **Reference.**
 
@@ -56,8 +56,8 @@ Live, the `stampdoctor` node reaches the same classification from its rolling wi
 **Reproduce it.**
 
 ```
-bagmutate clean.bag out --pathology tai
-bagmutate clean.bag out --pathology ouster_ptp
+rosio-bagmutate clean.bag out --pathology tai
+rosio-bagmutate clean.bag out --pathology ouster_ptp
 ```
 
 ## GPS against UTC, the 18 second leap offset
@@ -68,7 +68,7 @@ bagmutate clean.bag out --pathology ouster_ptp
 
 The value is not a constant of nature, it steps whenever a leap second is inserted, which is why code that hardcodes it silently rots. IERS Bulletin C also announces that no leap second will be introduced at the end of December 2026, so 18 is correct for now.
 
-**What stampdoctor reports.** `epoch_offset`, severity `error`, class `gps utc leap offset`:
+**What rosio reports.** `epoch_offset`, severity `error`, class `gps utc leap offset`:
 
 ```
 ERROR epoch_offset /gnss/fix: /gnss/fix offset 18.000 s matches the GPS to UTC leap offset (18 s), the source likely serves GPS time as UTC, stamps ahead of the receiver
@@ -87,8 +87,8 @@ When only the GNSS topics carry it, `inter_topic_skew` fires alongside on those 
 **Reproduce it.**
 
 ```
-bagmutate clean.bag out --pathology gps_leap
-bagmutate clean.bag out --pathology gps_leap --magnitude -18
+rosio-bagmutate clean.bag out --pathology gps_leap
+rosio-bagmutate clean.bag out --pathology gps_leap --magnitude -18
 ```
 
 ## The source clock was never set, stamps in 1970 or near zero
@@ -103,7 +103,7 @@ The pure form is a stamp of exactly zero, or a stamp a few seconds after the Uni
 
 **Cause.** Two mechanisms, same signature. Either the publisher never fills the header at all, so the stamp stays at its zero initialised value, or the source device has its own clock that came up unset and counts from its own boot rather than from the epoch. Embedded sensors, microcontroller bridges and any node that constructs a message without calling the clock all land here. The realsense case is the second kind, a sensor clock running on its own base and never disciplined to the host.
 
-**What stampdoctor reports.** Two checks, both `error`, depending on which mechanism it is.
+**What rosio reports.** Two checks, both `error`, depending on which mechanism it is.
 
 A hard zero:
 
@@ -129,7 +129,7 @@ On a multi topic bag the same topic normally also trips `inter_topic_skew` with 
 **Reproduce it.**
 
 ```
-bagmutate clean.bag out --pathology zero --topic /scan
+rosio-bagmutate clean.bag out --pathology zero --topic /scan
 ```
 
 ## A post processing shift applied to both clocks
@@ -142,7 +142,7 @@ bagmutate clean.bag out --pathology zero --topic /scan
 
 That is a reasonable thing for a dataset publisher to do, and it is invisible to every relative check, because the shift was applied to the record timestamps as well as to the header stamps. We measured it: image stamps start at exactly 10000.000000 s and the IMU at 9999.253204 s, while the median of receive minus stamp is 0.000000 s on all three topics. Any tool that only compares the two clocks against each other declares the bag perfect.
 
-**What stampdoctor reports.** This case is why `epoch_offset` tests absolute plausibility before it tests the offset. The first nonzero stamp of each topic is compared against a floor of 2005-01-01 UTC, and a stamp below it is an `error` regardless of how well the two clocks agree:
+**What rosio reports.** This case is why `epoch_offset` tests absolute plausibility before it tests the offset. The first nonzero stamp of each topic is compared against a floor of 2005-01-01 UTC, and a stamp below it is an `error` regardless of how well the two clocks agree:
 
 ```
 ERROR epoch_offset /alphasense/imu: /alphasense/imu stamps sit in year 1970, before the plausibility floor of 2005, source clock was never set or a post processing shift moved them
@@ -155,7 +155,7 @@ The message covers both readings deliberately, because from the bag alone the tw
 - Hilti Trimble SLAM Challenge 2026, timestamp convention: https://huggingface.co/datasets/Hilti-Research/hilti-trimble-slam-challenge-2026
 - Challenge repository: https://github.com/Hilti-Research/hilti-trimble-slam-challenge-2026
 
-**Reproduce it.** No preset reproduces this one honestly. `bagmutate` shifts header stamps and copies the record timestamps untouched, which is the opposite of what happened here, so `bagmutate clean.bag out --pathology offset --magnitude -1600000000` produces a bag that the offset gate catches for the wrong reason. Building a true positive control means rewriting the record timestamps as well, which the mutation tool deliberately does not do.
+**Reproduce it.** No preset reproduces this one honestly. `rosio-bagmutate` shifts header stamps and copies the record timestamps untouched, which is the opposite of what happened here, so `rosio-bagmutate clean.bag out --pathology offset --magnitude -1600000000` produces a bag that the offset gate catches for the wrong reason. Building a true positive control means rewriting the record timestamps as well, which the mutation tool deliberately does not do.
 
 ## A driver serving the wrong scale because of one configuration flag
 
@@ -167,7 +167,7 @@ with the concrete pair `sec: 1731667491` published while UTC was `1731659021`. T
 
 **Cause.** GNSS drivers usually expose a switch between the host clock and the receiver clock, and the two paths have different bugs. The receiver path can serve a time of week without the week number, a local time with a zone applied, a time that is only valid once the receiver has a fix, or GPS time labelled as UTC. The switch is a boolean in a YAML file, it is set once during bringup, and nothing downstream ever validates the result. Offsets that are near multiples of an hour are the tell: they come from a timezone or a coarse initialisation, not from a leap second and not from network latency.
 
-**What stampdoctor reports.** An offset of this size fits no known constant, and the stamps run ahead of the recorder, so it comes out as `epoch_offset`, severity `error`, class `stamps from the future`:
+**What rosio reports.** An offset of this size fits no known constant, and the stamps run ahead of the recorder, so it comes out as `epoch_offset`, severity `error`, class `stamps from the future`:
 
 ```
 ERROR epoch_offset /gnss/navsatfix: /gnss/navsatfix stamps run 9000.000 s ahead of the receiving clock
@@ -182,7 +182,7 @@ If the GNSS topics are the only ones affected, which is the usual shape, `inter_
 **Reproduce it.**
 
 ```
-bagmutate clean.bag out --pathology septentrio
+rosio-bagmutate clean.bag out --pathology septentrio
 ```
 
 ## Stamps that go backwards or stop moving under load
@@ -199,7 +199,7 @@ Backwards stamps also arrive from the recorder rather than the sensor. rosbag2 i
 
 **Cause.** A driver that computes its stamp on the CPU rather than in hardware inherits every scheduling delay on the host. Under load the arrival order of the buffers stops matching the acquisition order, or the driver skips the clock read and reuses the previous value, or two threads write the header from different clock sources. Split bag replay adds an ordering hazard on top that has nothing to do with the sensor at all.
 
-**What stampdoctor reports.** Three checks, and which one fires tells you which face you have.
+**What rosio reports.** Three checks, and which one fires tells you which face you have.
 
 ```
 ERROR monotonic /camera/imu: /camera/imu stamps go backwards, largest jump 1.500000000 s
@@ -220,8 +220,8 @@ The verdict adds the reading. For `monotonic` it states that the source clock st
 **Reproduce it.**
 
 ```
-bagmutate clean.bag out --pathology backward --at 0.5
-bagmutate clean.bag out --pathology frozen --length 25
+rosio-bagmutate clean.bag out --pathology backward --at 0.5
+rosio-bagmutate clean.bag out --pathology frozen --length 25
 ```
 
 ## Recorder dropouts, every topic at once
@@ -234,7 +234,7 @@ Downstream this is the failure that looks like a sensor fault and is not one. Od
 
 **Cause.** The recorder, not the sensors. Write bandwidth exceeded the disk, or a compression thread stalled, or the host swapped. Every topic sharing the recorder shares the gap, which is exactly what separates this from a single sensor dropping out.
 
-**What stampdoctor reports.** `stamp_gaps`, severity `warning`, one finding per affected topic:
+**What rosio reports.** `stamp_gaps`, severity `warning`, one finding per affected topic:
 
 ```
 WARNING stamp_gaps /os_cloud_node/points: /os_cloud_node/points has stamp gaps, largest 1.032 s against a median 0.100 s
@@ -258,7 +258,7 @@ Three or more topics gapping inside a two second window is what triggers that se
 **Reproduce it.**
 
 ```
-bagmutate clean.bag out --pathology dropout --magnitude 2.0
+rosio-bagmutate clean.bag out --pathology dropout --magnitude 2.0
 ```
 
 ## Multi sensor rigs whose clocks drift apart
@@ -273,13 +273,13 @@ with a measured figure of "Relative drift is about 58.78 ms/h", attributed to th
 
 **Cause.** Two independent oscillators, each free running, each with its own frequency error. A crystal that is 20 parts per million off produces 72 ms of divergence per hour on its own. Nothing in the data model notices, because both streams are internally consistent and monotonic, and any check that looks at a single instant sees agreement. Only the slope over a long window reveals it. This is also why the failure survives every review that consists of playing back the first thirty seconds of a bag.
 
-**What stampdoctor reports.** `clock_drift`, which fits a line through the offset between each topic's stamps and the recorder clock:
+**What rosio reports.** `clock_drift`, which fits a line through the offset between each topic's stamps and the recorder clock:
 
 ```
 WARNING clock_drift /camera/imu: /camera/imu clock drifts at 0.150 ms/s against the receiver, its source clock is unsynchronized
 ```
 
-Drift is reported as a `warning` above 1e-4 s per s and an `error` above 1e-3 s per s. Calibrate your expectations against the Newer College number before you go looking: 58.78 ms/h is 1.633e-5 s per s, well under the warning floor, so a rig drifting at that rate is not reported by this check at all. It still costs 0.01 s of misalignment after ten minutes and 0.06 s after an hour, which is enough to matter for a spinning lidar. The floor is set where it is because anything lower is not separable from ordinary offset noise on a short recording. To avoid calling a single step a drift, the check requires at least 30 messages over at least 5 seconds and requires each half of the series to reproduce at least half the overall slope with the same sign. A dropout produces a step in one half and nothing in the other, so it does not qualify. Both slopes are loose bringup heuristics rather than an error budget, so a silent `clock_drift` is not a statement that the rig is aligned, only that it is not visibly falling apart. The README section on thresholds says which constants to move if you have a budget of your own, `DRIFT_WARN_S_PER_S` and `DRIFT_ERROR_S_PER_S` in `stamplint/src/stamplint/checks/clock.py`.
+Drift is reported as a `warning` above 1e-4 s per s and an `error` above 1e-3 s per s. Calibrate your expectations against the Newer College number before you go looking: 58.78 ms/h is 1.633e-5 s per s, well under the warning floor, so a rig drifting at that rate is not reported by this check at all. It still costs 0.01 s of misalignment after ten minutes and 0.06 s after an hour, which is enough to matter for a spinning lidar. The floor is set where it is because anything lower is not separable from ordinary offset noise on a short recording. To avoid calling a single step a drift, the check requires at least 30 messages over at least 5 seconds and requires each half of the series to reproduce at least half the overall slope with the same sign. A dropout produces a step in one half and nothing in the other, so it does not qualify. Both slopes are loose bringup heuristics rather than an error budget, so a silent `clock_drift` is not a statement that the rig is aligned, only that it is not visibly falling apart. With a budget of your own, the constants to move are `DRIFT_WARN_S_PER_S` and `DRIFT_ERROR_S_PER_S` in `rosio/stamps/clock.py`.
 
 The verdict converts the slope into the number that decides whether you care:
 
@@ -297,15 +297,15 @@ Alongside it, `inter_topic_skew` catches the static part of the same problem, a 
 **Reproduce it.** The `drift` preset rescales stamps against elapsed time instead of shifting them, so its magnitude is a slope in seconds per second, applied from `--at` onward. A single topic offset produces the skew half of this entry without the drift half:
 
 ```
-bagmutate clean.bag out --pathology drift --at 0 --magnitude 0.02
-bagmutate clean.bag out --pathology offset --topic /camera/imu --magnitude 0.3
+rosio-bagmutate clean.bag out --pathology drift --at 0 --magnitude 0.02
+rosio-bagmutate clean.bag out --pathology offset --topic /camera/imu --magnitude 0.3
 ```
 
 The corpus carries both as `synthetic-drift` and `synthetic-skew`. A slope has to be present across the whole recording to be reported, so a drift injected halfway through a bag is not detected.
 
 ## Corpus entries that exercise these cases
 
-The checks above are validated against a manifest of public recordings in `corpus/manifest.yaml`, in four tiers: `control` recordings that must stay quiet, `buggy` recordings with a publicly documented defect, `noise` unlabelled data used to hunt reader crashes, and `synthetic` positive controls built offline with `bagmutate`. The data is never committed. `python corpus/fetch.py --list` shows the manifest and `python corpus/run.py` checks whatever is on disk against the expected findings.
+The checks above are validated against a manifest of public recordings in `corpus/stamps/manifest.yaml`, in four tiers: `control` recordings that must stay quiet, `buggy` recordings with a publicly documented defect, `noise` unlabelled data used to hunt reader crashes, and `synthetic` positive controls built offline with `rosio-bagmutate`. The data is never committed. `python corpus/stamps/fetch.py --list` shows the manifest and `python corpus/stamps/run.py` checks whatever is on disk against the expected findings.
 
 - `synthetic-tai-offset`, the TAI against UTC entry. A clean 12 second scan bag with every stamp moved 37 seconds off the record clock. Expects `epoch_offset` at `error` on `/scan`, forbids `stamp_gaps` and `monotonic`.
 - `synthetic-dropout`, the recorder dropout entry. A 2 second window of scans removed from the middle of the same clean bag, the shape Hilti 2021 issue 13 describes. Expects `stamp_gaps` at `warning` on `/scan`, forbids `epoch_offset` and `monotonic`.

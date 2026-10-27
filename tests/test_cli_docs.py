@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from rosio import cli, model
+from rosio import cli, config, model, scaffold
 from rosio.agent import install as agent_install
-from rosio.drift import rules
+from rosio.drift import build, rules
 from rosio.serve import tools
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -187,3 +187,37 @@ def test_the_server_readme_documents_every_custom_method():
     methods = set(re.findall(r'"(rosio/[A-Za-z]+|rosio-lsp\.[A-Za-z]+)"', source))
     readme = doc("crates/rosio-lsp/README.md")
     assert sorted(m for m in methods if f"`{m}`" not in readme) == []
+
+
+# ---------------------------------------------------------------------------
+# the configuration reference
+
+
+def _table_keys(text: str, heading: str) -> set[str]:
+    (section,) = [part for part in text.split("\n## ") if part.startswith(f"{heading}\n")]
+    return set(re.findall(r"^\| `([a-z_]+)` \|", section, flags=re.MULTILINE))
+
+
+@pytest.mark.parametrize(
+    ("heading", "keys"),
+    [
+        ("Top level", "_TOP_KEYS"),
+        ("A root", "_ROOT_KEYS"),
+        ("A profile", "_PROFILE_KEYS"),
+        ("An entry point", "_ENTRY_KEYS"),
+        ("A waiver file", "_WAIVER_KEYS"),
+    ],
+)
+def test_the_configuration_page_lists_exactly_the_keys_the_loader_accepts(heading, keys):
+    assert _table_keys(doc("docs/configuration.md"), heading) == set(getattr(config, keys))
+
+
+def test_the_configuration_page_states_the_defaults_the_code_uses():
+    text = flat(doc("docs/configuration.md"))
+    assert f"`{int(config.DEFAULT_LAUNCH_TIMEOUT)}`" in text
+    assert f"`{config.DEFAULT_OUT_DIR}`" in text
+    assert f"`{build.DEFAULT_RESOLUTION_BUDGET}` overall" in text
+    for pattern in config.INSTALL_PREFIX_IGNORE:
+        assert f"`{pattern}`" in text
+    assert "docs/configuration.md" in scaffold.HEADER
+    assert "docs/configuration.md" in doc("README.md")
