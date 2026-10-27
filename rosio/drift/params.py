@@ -63,6 +63,7 @@ rule without a reason tells a reader the rule looked and found nothing.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -457,9 +458,10 @@ def _nearest_name(name: str, declared: set[str]) -> str:
     """The declared name a mistyped key most likely meant, or nothing when none is close.
 
     Close means one slip of the hand: a letter missing, added, wrong or swapped with its
-    neighbour. `min_laser_range` beside `max_laser_range` differs by a word, and naming one
-    the misspelling of the other sends an engineer to rename a parameter that is merely
-    undeclared.
+    neighbour, inside a word of three letters or more. `min_laser_range` beside
+    `max_laser_range` differs by a word, and `kd` beside `ki` or `x_min` beside `y_min` by a
+    word of one or two letters, so naming one the misspelling of the other sends an engineer
+    to rename a parameter that is merely undeclared.
     """
     return next((item for item in sorted(declared - {name}) if _one_slip(name, item)), "")
 
@@ -470,11 +472,23 @@ def _one_slip(a: str, b: str) -> bool:
     start = 0
     while start < min(len(a), len(b)) and a[start] == b[start]:
         start += 1
+    if min(len(_word_at(a, start)), len(_word_at(b, start))) < 3:
+        return False
     a, b = a[start:], b[start:]
     if len(a) == len(b):
         return a[1:] == b[1:] or (a[2:] == b[2:] and a[:2] == b[1::-1])
     shorter, longer = sorted((a, b), key=len)
     return longer[1:] == shorter
+
+
+def _word_at(name: str, index: int) -> str:
+    """The word of a dotted or underscored name that holds `index`, or ends just before it."""
+    position = 0
+    for word in re.split(r"[._/]", name):
+        if position <= index <= position + len(word):
+            return word
+        position += len(word) + 1
+    return ""
 
 
 @rules.register("param.declared_unread")

@@ -2149,3 +2149,11 @@ def test_param_set_undeclared_offers_a_name_one_slip_away():
     for typo, meant in (("stop_distnce", "stop_distance"), ("max_spede", "max_speed")):
         found = _run(_undeclared_atlas(typo, declared=(meant,)), "param.set_undeclared")
         assert f"declares {meant}, which is likely what was meant" in found[0].say
+
+
+def test_param_set_undeclared_offers_no_name_whose_whole_word_changed():
+    """`kd` beside `ki`, or `x_min` beside `y_min`, are other parameters: the slip replaced a
+    word of one or two letters whole, and a short gain or axis name is never a typo of another."""
+    for name, other in (("kd", "ki"), ("x_min", "y_min")):
+        found = _run(_undeclared_atlas(name, declared=(other,)), "param.set_undeclared")
+        assert "likely what was meant" not in found[0].say, name
