@@ -24,7 +24,9 @@ Six responsibilities, in order:
 3. Supersede identity when the code states what the launch file did not. A node the declared
    layer named from the executable table, whose source states a literal node name, becomes
    the real node id. An ambiguous match never supersedes: both entities stay and exactly one
-   `node.ambiguous_identity` finding is emitted.
+   `node.ambiguous_identity` finding is emitted. A process whose source names each of its
+   nodes with a literal of its own, started by a site that names none, splits into one node
+   per name, and a site that does name it gives all of them that one name, which is reported.
 4. Attach the coded parameter declarations to the parameter entities the declared layer
    built, so a parameter set in yaml that no code declares and a parameter declared in code
    that no yaml sets are both readable in one pass.
@@ -64,7 +66,7 @@ from typing import Any
 
 from rosio import ids, model
 from rosio.errors import ContractError
-from rosio.resolve import known_names, ros_args, wrappers
+from rosio.resolve import known_names, ros_args, wrappers, yaml_lines
 
 CODED = model.Layer.CODED.value
 DECLARED = model.Layer.DECLARED.value
@@ -947,6 +949,24 @@ def declared_names(atlas: model.Atlas) -> dict[tuple[str, str], set[str]]:
             parsed = ids.parse_param(edge.dst)
             for fact in edge.facts:
                 out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
+    bound = {
+        source
+        for node in atlas.by_kind(model.NodeKind.NODE.value)
+        for fact in node.facts
+        if fact.layer == CODED
+        for source in fact.values.get("coded_sources") or []
+    }
+    for carrier in carriers(atlas):
+        if not carrier.file or carrier.file in bound:
+            continue
+        package = ids.build_pkg(ids.parse_file(carrier.file).package)
+        for row in (*carrier.parameters, *carrier.parameter_reads):
+            try:
+                out.setdefault((package, model.ANY_PROFILE), set()).add(
+                    ids.normalise_param_name(str(row.get("name") or ""))
+                )
+            except ContractError:
+                continue
     return out
 
 
@@ -977,7 +997,8 @@ def reading(
     a class defined in another file, with no declaration bound, read none of them. A node
     built to take undeclared parameters, or one whose value it cannot tell, uses them. A
     declaration whose name is built at run time hides only the keys its literal text allows,
-    so one such line no longer exempts every key of the file.
+    so one such line no longer exempts every key of the file. A key the package declares in
+    code the join bound to no node, a helper class handed the node, cannot be called absent.
     """
     parsed = ids.parse_param(node.id)
     owner = atlas.entities.get(parsed.owner)
@@ -998,6 +1019,9 @@ def reading(
     own = node.fact(CODED, profile)
     if parsed.name in names or (own is not None and own.values.get("declared_in_code")):
         return DECLARED_STATE
+    packages = {ids.build_pkg(ids.parse_file(item).package) for item in sources}
+    if any(parsed.name in declared_in(declared, package, profile) for package in packages):
+        return ""
     if any(could_name(expr, parsed.name) for item in sources for expr in blind.get(item, ())):
         return UNKNOWN_STATE
     return UNDECLARED_STATE
@@ -1357,15 +1381,15 @@ def _code_names(found: tuple[Carrier, ...]) -> list[str]:
 
 def _code_namespace(found: tuple[Carrier, ...]) -> str:
     """The namespace the sources state, absolute, empty when they state none or disagree."""
-    stated = set()
-    for carrier in found:
-        for row in carrier.nodes:
-            if str(row.get("namespace_source") or "") != "literal":
-                continue
-            name = str(row.get("namespace") or "").strip()
-            if name:
-                stated.add(name if name.startswith("/") else f"/{name}")
+    stated = {_row_namespace(row) for carrier in found for row in carrier.nodes} - {""}
     return stated.pop() if len(stated) == 1 else ""
+
+
+def _row_namespace(row: dict[str, Any]) -> str:
+    if str(row.get("namespace_source") or "") != "literal":
+        return ""
+    name = str(row.get("namespace") or "").strip()
+    return "" if not name else name if name.startswith("/") else f"/{name}"
 
 
 def _placed(item: Instance, stated: str) -> Instance:
@@ -1387,11 +1411,21 @@ def _supersede(
 ) -> None:
     atlas = builder.atlas
     rows: list[tuple[Instance, list[str], str]] = []
+    splits: dict[str, tuple[Instance, dict[str, dict[str, Any]]]] = {}
     for item in instances(atlas):
         found, _ = index.of(item)
         if not found or item.node_id not in atlas.entities:
             continue
         names = _code_names(found)
+        nodes = _split_names(found)
+        if nodes:
+            if atlas.entities[item.node_id].attrs.get("name_from_code"):
+                continue
+            if item.name_source in UNNAMED:
+                splits.setdefault(item.node_id, (item, nodes))
+            else:
+                _collision(builder, item, sorted(nodes), report)
+            continue
         contexts = {
             row["construction"]
             for carrier in found
@@ -1409,10 +1443,7 @@ def _supersede(
         item = _placed(item, _code_namespace(found))
         if item.known_name and item.known_name not in names:
             report.contradictions.append((item.pkg, item.executable, item.known_name, names[0]))
-        if item.name_source not in (
-            model.NameSource.EXECUTABLE_DEFAULT.value,
-            model.NameSource.UNKNOWN.value,
-        ):
+        if item.name_source not in UNNAMED:
             continue
         if len(names) > 1:
             _ambiguous(builder, item, names, report, one_process=True)
@@ -1421,6 +1452,8 @@ def _supersede(
         new_id = _target_id(item, names[0])
         if new_id and new_id != item.node_id:
             rows.append((item, names, new_id))
+    for item, nodes in splits.values():
+        _split(builder, item, nodes, report)
     # One profile launching this executable twice states two runtime nodes for one code name,
     # so neither of them may take it.
     # A site whose condition is false in the profile starts nothing there, and the load
@@ -1445,10 +1478,12 @@ def _supersede(
         if _taken(atlas, new_id, item):
             _ambiguous(builder, item, [names[0], item.name or item.executable], report)
             continue
+        _yield_to_named(builder, item.node_id, new_id)
         builder.supersede(item.node_id, new_id)
         node = builder.node(new_id)
         node.name_source = model.NameSource.LITERAL.value
         node.attrs.setdefault("name_from_code", names[0])
+        _settle_params(builder, new_id)
         remaining = []
         for entry in atlas.unresolved:
             if entry.owner == new_id and entry.want == "node_name" and entry.role == "node":
@@ -1457,6 +1492,271 @@ def _supersede(
                 remaining.append(entry)
         atlas.unresolved = remaining
         report.superseded += 1
+
+
+UNNAMED = (model.NameSource.EXECUTABLE_DEFAULT.value, model.NameSource.UNKNOWN.value)
+"""Name sources of a launch site that states no name, so the source decides it."""
+
+
+def _split_names(found: tuple[Carrier, ...]) -> dict[str, dict[str, Any]]:
+    """The node row of each node one process runs, by name, when the source names each one.
+
+    Empty unless there are several, every one a literal of its own: a name built at run time,
+    two nodes under one name or two constructions nothing tells apart keep the process one
+    identity, which is a blind spot and never a guess.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for carrier in found:
+        for row in carrier.nodes:
+            name = str(row.get("name") or "").strip()
+            if (
+                not name
+                or row.get("construction_ambiguous")
+                or str(row.get("name_source") or "literal") != "literal"
+            ):
+                return {}
+            held = out.setdefault(name, row)
+            if not _context_of(row) or _context_of(held) != _context_of(row):
+                return {}
+    contexts = {_context_of(row) for row in out.values()}
+    return out if len(out) > 1 and len(contexts) == len(out) else {}
+
+
+def _context_of(row: dict[str, Any]) -> str:
+    return str(row.get("construction") or "") or _short(str(row.get("class") or ""))
+
+
+def _short(name: str) -> str:
+    return name.rpartition("::")[2]
+
+
+def _split(
+    builder: model.AtlasBuilder,
+    item: Instance,
+    nodes: dict[str, dict[str, Any]],
+    report: JoinReport,
+) -> None:
+    """One process a launch site starts unnamed, whose source names each node it runs.
+
+    rclcpp gives each node of the process the name its own source states, so the site starts
+    one node per name, in the namespace the site gives unless the source states one. Each
+    takes the launch site, its arguments, its remaps and the parameter files, which reach
+    every node of the process, and the bind keeps for each the records of its own
+    construction.
+    """
+    atlas = builder.atlas
+    names = sorted(nodes)
+    targets = {
+        name: _target_id(_placed(item, _row_namespace(row)), name) for name, row in nodes.items()
+    }
+    profiles = {fact.profile for fact in atlas.entities[item.node_id].facts}
+    held = [atlas.entities.get(target) for target in targets.values()]
+    if (
+        not all(targets.values())
+        or len(set(targets.values())) < len(targets)
+        or any(
+            other is not None
+            and any(other.fact(DECLARED, profile) is not None for profile in profiles)
+            for other in held
+        )
+    ):
+        _ambiguous(builder, item, names, report, one_process=True)
+        _starts_several(builder, item, names)
+        return
+    builder.split(item.node_id, sorted(targets.values()))
+    for name in names:
+        node = builder.node(targets[name])
+        node.name_source = model.NameSource.LITERAL.value
+        node.attrs.setdefault("name_from_code", name)
+        _settle_params(builder, targets[name])
+    remaining = []
+    for entry in atlas.unresolved:
+        if (
+            entry.owner in targets.values()
+            and entry.want == model.Want.NODE_NAME.value
+            and entry.role == "node"
+        ):
+            builder.count_resolved(entry.want)
+        else:
+            remaining.append(entry)
+    atlas.unresolved = remaining
+    report.superseded += 1
+
+
+YAML_MECHANISMS = frozenset(
+    {
+        model.Mechanism.YAML_BASE.value,
+        model.Mechanism.YAML_OVERLAY_MERGE.value,
+        model.Mechanism.YAML_WILDCARD.value,
+        model.Mechanism.LAUNCH_PARAMS_FILE.value,
+        model.Mechanism.LAUNCH_REWRITTEN_YAML.value,
+        model.Mechanism.ROS_ARGS_PARAMS_FILE.value,
+    }
+)
+KEEP_SHADOW = frozenset({model.ShadowKind.NOT_READ_IN_PROFILE.value, model.ShadowKind.OTHER.value})
+
+
+def _settle_params(builder: model.AtlasBuilder, node_id: str) -> None:
+    """The chains of a node a split made, read for the name it has now.
+
+    The parameter collector followed a block keyed on this name as a chain of its own, which
+    states this name as its owner and matched no launched node. One is launched now, so its
+    first row wins. A chain copied from the process was followed under the executable's name,
+    and loses every row of a block keyed on another name. A chain left with no row in a
+    profile was configuration of another node, and goes with its fact.
+    """
+    atlas = builder.atlas
+    fqn = ids.parse_node(node_id).fqn or ""
+    for entity in list(atlas.by_kind(model.NodeKind.PARAM.value)):
+        if ids.parse_param(entity.id).owner != node_id:
+            continue
+        rows: list[model.Candidate] = []
+        for profile in sorted({row.profile for row in entity.candidates}):
+            chain = sorted(
+                (row for row in entity.candidates if row.profile == profile),
+                key=lambda row: row.rank,
+            )
+            fact = entity.fact(DECLARED, profile)
+            owner = str(fact.values.get("owner") or "") if fact is not None else ""
+            if (
+                owner == fqn
+                and fact is not None
+                and fact.values.get("state") == model.ParamState.OWNER_NAME_MISMATCH.value
+            ):
+                chain = _ranked(chain, wins=True)
+                builder.edge(
+                    model.EdgeKind.HAS_PARAM.value,
+                    node_id,
+                    entity.id,
+                    layer=CODED,
+                    profile=profile,
+                )
+            elif owner and owner != fqn:
+                kept = [row for row in chain if _reaches(row, fqn)]
+                if len(kept) < len(chain):
+                    chain = _ranked(kept, wins=any(row.wins for row in chain))
+                if not chain:
+                    entity.facts = [
+                        item
+                        for item in entity.facts
+                        if not (item.layer == DECLARED and item.profile == profile)
+                    ]
+            rows.extend(chain)
+        entity.candidates = sorted(rows, key=model.Candidate.sort_key)
+        if any(row.wins for row in rows):
+            entity.state = model.ParamState.EFFECTIVE.value
+        if not entity.candidates and not entity.facts:
+            _drop(builder, entity.id)
+
+
+def _yield_to_named(builder: model.AtlasBuilder, old_id: str, new_id: str) -> None:
+    """Drop the process chain of every profile the chain followed under the new name states.
+
+    That chain was followed for this exact name, so it is the one to keep, and two chains for
+    one profile cannot be merged by a supersession.
+    """
+    atlas = builder.atlas
+    for entity in list(atlas.by_kind(model.NodeKind.PARAM.value)):
+        owner, name = ids.parse_param(entity.id)
+        named = atlas.entities.get(ids.build_param(new_id, name)) if owner == old_id else None
+        if named is None:
+            continue
+        stated = {row.profile for row in named.candidates} | {
+            fact.profile for fact in named.facts if fact.layer == DECLARED
+        }
+        entity.candidates = [row for row in entity.candidates if row.profile not in stated]
+        entity.facts = [
+            fact for fact in entity.facts if not (fact.layer == DECLARED and fact.profile in stated)
+        ]
+        if not entity.candidates and not entity.facts:
+            _drop(builder, entity.id)
+
+
+def _ranked(chain: list[model.Candidate], *, wins: bool) -> list[model.Candidate]:
+    out: list[model.Candidate] = []
+    for index, row in enumerate(chain):
+        if index == 0:
+            out.append(replace(row, rank=0, wins=wins, shadow_kind=None, shadowed_by=None))
+            continue
+        kind = row.shadow_kind
+        if wins and kind not in KEEP_SHADOW:
+            kind = _shadow_of(chain[0].value, row.value)
+        out.append(replace(row, rank=index, wins=False, shadow_kind=kind, shadowed_by=0))
+    return out
+
+
+def _reaches(row: model.Candidate, fqn: str) -> bool:
+    """Whether the yaml block a candidate was read from selects this node.
+
+    The locator is the key path, so the block key is what precedes `ros__parameters`. A row
+    that is not a yaml key, or whose block key cannot be read, reached the process and stays.
+    """
+    if row.mechanism not in YAML_MECHANISMS or row.source is None:
+        return True
+    head, found, _rest = row.source.locator.partition(".ros__parameters.")
+    if not found:
+        return True
+    try:
+        return ids.param_key_matches(yaml_lines.selector_of(head.split(".")), fqn)
+    except ContractError:
+        return True
+
+
+def _drop(builder: model.AtlasBuilder, entity_id: str) -> None:
+    atlas = builder.atlas
+    del atlas.entities[entity_id]
+    for handle in sorted(atlas.edges):
+        edge = atlas.edges[handle]
+        if entity_id in (edge.src, edge.dst):
+            del atlas.edges[handle]
+    atlas.unresolved = [entry for entry in atlas.unresolved if entry.owner != entity_id]
+
+
+def _collision(
+    builder: model.AtlasBuilder,
+    item: Instance,
+    names: list[str],
+    report: JoinReport,
+) -> None:
+    """A launch name on a process whose source runs several nodes gives all of them that name.
+
+    `name=` and an argv `__node` rule remap every node of the process, so the nodes the
+    source names apart all start under the one name, and nothing can tell them apart.
+    """
+    fact = builder.atlas.entities[item.node_id].fact(DECLARED, item.profile)
+    where = list(fact.evidence) if fact is not None else []
+    stated = ids.parse_file(where[0].file) if where else None
+    site = f"{stated.package}/{stated.relpath}" if stated else "the launch file"
+    fqn = ids.parse_node(item.node_id).fqn or item.name
+    listed = ", ".join(names)
+    finding = model.Finding(
+        rule="node.ambiguous_identity",
+        severity=model.Severity.WARN.value,
+        subject=item.node_id,
+        title=f"{item.pkg}/{item.executable} runs {len(names)} nodes under the one name {fqn}",
+        detail=(
+            f"the launch site names the process {fqn}, and a launch name is a __node remap "
+            f"rclcpp applies to every node of the process, so the nodes its source names "
+            f"{listed} all run as {fqn}"
+        ),
+        fix=(
+            "remove the name from the launch site, or rename one node at a time with a remap "
+            f"written <node>:__node:=<new name>, such as {names[0]}:__node:=<new name>"
+        ),
+        say=(
+            f"{site} names {item.pkg}/{item.executable} {fqn}, which renames each of its "
+            f"nodes {listed} to {fqn}, so they share one name; drop the name, or remap one "
+            "node at a time with <node>:__node:=<new name>"
+        ),
+        discriminator=ids.digest("collision", *names),
+        profiles=[item.profile],
+        layers=[DECLARED, CODED],
+        where=where,
+    )
+    if any(existing.id == finding.id for existing in builder.atlas.findings):
+        return
+    builder.finding(finding)
+    report.ambiguous += 1
 
 
 def _launched(atlas: model.Atlas, item: Instance) -> bool:
@@ -1707,6 +2007,52 @@ def _with_node_plugins(
     return tuple(selected[key] for key in sorted(selected))
 
 
+SCOPED_FIELDS = (
+    "endpoints",
+    "parameters",
+    "parameter_reads",
+    "plugin_parameters",
+    "tf_broadcasts",
+    "tf_lookups",
+)
+
+
+def _own(atlas: model.Atlas, item: Instance, found: tuple[Carrier, ...]) -> tuple[Carrier, ...]:
+    """The records of the one node a split gave this id, out of a process that runs several.
+
+    A record of another node's class or of another construction is that node's. A record of
+    a class no node is built from, a base or a free function, stays with every node.
+    """
+    entity = atlas.entities.get(item.node_id)
+    name = str(entity.attrs.get("name_from_code") or "") if entity is not None else ""
+    nodes = _split_names(found)
+    if name not in nodes:
+        return found
+    mine = nodes[name]
+    construction = str(mine.get("construction") or "")
+    others = {_short(str(row.get("class") or "")) for row in nodes.values()} - {
+        _short(str(mine.get("class") or "")),
+        "",
+    }
+
+    def kept(row: dict[str, Any]) -> bool:
+        if construction and row.get("construction") and row["construction"] != construction:
+            return False
+        owner = str(row.get("owner_symbol") or row.get("symbol") or "")
+        if owner.startswith("sym:"):
+            owner = ids.parse_sym(owner).qualname
+        return _short(_class_type(owner).rpartition("::")[0]) not in others
+
+    return tuple(
+        replace(
+            carrier,
+            nodes=tuple(row for row in carrier.nodes if row.get("name") == name),
+            **{field: tuple(filter(kept, getattr(carrier, field))) for field in SCOPED_FIELDS},
+        )
+        for carrier in found
+    )
+
+
 def _row_of_class(row: dict[str, Any], implementation: str) -> bool:
     owner = str(row.get("owner_symbol") or row.get("symbol") or "")
     if owner.startswith("sym:"):
@@ -1725,7 +2071,7 @@ def _bind_instance(
     report: JoinReport,
     count: bool,
 ) -> None:
-    found = _with_node_plugins(builder.atlas, item, found)
+    found = _own(builder.atlas, item, _with_node_plugins(builder.atlas, item, found))
     contexts = {
         str(row["construction"])
         for carrier in found

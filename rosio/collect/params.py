@@ -519,10 +519,15 @@ def chain_for(
     ws: Workspace,
     group: int = 0,
     pipelines: Sequence[records.ParamPipeline] = (),
+    name: str = "",
 ) -> list[ParamCandidateRow]:
-    """The ordered candidate chain of every parameter of one node, sorted by name."""
+    """The ordered candidate chain of every parameter of one node, sorted by name.
+
+    `name` follows the chain under another node name of the same process, see
+    `alternate_owners`.
+    """
     try:
-        fqn = owner_name(node)
+        fqn = name or owner_name(node)
     except ContractError:
         if not node.command_blinds:
             raise
@@ -549,13 +554,116 @@ def chain_for(
     rows = _rows(
         inputs,
         fqn=fqn,
-        owner_id=owner_node_id(node),
+        owner_id=ids.build_node(name) if name else owner_node_id(node),
         group=group,
         blinds=blinds,
     )
     if notes:
         rows = [replace(row, note=", ".join([row.note, *notes]).strip(", ")) for row in rows]
     return rows
+
+
+ALTERNATE_NOTE = (
+    "launch names no node of this process, so only a node its source names so reads this block"
+)
+
+
+def alternate_owners(
+    walk: records.LaunchWalk,
+    node: records.ResolvedNode,
+    *,
+    ws: Workspace,
+    pipelines: Sequence[records.ParamPipeline] = (),
+    taken: frozenset[str] = frozenset(),
+) -> list[str]:
+    """Other names a process launch leaves unnamed may run nodes under, read off its files.
+
+    Launch names neither the process nor its nodes and no table names the executable, so the
+    name its chain is followed under is the executable, which is a guess. One executable can
+    run several nodes, every one of them reads every file the launch site hands the process,
+    and only the source says what they are called. A block of those files keyed on another
+    name in the node's namespace, which no launched node of the profile owns, can be one of
+    them, so its chain is followed under that name as well and the join decides.
+    """
+    decided = identity.identify(node)
+    if (
+        not ids.is_synthetic(decided.node_id)
+        or decided.known_name
+        or decided.name_source == model.NameSource.RUNTIME_RANDOMISED.value
+        or not decided.namespace
+        or not node.executable
+        or node.plugin_class
+        or node.command_blinds
+    ):
+        return []
+    try:
+        guessed = owner_name(node)
+    except ContractError:
+        return []
+    out: set[str] = set()
+    for step in _plan(walk, node.params, pipelines, ws):
+        source = step.source
+        if source is None or source.kind not in _FILE_KINDS:
+            continue
+        path = source.source_path if source.kind == "rewritten_file" else source.path
+        document = _load(path) if path else None
+        if document is None or not document.is_parameter_file():
+            continue
+        reshaped, _root_key = _reshape(source, document)
+        for block in yaml_lines.param_blocks(reshaped):
+            if _specificity(block.selector) < 2:
+                continue
+            try:
+                fqn = ids.normalise_ros_name(
+                    block.selector.strip("/").rpartition("/")[2], decided.namespace
+                )
+            except ContractError:
+                continue
+            if fqn not in taken and fqn != guessed and _selector_matches(block.selector, fqn):
+                out.add(fqn)
+    return sorted(out)
+
+
+def alternate_chain(
+    walk: records.LaunchWalk,
+    node: records.ResolvedNode,
+    fqn: str,
+    *,
+    ws: Workspace,
+    group: int = 0,
+    pipelines: Sequence[records.ParamPipeline] = (),
+) -> list[ParamCandidateRow]:
+    """The parameters a block keyed on `fqn` sets, chained as a node of that name reads them.
+
+    Only a key some block of that name writes is kept: a key the wildcard blocks alone write
+    is already in the chain of the process. No launched node is named so, so nothing wins and
+    the state is the one of a block no node owns, with the owner stated, which is what the
+    join reads when the source names the node.
+    """
+    guessed = owner_name(node)
+    out: list[ParamCandidateRow] = []
+    for row in chain_for(walk, node, ws=ws, group=group, pipelines=pipelines, name=fqn):
+        own = [
+            candidate.selector
+            for candidate in row.candidates
+            if _specificity(candidate.selector) > 1
+            and not _selector_matches(candidate.selector, guessed)
+        ]
+        if not own:
+            continue
+        if row.state == model.ParamState.EFFECTIVE.value:
+            row = replace(
+                row,
+                state=model.ParamState.OWNER_NAME_MISMATCH.value,
+                effective=None,
+                selector_key=own[0],
+                candidates=tuple(
+                    replace(candidate, note=_with_note(candidate.note, ALTERNATE_NOTE))
+                    for candidate in row.candidates
+                ),
+            )
+        out.append(row)
+    return out
 
 
 _DISPLACED_ORDER = -1
@@ -1414,11 +1522,13 @@ def orphan_rows(
     ws: Workspace,
     group: int = 0,
     pipelines: Sequence[records.ParamPipeline] = (),
+    alternates: Sequence[str] = (),
 ) -> list[ParamCandidateRow]:
     """Parameter blocks in the walk's files that match no node the walk launched.
 
     A wildcard block is never an orphan: it applies to whatever node the file was handed
-    to. A plain node name that nothing launches is the silent case this exists for.
+    to. A plain node name that nothing launches is the silent case this exists for. A block
+    keyed on one of `alternates` is not either, `alternate_chain` follows it.
 
     A node whose runtime name cannot be formed (an ExecuteProcess whose executable is a
     script file name) makes the question unanswerable rather than answering it no, so the
@@ -1433,6 +1543,7 @@ def orphan_rows(
                 owners.append(owner_name(owner))
             except ContractError:
                 unnamed = True
+    owners.extend(alternates)
     state = (
         model.ParamState.UNRESOLVED_OWNER.value
         if unnamed
@@ -2436,9 +2547,14 @@ class ParamsCollector:
             for profile_id, group_walks in grouped.items()
         }
         memo: dict[str, bool] = {}
+        taken = {
+            profile_id: frozenset(name for walk in group_walks for name in _owner_names(walk))
+            for profile_id, group_walks in grouped.items()
+        }
         for group, walk in enumerate(ordered):
             slug = walk.profile or ctx.profile
             profile_id = ids.build_profile(slug) if slug else model.ANY_PROFILE
+            alternates: set[str] = set()
             for node in sorted(walk.nodes, key=_node_key):
                 if node.attrs.get("unreachable"):
                     # A condition that holds false in this profile: the node never starts,
@@ -2455,7 +2571,21 @@ class ParamsCollector:
                     self._register_owner(ctx, owner)
                     for row in rows:
                         self._accumulate(by_param, row, profile_id, ctx.ws, memo)
-            for row in orphan_rows(walk, ws=ctx.ws, group=group, pipelines=pipelines):
+                for name in alternate_owners(
+                    walk, node, ws=ctx.ws, pipelines=pipelines, taken=taken[profile_id]
+                ):
+                    alternates.add(name)
+                    for row in alternate_chain(
+                        walk, node, name, ws=ctx.ws, group=group, pipelines=pipelines
+                    ):
+                        self._accumulate(by_param, row, profile_id, ctx.ws, memo)
+            for row in orphan_rows(
+                walk,
+                ws=ctx.ws,
+                group=group,
+                pipelines=pipelines,
+                alternates=sorted(alternates),
+            ):
                 self._accumulate(by_param, row, profile_id, ctx.ws, memo)
         for profile_id, group_walks in sorted(grouped.items()):
             self._refused_files(ctx, group_walks, pipelines, profile_id)
@@ -2930,6 +3060,17 @@ def _read_somewhere_in_profile(rows: Sequence[CandidateRow]) -> list[CandidateRo
     ]
 
 
+def _owner_names(walk: records.LaunchWalk) -> list[str]:
+    out: list[str] = []
+    for node in walk.nodes:
+        for owner in (node, *child_nodes(node)):
+            try:
+                out.append(owner_name(owner))
+            except ContractError:
+                continue
+    return out
+
+
 def _node_key(node: records.ResolvedNode) -> tuple[str, str, str]:
     return (node.namespace or "/", node.name or "", node.executable or "")
 
@@ -2980,6 +3121,7 @@ register("params", ParamsCollector)
 
 
 __all__ = [
+    "ALTERNATE_NOTE",
     "BUILT_ONLY",
     "LAYER",
     "NOT_INSTALLED",
@@ -2992,6 +3134,8 @@ __all__ = [
     "CandidateRow",
     "ParamCandidateRow",
     "ParamsCollector",
+    "alternate_chain",
+    "alternate_owners",
     "chain_for",
     "child_nodes",
     "orphan_rows",

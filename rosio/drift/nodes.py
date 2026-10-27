@@ -388,6 +388,13 @@ def node_ambiguous_identity(atlas: model.Atlas) -> list[model.Finding]:
         candidates = ", ".join(sorted(human(item) for item in row.candidates))
         where = slug(row.profile)
         facts = [stated(atlas.entities[item], DECLARED, row.profile) for item in row.candidates]
+        fix = "give each instance a name in the launch description"
+        if any(already_reported(atlas, "node.ambiguous_identity", item) for item in row.candidates):
+            # A launch name renames every node of a process that runs several.
+            fix += (
+                ", except a process that runs several nodes, whose nodes are renamed one at a "
+                "time with a remap written <node>:__node:=<new name>"
+            )
         out.append(
             model.Finding(
                 rule="node.ambiguous_identity",
@@ -399,7 +406,7 @@ def node_ambiguous_identity(atlas: model.Atlas) -> list[model.Finding]:
                     f"{label} matches all of them, so rosio kept them apart instead of "
                     "attaching the runtime facts to one of them"
                 ),
-                fix="give each instance a name in the launch description",
+                fix=fix,
                 say=(
                     f"{where} starts {candidates} with no node name, so the running node "
                     f"{label} cannot be matched to one of them, and its parameters and "

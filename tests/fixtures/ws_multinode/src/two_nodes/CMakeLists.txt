@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.8)
+project(two_nodes)
+add_executable(pair src/main.cpp src/alpha.cpp src/beta.cpp)
+target_include_directories(pair PUBLIC include)
+install(TARGETS pair DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})

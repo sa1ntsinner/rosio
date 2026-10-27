@@ -257,10 +257,21 @@ def _build(
             text = _key_node_text(key_node)
             path = (*prefix, text)
             # A key spelled twice keeps its last value, so the last line is the citable one.
+            # Two mappings under one key are one mapping to rcl, the later key winning inside
+            # it: measured on jazzy with two `/**` keys in one parameters file.
             lines[path] = key_node.start_mark.line + 1
-            out[text] = _build(value_node, loader, path, lines)
+            out[text] = _merged(out.get(text), _build(value_node, loader, path, lines))
         return out
     return loader.construct_object(node, deep=True)
+
+
+def _merged(held: Any, value: Any) -> Any:
+    if not isinstance(held, dict) or not isinstance(value, dict):
+        return value
+    out = dict(held)
+    for key, item in value.items():
+        out[key] = _merged(out.get(key), item)
+    return out
 
 
 def _key_node_text(node: yaml.Node) -> str:

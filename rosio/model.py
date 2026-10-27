@@ -23,11 +23,12 @@ every `line_hint`, so two runs over unchanged inputs are byte identical.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -1838,6 +1839,85 @@ class AtlasBuilder:
             self.supersede(derived_old, derived_new)
         return new
 
+    def split(self, old_id: str, new_ids: Sequence[str]) -> None:
+        """Resolve one synthetic identity to several real ones: one process, several nodes.
+
+        Every new identity gets a copy of what the old one held: its facts and attrs, the old
+        id in `aka`, every edge with the old endpoint replaced, every blind spot and finding,
+        and every derived parameter and plugin instance, split the same way. A slot a new
+        entity already states is kept as it is, because it was formed for that exact name.
+        The old entity and everything derived from it go.
+        """
+        old = self.atlas.entities.get(old_id)
+        if old is None:
+            raise ContractError(f"cannot split unknown entity {old_id!r}")
+        derived = [old_id, *(item for item, _ in self._derived_pairs(old_id, old_id))]
+        maps = {}
+        for new_id in new_ids:
+            if ids.kind_of(new_id) != ids.kind_of(old_id):
+                raise ContractError(f"cannot split {old_id!r} into {new_id!r}, the kinds differ")
+            maps[new_id] = {old_id: new_id, **dict(self._derived_pairs(old_id, new_id))}
+        for mapping in maps.values():
+            for source_id in derived:
+                self._copy_entity(self.atlas.entities[source_id], mapping[source_id])
+            for handle in sorted(self.atlas.edges):
+                edge = self.atlas.edges[handle]
+                if edge.src not in mapping and edge.dst not in mapping:
+                    continue
+                copied = copy.deepcopy(edge)
+                copied.src = mapping.get(edge.src, edge.src)
+                copied.dst = mapping.get(edge.dst, edge.dst)
+                held = self.atlas.edges.setdefault(copied.id, copied)
+                if held is not copied:
+                    slots = {fact.slot for fact in held.facts}
+                    for fact in copied.facts:
+                        if fact.slot not in slots:
+                            _add_fact(held.facts, held.id, fact)
+        gone = set(derived)
+        unresolved = [entry for entry in self.atlas.unresolved if entry.owner not in gone]
+        findings = [item for item in self.atlas.findings if not _about(item, gone)]
+        for mapping in maps.values():
+            for entry in self.atlas.unresolved:
+                if entry.owner in gone:
+                    unresolved.append(replace(copy.deepcopy(entry), owner=mapping[entry.owner]))
+            for item in self.atlas.findings:
+                if _about(item, gone):
+                    copied = copy.deepcopy(item)
+                    copied.subject = _mapped_subject(item.subject, mapping)
+                    if all(other.id != copied.id for other in findings):
+                        findings.append(copied)
+        self.atlas.unresolved = _merged_unresolved(unresolved)
+        self.atlas.findings = findings
+        for handle in sorted(self.atlas.edges):
+            edge = self.atlas.edges[handle]
+            if edge.src in gone or edge.dst in gone:
+                del self.atlas.edges[handle]
+        for source_id in derived:
+            del self.atlas.entities[source_id]
+
+    def _copy_entity(self, source: Node, new_id: str) -> None:
+        new = self.node(new_id)
+        slots = {fact.slot for fact in new.facts}
+        for fact in source.facts:
+            if fact.slot not in slots:
+                _add_fact(new.facts, new_id, copy.deepcopy(fact))
+        for key, value in source.attrs.items():
+            new.attrs.setdefault(key, copy.deepcopy(value))
+        for alias in [source.id, *source.aka]:
+            if alias not in new.aka:
+                new.aka.append(alias)
+        new.aka.sort()
+        if new.name_source is None:
+            new.name_source = source.name_source
+        held = {candidate.profile for candidate in new.candidates}
+        added = [copy.deepcopy(row) for row in source.candidates if row.profile not in held]
+        if added:
+            new.candidates = sorted([*new.candidates, *added], key=Candidate.sort_key)
+        if source.state is not None and (added or not source.candidates):
+            new.state = (
+                source.state if new.state is None else stronger_param_state(new.state, source.state)
+            )
+
     def _rewrite_unresolved_owner(self, old_id: str, new_id: str) -> None:
         """Move every blind spot of the old identity onto the new one, one entry per spot.
 
@@ -1857,20 +1937,10 @@ class AtlasBuilder:
         """
         if not any(entry.owner == old_id for entry in self.atlas.unresolved):
             return
-        merged: dict[str, Unresolved] = {}
         for entry in self.atlas.unresolved:
             if entry.owner == old_id:
                 entry.owner = new_id
-            held = merged.get(entry.id)
-            if held is None:
-                merged[entry.id] = entry
-                continue
-            held.reason = _first_stated(held.reason, entry.reason)
-            held.role = _first_stated(held.role, entry.role)
-            held.written_in = _first_stated(held.written_in, entry.written_in)
-            held.resolvable_by = sorted(dict.fromkeys([*held.resolvable_by, *entry.resolvable_by]))
-            held.evidence = _sorted_sources([*held.evidence, *entry.evidence])
-        self.atlas.unresolved = [merged[key] for key in sorted(merged)]
+        self.atlas.unresolved = _merged_unresolved(self.atlas.unresolved)
 
     def _rewrite_edges(self, old_id: str, new_id: str) -> None:
         for handle in sorted(self.atlas.edges):
@@ -2160,6 +2230,40 @@ def _merge_values(target: dict[str, Any], incoming: Mapping[str, Any], where: st
                 f"with {value!r}"
             )
         target[key] = value
+
+
+def _about(finding: Finding, gone: set[str]) -> bool:
+    subject = finding.subject
+    if isinstance(subject, EdgeRef):
+        return subject.src in gone or subject.dst in gone
+    return subject in gone
+
+
+def _mapped_subject(subject: str | EdgeRef, mapping: Mapping[str, str]) -> str | EdgeRef:
+    if isinstance(subject, EdgeRef):
+        return EdgeRef(
+            kind=subject.kind,
+            src=mapping.get(subject.src, subject.src),
+            dst=mapping.get(subject.dst, subject.dst),
+            key=subject.key,
+        )
+    return mapping.get(subject, subject)
+
+
+def _merged_unresolved(entries: Iterable[Unresolved]) -> list[Unresolved]:
+    """One row per id, the union of every row that landed on it."""
+    merged: dict[str, Unresolved] = {}
+    for entry in entries:
+        held = merged.get(entry.id)
+        if held is None:
+            merged[entry.id] = entry
+            continue
+        held.reason = _first_stated(held.reason, entry.reason)
+        held.role = _first_stated(held.role, entry.role)
+        held.written_in = _first_stated(held.written_in, entry.written_in)
+        held.resolvable_by = sorted(dict.fromkeys([*held.resolvable_by, *entry.resolvable_by]))
+        held.evidence = _sorted_sources([*held.evidence, *entry.evidence])
+    return [merged[key] for key in sorted(merged)]
 
 
 def _merge_candidates(

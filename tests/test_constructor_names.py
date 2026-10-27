@@ -408,8 +408,11 @@ def test_constructor_names_extract_to_stable_valid_identities(tmp_path):
     assert any(
         edge.dst == "topic:/header_output" for edge in first.out_edges("node:/header_default")
     )
-    assert any(key.startswith("node:~argument_nodes|ambiguous|") for key in first.entities)
-    assert any(row.reason == "multiple_constructed_nodes" for row in first.unresolved)
+    # One unnamed process constructing `first` and `second` runs two nodes, one per name.
+    assert not any(key.startswith("node:~argument_nodes|ambiguous|") for key in first.entities)
+    for name in ("first", "second"):
+        assert first.entities[f"node:/{name}"].attrs["name_from_code"] == name
+    assert not any(row.reason == "multiple_constructed_nodes" for row in first.unresolved)
     assert not any(
         row.want == "node_name"
         and row.owner
@@ -443,4 +446,7 @@ def test_one_unnamed_node_launched_by_two_profiles_resolves_once(tmp_path):
         for row in atlas.findings
         if row.rule == "node.ambiguous_identity" and row.subject == node.id
     ]
-    assert len([row for row in atlas.findings if row.rule == "node.ambiguous_identity"]) == 1
+    # The process that constructs `first` and `second` runs both, in both profiles.
+    assert not [row for row in atlas.findings if row.rule == "node.ambiguous_identity"]
+    for name in ("first", "second"):
+        assert atlas.entities[f"node:/{name}"].profiles == ["profile:first", "profile:second"]

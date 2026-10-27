@@ -155,6 +155,10 @@ continues to name the real source symbol. The join selects contexts from the exe
 node records before binding endpoints, parameters or TF. Multiple constructed nodes do not
 become one declared node. Identical construction content carries `construction_ambiguous`
 on the node row and remains a blind spot, never an ordinal or a combined endpoint site.
+When every node row of one process names a literal of its own, each with its own class or
+construction, a launch site that names none of them starts one node per name (section 3.5),
+and each node binds the records of its own class or construction. A record of a class none
+of them is built from, a base or a free function, stays with every one of them.
 
 Endpoint records may carry `parameter_suffix` beside `from_parameter`. TF records use the
 corresponding `<role>_parameter_suffix` and `<role>_expr`. A string accessor preserves the
@@ -327,6 +331,17 @@ that happened to be byte identical.
   namespace fabricates TF edges.
 * A regression from a resolved id back to a synthetic id is an `error` severity finding
   (`node.identity_regressed`), never a silent id change.
+
+One process can run several nodes, and rclcpp names each from its own source. A launch site
+that states no name for such a process starts one node per literal name, so the synthetic
+identity resolves to several real ones and `AtlasBuilder.split(old, news)` is the call: every
+new identity takes a copy of the facts, the edges, the blind spots, the findings and the
+derived parameters, keeps the old id in `aka`, and the old entity goes. A slot a new entity
+already states is kept, because it was formed for that exact name. A launch `name=` or an
+argv `__node` rule is the opposite case: it remaps every node of the process, so the nodes
+share one name, and the join reports `node.ambiguous_identity` with a fix that removes the
+name or remaps one node at a time (`<node>:__node:=<new name>`), never a fix that names the
+site.
 
 ## 4. Entities
 
@@ -531,6 +546,19 @@ with per candidate provenance.
   wins. Dropping the write hides the only line an engineer can edit, and letting it win names
   a value that is wrong on the other branch. A write whose value did not fold adds no
   candidate, because nothing about it is known.
+* Every parameters file a launch site hands a process reaches every node of that process.
+  When launch names neither the process nor its nodes and no table names the executable, the
+  parameter collector follows the chain under the executable's name as before, and also under
+  each other name a block of those files is keyed on in the node's namespace that no launched
+  node of the profile owns (`params.alternate_owners`). Such a chain states that name as its
+  `owner`, keeps only the keys a block of that name writes, and is `owner_name_mismatch` with
+  nothing winning, because launch alone cannot say a node of that name runs. The join, once
+  the source names that node, lets its first row win, and drops from a chain copied off the
+  process every row of a block keyed on another name. Two mappings under one key in one
+  parameters file are one mapping, the later key winning inside it, which is what rcl does:
+  measured on jazzy with two `/**` keys in one file.
+* A key the node's bound code does not declare is not called undeclared when the package
+  declares it in code the join bound to no node, such as a helper class handed the node.
 
 ## 8. Unresolved values
 
@@ -973,6 +1001,14 @@ of each such entry, and python declarations the reader followed now count under
 `a tree outside this workspace`, with `that ros_setup sources` when a setup file holds it,
 instead of its last directory, and states the build beside src as a build, which moved the
 fingerprints of those findings. No release had shipped, so no stored id or waiver existed.
+
+Inside `1.22` a process a launch site starts unnamed, whose source names each node it runs
+with a literal of its own, became one node per name, which moved its synthetic node id and
+the parameter ids under it to real ones and retired the `node.ambiguous_identity` finding the
+join wrote for it. A block keyed on one of those names now carries the chain that node reads.
+The fix of the runtime `node.ambiguous_identity` finding names the per node remap when one of
+the candidates runs several nodes. No key was added and no release had shipped, so no stored
+id or waiver existed.
 
 Several finding texts moved in one change without a version bump, and they are named here
 because a fingerprint covers the normalised detail while no finding id moved. `build.stale`

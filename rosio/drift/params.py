@@ -70,6 +70,7 @@ from dataclasses import dataclass
 from rosio import ids, join, model
 from rosio.drift import plugins, rules
 from rosio.errors import ContractError
+from rosio.resolve import yaml_lines
 
 DECLARED = model.Layer.DECLARED.value
 CODED = model.Layer.CODED.value
@@ -156,7 +157,13 @@ def _live(node: model.Node, profile: str) -> bool:
     fact = node.fact(DECLARED, profile)
     if not rules.usable(fact):
         return False
-    return str(fact.values.get("state") or node.state) == EFFECTIVE
+    if str(fact.values.get("state") or node.state) == EFFECTIVE:
+        return True
+    # A block followed under a name launch never states wins once the join reads that name
+    # in the source, and the fact the parameter collector wrote before it knew stays as said.
+    return bool(fact.values.get("owner")) and any(
+        row.wins and row.profile == profile for row in node.candidates
+    )
 
 
 def _layers(*candidates: model.Candidate) -> list[str]:
@@ -684,8 +691,13 @@ def _blocks(atlas: model.Atlas) -> list[_Block]:
             selector = str(fact.values.get("selector") or "")
             if state not in ORPHAN_STATES or not selector:
                 continue
+            owner = str(fact.values.get("owner") or "")
+            if owner and _starts(atlas, owner, fact.profile):
+                continue
             keys = {row.file: row for row in fact.evidence}
             for site in _write_sites(node, fact.profile):
+                if owner and _block_of(site) != selector:
+                    continue
                 rows[(fact.profile, site.file, selector)].append(
                     _BlockRow(state, name, site, keys.get(site.file))
                 )
@@ -718,6 +730,22 @@ def _blocks(atlas: model.Atlas) -> list[_Block]:
             )
         )
     return out
+
+
+def _starts(atlas: model.Atlas, fqn: str, profile: str) -> bool:
+    """Whether the profile starts a node of this name, which a source can name for a process
+    the launch file leaves unnamed. The parameter collector cannot know that, the join can."""
+    try:
+        node = atlas.get(ids.build_node(fqn))
+    except ContractError:
+        return False
+    return node is not None and node.fact(DECLARED, profile) is not None
+
+
+def _block_of(site: model.Source) -> str:
+    """The block key a yaml write site sits under, read off its key path locator."""
+    head, found, _rest = site.locator.partition(".ros__parameters.")
+    return yaml_lines.selector_of(head.split(".")) if found else ""
 
 
 def _write_sites(node: model.Node, profile: str) -> list[model.Source]:
