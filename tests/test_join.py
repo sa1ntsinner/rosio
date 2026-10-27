@@ -236,20 +236,10 @@ def test_the_join_produces_the_topic_neither_layer_states(builder):
 
 def test_an_absolute_literal_binds_without_a_remap(builder):
     join.join(builder)
-    edge = builder.atlas.edges[
-        ids.build_edge(
-            model.EdgeKind.SUBSCRIBES.value,
-            "node:/io_bridge",
-            "topic:/vehicle/state",
-            ids.edge_key(
-                profile=REAL,
-                symbol=OWNER,
-                raw_name="/vehicle/state",
-                kind="subscriber",
-                type="nx_msgs/msg/RobotStatus",
-                condition="",
-            ),
-        )
+    [edge] = [
+        edge
+        for edge in builder.atlas.out_edges("node:/io_bridge")
+        if edge.kind == model.EdgeKind.SUBSCRIBES.value and edge.dst == "topic:/vehicle/state"
     ]
     assert edge.fact(join.CODED, REAL).values["remapped"] is False
 
@@ -1062,15 +1052,11 @@ def test_a_plugin_parameter_reaches_the_plugin_it_declares(builder):
     pparam = ids.build_pparam(base, lookup, "BaseObstacle.scale")
     assert pparam in builder.atlas.entities
     assert builder.atlas.entities[pparam].fact(join.CODED, REAL).values["default"] == 0.02
-    edge = builder.atlas.edges[
-        ids.build_edge(
-            model.EdgeKind.DECLARES_PARAM.value,
-            ids.build_plugin(base, lookup),
-            pparam,
-            ids.edge_key(
-                profile=REAL, plugin=ids.build_plugin(base, lookup), name="BaseObstacle.scale"
-            ),
-        )
+    [edge] = [
+        edge
+        for edge in builder.atlas.in_edges(pparam)
+        if edge.kind == model.EdgeKind.DECLARES_PARAM.value
+        and edge.src == ids.build_plugin(base, lookup)
     ]
     assert edge.fact(join.CODED, REAL).values["suffix"] == "BaseObstacle.scale"
 

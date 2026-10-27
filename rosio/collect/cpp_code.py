@@ -33,6 +33,7 @@ system, which is the fastest way to make a drift report get ignored.
 
 from __future__ import annotations
 
+import copy
 import math
 import posixpath
 import re
@@ -80,8 +81,8 @@ ACTION_FACTORY_CALLS = {
     "create_action_server": "action_server",
     "create_action_client": "action_client",
 }
-"""nav2 `LifecycleNode::create_action_server<T>(name, ...)` and the `nav2::interfaces` free
-functions that take the node first."""
+"""nav2 `LifecycleNode::create_action_server<T>(name, ...)`, and the namespace qualified free
+functions of `nav2::interfaces` that take the node first."""
 TIMER_CALLS = frozenset({"create_wall_timer", "create_timer"})
 CAMERA_CALLS = frozenset({"create_camera_publisher", "create_camera_subscription"})
 IMAGE_CALLS = frozenset({"create_publisher", "create_subscription"}) | CAMERA_CALLS
@@ -521,6 +522,8 @@ class Unit:
     registrations: list[Registration] = field(default_factory=list)
     plugin_of_helper: Registration | None = None
     """The plugin that builds this file's helper class and hands it the instance name."""
+    plugin_name_locals: set[str] = field(default_factory=set)
+    """The string parameter of `configure` or `initialize`, the instance name of a plugin."""
     wrappers: dict[str, tuple[int, int]] = field(default_factory=dict)
     shared_wrappers: dict[str, tuple[int, int]] = field(default_factory=dict)
     member_wrappers: dict[tuple[str, str], str] = field(default_factory=dict)
@@ -883,6 +886,7 @@ class _Reader:
         self.consumed: set[int] = set()
         self.node_selectors: dict[tuple[str, str], str] = {}
         self.constructor_arguments: dict[str, list[tuple[str | None, ...]]] = {}
+        self.assigned: dict[tuple[str, str], int] = {}
 
     # scope ---------------------------------------------------------------
 
@@ -909,6 +913,8 @@ class _Reader:
     def bind(self, name: str, ref: Ref) -> None:
         if not name:
             return
+        key = (self.klass, name) if name.endswith("_") else (self.sym, name)
+        self.assigned[key] = self.assigned.get(key, 0) + 1
         if name.endswith("_") and self.klass:
             self.unit.members[(self.klass, name)] = ref
             return
@@ -932,6 +938,10 @@ class _Reader:
             if found is not None:
                 binding = found.binding or ("member" if expr.endswith("_") else "local")
                 built = found.built or (found.expr if found.status == UNRESOLVED else "")
+                key = (self.klass, expr) if expr.endswith("_") else (self.sym, expr)
+                if self.assigned.get(key, 0) > 1:
+                    # two assignments, an if and an else among them, build more than the last
+                    built = ""
                 return replace(found, expr=expr, binding=binding, built=built)
             if expr in self.defines:
                 return Ref(LITERAL, self.defines[expr], expr, origin="macro", source_name=expr)
@@ -1290,6 +1300,7 @@ class _Reader:
                 names.append(_text(inner, self.src).strip("&* "))
         if len(names) == 1 and names[0]:
             self.scopes[-1][names[0]] = Ref(UNRESOLVED, "", names[0], origin=PLUGIN_NAME)
+            self.unit.plugin_name_locals.add(names[0])
 
     def _function_name(self, declarator: Any) -> tuple[str, str]:
         target = declarator
@@ -1848,7 +1859,12 @@ class _Reader:
             return False
         if not arguments:
             return True
-        if not action and len(arguments) > 1 and _is_node_argument(arguments[0], self.src):
+        if (
+            not action
+            and not factory
+            and len(arguments) > 1
+            and _is_node_argument(arguments[0], self.src)
+        ):
             # The free function spelling, rclcpp::create_publisher(node, topic, qos).
             arguments = arguments[1:]
         types = _template_types(template, self.src)
@@ -1862,7 +1878,9 @@ class _Reader:
             position = 4
         interface_arity = 8 if name == "create_server" else 5
         name_position = (4 if len(arguments) >= interface_arity else 1) if action else 0
-        if factory and len(arguments) > 1 and _is_node_argument(arguments[0], self.src):
+        if factory and function is not None and function.type == "qualified_identifier":
+            # `nav2::interfaces::create_action_client<T>(node, name)` takes the node first,
+            # whatever the handle is called, and the member form takes the name first
             name_position = 1
         if name_position >= len(arguments):
             return True
@@ -3456,6 +3474,7 @@ def analyse(
         for position, item in enumerate(unit.classes):
             if not item.construction:
                 unit.classes[position] = _merge_class(index.classes.get(item.qualname), item)
+    _plugin_suffixes(units)
     _finish_node_helpers(units)
     _local_constructions(units)
     _header_constructions(units, include_dirs or {}, definitions)
@@ -3699,6 +3718,16 @@ def _helper_constructions(root: Any, src: bytes) -> list[tuple[str, list[Any]]]:
     return out
 
 
+def _enclosing_method(node: Any, src: bytes) -> str:
+    while node is not None and node.type != "function_definition":
+        node = node.parent
+    target = _child(node, "declarator") if node is not None else None
+    while target is not None and target.type != "function_declarator":
+        target = _child(target, "declarator")
+    inner = _child(target, "declarator") if target is not None else None
+    return _flat(inner, src).rpartition("::")[2] if inner is not None else ""
+
+
 def _helper_arguments(units: Sequence[Unit]) -> None:
     """A class that is not a node and that its package constructs at one site takes the
     literal arguments of that site into its constructor, as a node class main constructs once
@@ -3726,12 +3755,26 @@ def _helper_arguments(units: Sequence[Unit]) -> None:
         if unit.syntax is None:
             continue
         defines = dict(_DEFINE.findall(unit.source.decode("utf-8", "replace")))
-        names_held = {
-            member for (_klass, member), ref in unit.members.items() if ref.origin == PLUGIN_NAME
-        } | {"getName()"}
+        # only a plugin hands a helper its instance name
+        plugin = any(item.macro == "PLUGINLIB_EXPORT_CLASS" for item in unit.registrations)
+        names_held = (
+            {member for (_klass, member), ref in unit.members.items() if ref.origin == PLUGIN_NAME}
+            | {"getName()"}
+            if plugin
+            else set()
+        )
         for spelling, arguments in _helper_constructions(unit.syntax, unit.source):
             values = [_string_of(argument, unit.source) for argument in arguments]
             texts = [_flat(argument, unit.source).removeprefix("this->") for argument in arguments]
+            if plugin and unit.plugin_name_locals:
+                texts = [
+                    PLUGIN_NAME_ARGUMENT
+                    if text in unit.plugin_name_locals
+                    and _enclosing_method(argument, unit.source) in PLUGIN_SETUP_METHODS
+                    else text
+                    for text, argument in zip(texts, arguments, strict=True)
+                ]
+                names_held.add(PLUGIN_NAME_ARGUMENT)
             key = (unit.pkg, match(unit.pkg, spelling))
             sites.setdefault(key, []).append(
                 tuple(
@@ -4544,6 +4587,75 @@ def _finish_param(item: ParamSite, index: CodeIndex) -> ParamSite:
     return replace(item, name=name, default=default.value, default_state="known")
 
 
+def _short_class(name: str) -> str:
+    return re.sub(r"<.*", "", name).strip().rpartition("::")[2]
+
+
+def _plugin_suffixes(units: Sequence[Unit]) -> None:
+    """A suffix names a parameter of a plugin instance only in a class its package registers
+    with `PLUGINLIB_EXPORT_CLASS`, through an alias when the class is a template, or in a
+    helper a registered plugin hands its name. Anywhere else the instance name is not a
+    plugin's, so the suffix is a `param_name` blind spot and never a node parameter."""
+    aliases: dict[str, dict[str, str]] = {}
+    for unit in units:
+        for row in unit.type_aliases:
+            aliases.setdefault(unit.pkg, {})[_short_class(row["name"])] = _short_class(
+                row["target"]
+            )
+    registered: dict[str, dict[str, set[Registration]]] = {}
+    for unit in units:
+        for item in unit.registrations:
+            if item.macro != "PLUGINLIB_EXPORT_CLASS":
+                continue
+            table = registered.setdefault(unit.pkg, {})
+            short = _short_class(item.type)
+            for name in {short, aliases.get(unit.pkg, {}).get(short, short)}:
+                table.setdefault(name, set()).add(item)
+    for unit in units:
+        table = registered.get(unit.pkg, {})
+        own = next(
+            (item for item in unit.registrations if item.macro == "PLUGINLIB_EXPORT_CLASS"), None
+        )
+        helper = unit.plugin_of_helper
+
+        def plugin_of(
+            owner_class: str,
+            helper: Registration | None = helper,
+            table: dict[str, set[Registration]] = table,
+            own: Registration | None = own,
+        ) -> Registration | None:
+            if helper is not None:
+                return helper
+            found = table.get(_short_class(owner_class), set())
+            if len(found) == 1:
+                return next(iter(found))
+            return own if not owner_class else None
+
+        owners = [item.owner_class for item in unit.params if item.name.status == SUFFIX]
+        owners += [
+            item.sym.rpartition("::")[0] for item in unit.reads if item.name.status == SUFFIX
+        ]
+        found = {plugin_of(owner) for owner in owners} - {None}
+        plugin = own or helper or (next(iter(found)) if len(found) == 1 else None)
+        if own is None and helper is None and plugin is not None:
+            # the file states the parameters of a plugin another file of the package registers
+            unit.plugin_of_helper = plugin
+        unit.params = [
+            replace(item, scope="node")
+            if item.name.status == SUFFIX
+            and (plugin is None or plugin_of(item.owner_class) is not plugin)
+            else item
+            for item in unit.params
+        ]
+        unit.reads = [
+            replace(item, name=Ref(UNRESOLVED, "", item.name.expr))
+            if item.name.status == SUFFIX
+            and (plugin is None or plugin_of(item.sym.rpartition("::")[0]) is not plugin)
+            else item
+            for item in unit.reads
+        ]
+
+
 def _plugin_prefix(ref: Ref) -> bool:
     return ref.expr in {"name_", "this->name_"} or ref.origin == PLUGIN_NAME
 
@@ -4949,8 +5061,20 @@ def file_report(
             continue
         if item.scope == "plugin" and plugin is not None:
             plugin_parameters.append(_plugin_param_view(item, reads, base_class, lookup_name))
-        elif item.scope == "plugin":
-            parameters.append(_param_view(item, reads))
+        elif item.name.status == SUFFIX:
+            # a suffix of an instance name no registration of the package owns
+            unresolved.append(
+                {
+                    "want": model.Want.PARAM_NAME.value,
+                    "expr": item.spelling,
+                    "reason": "plugin_instance_prefix",
+                    "resolvable_by": ["observed"],
+                    **({"construction": item.construction} if item.construction else {}),
+                    "owner_symbol": item.sym,
+                    "line_hint": item.line,
+                }
+            )
+            continue
         else:
             parameters.append(_param_view(item, reads))
         if item.default_state == "unknown":
@@ -5336,6 +5460,47 @@ class _Pending:
     reads: list[str] = field(default_factory=list)
 
 
+class _Overlay(dict):  # type: ignore[type-arg]
+    """The entries of `base`, each copied on first touch, so a file the atlas refuses leaves
+    `base` as it was."""
+
+    def __init__(self, base: dict[str, Any]) -> None:
+        super().__init__()
+        self.base = base
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if not dict.__contains__(self, key):
+            if key not in self.base:
+                return default
+            dict.__setitem__(self, key, copy.deepcopy(self.base[key]))
+        return dict.__getitem__(self, key)
+
+    def __contains__(self, key: object) -> bool:
+        return dict.__contains__(self, key) or key in self.base
+
+    def __getitem__(self, key: str) -> Any:
+        if key not in self:
+            raise KeyError(key)
+        return self.get(key)
+
+
+def _scratch(builder: model.AtlasBuilder) -> model.AtlasBuilder:
+    """A builder over one translation unit, written into `builder` only once it is whole."""
+    scratch = model.AtlasBuilder()
+    scratch.atlas.entities = _Overlay(builder.atlas.entities)
+    scratch.atlas.edges = _Overlay(builder.atlas.edges)
+    return scratch
+
+
+def _commit(builder: model.AtlasBuilder, scratch: model.AtlasBuilder) -> None:
+    builder.atlas.entities.update(dict.items(scratch.atlas.entities))
+    builder.atlas.edges.update(dict.items(scratch.atlas.edges))
+    for entry in scratch.atlas.unresolved:
+        builder.unresolved(entry)
+    for want, count in sorted(scratch._resolved_counts.items()):
+        builder.count_resolved(want, count)
+
+
 @dataclass
 class CppCodeCollector:
     name: str = NAME
@@ -5433,10 +5598,23 @@ class CppCodeCollector:
         builder.declare_layer(LAYER, present=True, run=run)
         late = builder.atlas.entities[run].attrs["exceptions"]
         for unit in sorted(units, key=lambda item: item.path):
+            held, self.pending = self.pending, {}
+            scratch = _scratch(builder)
+            ctx.builder = scratch
             try:
                 self._emit(ctx, run, unit, lookups, components)
             except ContractError as exc:
+                ctx.builder, self.pending = builder, held
                 self._refused(ctx, unit.path, str(exc), late)
+                continue
+            finally:
+                ctx.builder = builder
+            _commit(builder, scratch)
+            for param_id, row in self.pending.items():
+                into = held.setdefault(param_id, _Pending())
+                into.declares.extend(row.declares)
+                into.reads.extend(row.reads)
+            self.pending = held
         self._flush(ctx, run)
         late.sort(key=lambda row: (str(row.get("path", "")), str(row.get("phase", ""))))
 
@@ -5751,28 +5929,19 @@ class CppCodeCollector:
         if not row["parent"] or not row["child"]:
             return
         parent, child = ids.build_frame(row["parent"]), ids.build_frame(row["child"])
-        key = ids.edge_key(sym=sym_id, pair=f"{row['parent']}>{row['child']}")
         values = {
             "source": "cpp_broadcast",
             "symbol": sym_id,
             "broadcaster": row["broadcaster"],
             "condition": row["condition"],
         }
-        # Two sites of one symbol stating the same pair fold into one edge; one that states
-        # other content takes that content into its key, as `join._site_edge` does.
-        edge = builder.atlas.edges.get(
-            ids.build_edge(model.EdgeKind.TF_PARENT.value, parent, child, key)
+        # Two sites of one symbol stating the same content fold into one edge, as
+        # `join._site_edge` folds them, and every other site has a key of its own.
+        key = ids.edge_key(
+            sym=sym_id,
+            pair=f"{row['parent']}>{row['child']}",
+            content=ids.digest_fields({name: str(value) for name, value in values.items()}),
         )
-        slot = edge.fact(LAYER, model.ANY_PROFILE) if edge is not None else None
-        if slot is not None and any(
-            name not in slot.values or slot.values[name] != value for name, value in values.items()
-        ):
-            key = ids.edge_key(
-                site=key,
-                content=ids.digest_fields(
-                    {name: str(value) for name, value in sorted(values.items())}
-                ),
-            )
         builder.edge(
             model.EdgeKind.TF_PARENT.value,
             parent,

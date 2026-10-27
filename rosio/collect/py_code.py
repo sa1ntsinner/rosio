@@ -183,6 +183,7 @@ _RESOLVABLE_BY = {
 }
 
 _DETAILS = {
+    "frame_empty": "the literal names no frame, so tf2 refuses the transform at run time",
     "branch_dependent": (
         "the two arms of a branch bind this name to different values, so the source states"
         " one value per branch and no value that holds either way"
@@ -278,6 +279,13 @@ class Ctx:
 
 # ---------------------------------------------------------------------------
 # helpers
+
+
+def _frame_val(val: Val) -> Val:
+    """A literal that names no frame (`''`, `'/'`) is a blind spot, never `frame:`."""
+    if val.known and isinstance(val.value, str) and not val.value.strip().lstrip("/"):
+        return Val(expr=val.expr or repr(val.value), reason="frame_empty")
+    return val
 
 
 def _guard_view(guard: tuple[str, bool] | None) -> dict[str, Any]:
@@ -2214,6 +2222,7 @@ class PyFile:
             self._blind("frame_id", self._src(args[0]), "", ctx.symbol, node)
             return
         for parent, child in pairs:
+            parent, child = _frame_val(parent), _frame_val(child)
             record: dict[str, Any] = {
                 "kind": kind,
                 "parent": parent.value if parent.known else None,
@@ -2256,7 +2265,7 @@ class PyFile:
                 (fields.get("header.frame_id", _UNKNOWN), fields.get("child_frame_id", _UNKNOWN))
             ]
         if isinstance(node, ast.Call):
-            method = self._own_method(node)
+            method = self._own_method(node, ctx)
             if method is not None:
                 return self._returned_transforms(method, ctx)
             parent = self._keyword(node, "frame_id")
@@ -2275,8 +2284,9 @@ class PyFile:
             ]
         return []
 
-    def _own_method(self, node: ast.Call) -> ast.FunctionDef | None:
-        """The one method `self.<name>()` with no arguments calls, read from this module."""
+    def _own_method(self, node: ast.Call, ctx: Ctx) -> ast.FunctionDef | None:
+        """The one method `self.<name>()` with no arguments calls, defined by the class of
+        the calling method."""
         func = node.func
         if (
             node.args
@@ -2286,9 +2296,12 @@ class PyFile:
             or func.value.id != "self"
         ):
             return None
+        owner = ctx.symbol.rsplit(".", 1)[0].rsplit(".", 1)[-1]
         found = [
             item
-            for item in ast.walk(self.tree)
+            for klass in ast.walk(self.tree)
+            if isinstance(klass, ast.ClassDef) and klass.name == owner
+            for item in klass.body
             if isinstance(item, ast.FunctionDef) and item.name == func.attr
         ]
         return found[0] if len(found) == 1 else None
@@ -2301,6 +2314,24 @@ class PyFile:
         """
         fields: dict[str, dict[str, ast.expr]] = {}
         returned: ast.expr | None = None
+        # the method's own locals, never the caller's
+        own = Ctx(ctx.symbol)
+        assigned: dict[str, int] = {}
+        for item in ast.walk(method):
+            if isinstance(item, ast.Assign | ast.AnnAssign | ast.AugAssign | ast.For):
+                targets = item.targets if isinstance(item, ast.Assign) else [item.target]
+                for target in targets:
+                    for name in ast.walk(target):
+                        if isinstance(name, ast.Name):
+                            assigned[name.id] = assigned.get(name.id, 0) + 1
+        for item in method.body:
+            if (
+                isinstance(item, ast.Assign)
+                and len(item.targets) == 1
+                and isinstance(item.targets[0], ast.Name)
+                and assigned.get(item.targets[0].id) == 1
+            ):
+                own.scope[item.targets[0].id] = self._eval(item.value, own)
         for item in ast.walk(method):
             if isinstance(item, ast.Return):
                 if returned is not None:
@@ -2323,10 +2354,7 @@ class PyFile:
             if not held or len(held) != 2:
                 return []
             pairs.append(
-                (
-                    self._eval(held["header.frame_id"], ctx),
-                    self._eval(held["child_frame_id"], ctx),
-                )
+                (self._eval(held["header.frame_id"], own), self._eval(held["child_frame_id"], own))
             )
         return pairs
 
@@ -2335,8 +2363,8 @@ class PyFile:
         if len(args) < 2:
             return
         target_node, source_node = args[0], args[1]
-        target = self._eval(target_node, ctx)
-        source = self._eval(source_node, ctx)
+        target = _frame_val(self._eval(target_node, ctx))
+        source = _frame_val(self._eval(source_node, ctx))
         record: dict[str, Any] = {
             "api": call,
             "target": target.value if target.known else None,

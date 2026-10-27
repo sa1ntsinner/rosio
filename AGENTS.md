@@ -418,9 +418,10 @@ constructor overloads declaring one name or an `if` and an `else if` asking for 
 are one edge holding both evidence rows: a key that told them apart would need a line or an
 ordinal, which section 3.1 refuses, so folding is the only form that keeps both sites
 readable. The builder takes them with `fold=True`, which skips the evidence check and keeps
-the value and confidence checks. A site whose content differs from the edge its key already
-names takes a digest of that content into its key, so one QoS block never stands for two
-sites there either. A `ContractError` that still escapes the join leaves the atlas written:
+the value and confidence checks. Every site takes a digest of its own content and confidence
+into its key, so one QoS block never stands for two sites, and a site written above another
+adds one edge and moves none: a key that only the second site to arrive took a digest into
+handed the plain key to whichever site came first, and inserting a sibling moved an id. A `ContractError` that still escapes the join leaves the atlas written:
 `extract._join` records a refused `join` pass on a coded run with a problem row, and
 `extract.pass_incomplete` reports it, rather than the run ending with nothing on disk.
 
@@ -817,7 +818,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.26`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.27`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -987,6 +988,10 @@ What was added, in the order it arrived:
   with `refused_detail` instead of a run exception row alone, and the unresolved reason
   `frame_empty`, a frame literal that names no frame (`""`, `"/"`), which no longer mints
   `frame:`.
+
+* in `1.27`, the unresolved reason `angle_unreadable`: a roll, pitch or yaw a
+  `static_transform_publisher` is handed that is not a number leaves `rotation.x` to
+  `rotation.w` of its node blind spots, where the rotation was dropped and nothing said so.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace
@@ -1253,11 +1258,13 @@ shipped, so no stored id or waiver existed.
 
 Inside `1.26` several ids and texts moved besides the new keys. A component library binds the
 helper classes, header members and bases of the class it registers, so a composed node states
-the endpoints a helper makes, and `create_action_server` and `create_action_client` (rclcpp
-and rclcpp_action) are action endpoints, so `action` entities and their `serves` and `calls`
+the endpoints a helper makes, and `rclcpp_action::create_server` and `create_client`, and nav2's
+`create_action_server` and `create_action_client` (the member, and the `nav2::interfaces` free
+function that takes the node first) are action endpoints, so `action` entities and their `serves` and `calls`
 edges exist where there were none. The wrapper table holds `nav2_util::TwistPublisher`, whose
 second argument is the topic. A `std::string` parameter of a plugin's `configure` or
-`initialize`, and `getName()`, are the plugin instance name, so `name + ".scale"` there is a
+`initialize`, and `getName()`, of a class its package registers with
+`PLUGINLIB_EXPORT_CLASS` are the plugin instance name, so `name + ".scale"` there is a
 suffix of a `pparam` and not a `param_name` blind spot, and a helper the plugin hands that
 name to declares suffixes of the same plugin; the parameter states and the `param_name` rate
 of a plugin stack moved. A `param_name` blind spot whose name a local holds states the
@@ -1266,8 +1273,9 @@ local's initializer (`prefix + ".value"`) as its expression, which moved those e
 node (`frame_id`, `child_frame_id`, `translation.*`, `rotation.*`), its role digest covers
 them, and a frame its source reads from a parameter is no longer minted from the default, so
 the synthetic ids of static publishers moved and `frame:frame` and `frame:child` went. Two
-literal origins for one frame pair in one C++ file are two `tf_parent` sites keyed by a digest
-over the origin, where they raised. A node only a site whose condition is false in every
+broadcasts of one frame pair in one C++ symbol that state different content (a condition, a
+broadcaster) are two `tf_parent` sites, where they raised; a C++ broadcast states no origin,
+so it is not in the key. A node only a site whose condition is false in every
 profile starts is not an entity and owns no blind spot: the launch entity stays, with its
 `launches` edge, which removed synthetic nodes and `node_name` entries. `import a.b` binds
 `a`, so a type spelled `sensor_msgs.msg.Image` is `type:sensor_msgs|msg|Image`. A python
@@ -1277,7 +1285,31 @@ over a dict a launch file passes asks to remove the key from that dict rather th
 the line, and `rosio query` over an endpoint relation no edge answers names the blind spots of
 that want. No release had shipped, so no stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.26` file: `Atlas.from_json` compares the major
+Inside `1.27` several ids and texts moved besides the new reason. Every coded edge the join
+writes over a site (`publishes`, `subscribes`, `serves`, `calls`, `broadcasts_tf`,
+`listens_tf`, `tf_parent`, `declares_param`, `reads_param`) and every C++ `tf_parent` edge
+carries a digest of its own content in its key, so every such edge id moved once. A
+`std::string` parameter of `configure` or `initialize`, `getName()` and `name_` name a plugin
+instance only in a class its package registers with `PLUGINLIB_EXPORT_CLASS` (a template
+through the alias the macro names) or in a helper a registered plugin hands its name. A file
+that states the suffixes of a plugin another file of the package registers binds them to that
+plugin, and a suffix no registration owns is a `param_name` blind spot with reason
+`plugin_instance_prefix` instead of a node parameter named by the suffix, which moved
+`pparam` entities, parameters, states and the `param_name` rate. A helper a plugin's setup method hands its name
+argument directly declares suffixes of that plugin, as one handed the member already did. A
+local assigned more than once (the arms of an `if`) states its spelling as the expression of
+its `param_name` blind spot, which hides every key, where it stated the last assignment. A
+python method that builds and returns a transform is read in its own scope and only from the
+caller's class, so a frame no literal or member of that method states is a `frame_id` blind
+spot. A namespace qualified `nav2::interfaces::create_action_server` or
+`create_action_client` takes its name from the second argument whatever the node handle is
+called, and the member form from the first. A python frame literal that names no frame is the
+`frame_empty` blind spot, where it refused the whole file. A C++ file the atlas refuses keeps
+none of the records it wrote before the refusal, and the pass goes on. A rotation a
+`static_transform_publisher` reads from angles cites the flags written, or `positional`, where
+it cited `--roll --pitch --yaw`. No release had shipped, so no stored id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.27` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

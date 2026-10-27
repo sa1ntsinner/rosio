@@ -35,10 +35,11 @@ from typing import Any
 from rosio import ATLAS_SCHEMA_VERSION, __version__, ids
 from rosio.errors import ContractError
 
-SCHEMA_MINOR = "26"
+SCHEMA_MINOR = "27"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the `cpp_refused_by_atlas` refusal reason and the `frame_empty` blind spot
-reason; the package attribute `launch_runs_from`, which replaced `share_read_from`, and
+stored id: the `angle_unreadable` blind spot reason; the `cpp_refused_by_atlas` refusal
+reason and the `frame_empty` blind spot reason; the package attribute `launch_runs_from`,
+which replaced `share_read_from`, and
 the plugin manifest attribute `manifests_held`; node and construction record
 `use_global_arguments`; the coded record `plugin_loaders`, the class row `node_handoffs`,
 and the `generate_parameter_library` keys `definition`, `parameters`,

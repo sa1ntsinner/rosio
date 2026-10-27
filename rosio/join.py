@@ -3064,22 +3064,12 @@ def _site_edge(
 
     Two sites in one symbol can state the same content: two constructor overloads declaring
     one name, an `if` and an `else if` asking for one transform. No key may carry a line, so
-    those fold into one edge holding both evidence rows. A site whose content differs from
-    the edge its key already names takes its content into the key, so it never stands for
-    the first.
+    those fold into one edge holding both evidence rows. Every site takes its content into
+    the key, so a site whose content differs never stands for another, and adding one moves
+    no key that was there before it.
     """
-    edge = builder.atlas.edges.get(ids.build_edge(kind, src, dst, key))
-    slot = None
-    if edge is not None:
-        slot = next((row for row in edge.facts if row.slot == (CODED, profile)), None)
-    if slot is not None and (
-        slot.confidence != confidence
-        or any(
-            name not in slot.values or slot.values[name] != value for name, value in values.items()
-        )
-    ):
-        content = ids.digest_fields({name: str(value) for name, value in sorted(values.items())})
-        key = ids.edge_key(site=key, content=content)
+    content = ids.digest_fields({name: str(value) for name, value in values.items()})
+    key = ids.edge_key(site=key, content=content, confidence=confidence)
     builder.edge(
         kind,
         src,

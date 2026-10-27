@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
-from rosio import ids
+from rosio import ids, model
 from rosio.errors import ContractError
 from rosio.resolve import records
 
@@ -363,6 +363,11 @@ _STATIC_TF_FLAGS = {
 }
 
 
+ANGLE_UNREADABLE = "angle_unreadable"
+"""A roll, pitch or yaw that is not a number, so no rotation of that transform is known."""
+_ROTATION = ("rotation.x", "rotation.y", "rotation.z", "rotation.w")
+
+
 def program_params(node: records.ResolvedNode) -> records.ResolvedNode:
     """The parameters a known program sets from its own arguments.
 
@@ -371,21 +376,36 @@ def program_params(node: records.ResolvedNode) -> records.ResolvedNode:
     (`static_transform_broadcaster_program.cpp`), so the node's `frame_id` default is never
     what runs once the arguments name a frame.
     """
-    found = program_assignments(node.pkg, node.executable, node.argv)
-    if not found:
+    found, unreadable = _program(node.pkg, node.executable, node.argv)
+    if not found and not unreadable:
         return node
     order = max((item.order for item in node.params), default=-1) + 1
     base = node.site.locator if node.site else ""
-    added = tuple(
+    note = "an argument static_transform_publisher hands its node as a parameter"
+    added = [
         records.ParamSource(
             order=order + index,
             kind="ros_args_assign",
             values=((name, found[name][0]),),
-            note="an argument static_transform_publisher hands its node as a parameter",
+            note=note,
             site=_site(node, base, found[name][1]),
         )
         for index, name in enumerate(sorted(found))
-    )
+    ]
+    if unreadable:
+        from rosio.resolve._launch_child import uncarried
+
+        expr = " ".join(f"{flag} {text}" for text, flag in unreadable)
+        what = " ".join(dict.fromkeys(flag for _text, flag in unreadable))
+        added.append(
+            records.ParamSource(
+                order=order + len(added),
+                kind="inline_dict",
+                values=tuple((name, uncarried(expr, ANGLE_UNREADABLE)) for name in _ROTATION),
+                note=f"mechanism={model.Mechanism.ROS_ARGS_P.value}, {note}",
+                site=_site(node, base, what),
+            )
+        )
     return replace(node, params=(*node.params, *added))
 
 
@@ -393,8 +413,16 @@ def program_assignments(
     pkg: str, executable: str, argv: Sequence[Any]
 ) -> dict[str, tuple[str, str]]:
     """Parameter name to (text, the argument that states it) for a known program."""
+    return _program(pkg, executable, argv)[0]
+
+
+def _program(
+    pkg: str, executable: str, argv: Sequence[Any]
+) -> tuple[dict[str, tuple[str, str]], list[tuple[str, str]]]:
+    """The assignments, and the (text, argument) of each angle that is not a number, which
+    leaves the rotation unknown rather than the identity."""
     if (pkg, executable) != STATIC_TF_PROGRAM:
-        return {}
+        return {}, []
     words = [str(item) for item in argv]
     if ROS_ARGS in words:
         words = words[: words.index(ROS_ARGS)]
@@ -412,17 +440,22 @@ def program_assignments(
         )
         names += ["frame_id", "child_frame_id"]
         found = {name: (value, "positional") for name, value in zip(names, words, strict=True)}
-    angles = [_number(found.pop(name, ("0", ""))[0]) for name in ("roll", "pitch", "yaw")]
-    if None not in angles and any(angles) and "rotation.w" not in found:
+    stated = [found.pop(name, ("0", "")) for name in ("roll", "pitch", "yaw")]
+    angles = [_number(text) for text, _flag in stated]
+    unreadable = [row for row, angle in zip(stated, angles, strict=True) if angle is None]
+    if "rotation.w" in found:
+        unreadable = []
+    elif not unreadable and any(angles):
+        flags = " ".join(dict.fromkeys(flag for _text, flag in stated if flag))
         quaternion = _quaternion(*angles)  # type: ignore[arg-type]
-        for index, name in enumerate(("rotation.x", "rotation.y", "rotation.z", "rotation.w")):
-            found[name] = (repr(quaternion[index]), "--roll --pitch --yaw")
+        for index, name in enumerate(_ROTATION):
+            found[name] = (repr(quaternion[index]), flags)
     for name, (value, flag) in list(found.items()):
         number = _number(value)
         if name.startswith(("translation.", "rotation.")) and number is not None:
             # the program parses every number as a double, whatever the text spells
             found[name] = (repr(number), flag)
-    return found
+    return found, unreadable
 
 
 def _number(text: str) -> float | None:
