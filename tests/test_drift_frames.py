@@ -1515,6 +1515,49 @@ def test_launch_raised_without_a_kept_action_keeps_its_wording_and_id():
     )
 
 
+def test_launch_raised_names_a_missing_module_and_its_apt_package():
+    """The row held `No module named 'controller_manager'` and the fix said to supply an
+    argument."""
+    row = dict(
+        _RAISED_ROW,
+        phase="import",
+        exc_type="ModuleNotFoundError",
+        message="No module named 'controller_manager', searched: ROS jazzy",
+    )
+    (found,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert "sudo apt install ros-jazzy-controller-manager" in found.fix
+    assert "python module controller_manager" in found.say
+    (again,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert again.id == found.id
+
+
+def test_launch_raised_names_a_module_no_ros_package_ships_without_apt():
+    row = dict(
+        _RAISED_ROW,
+        phase="import",
+        exc_type="ModuleNotFoundError",
+        message="No module named 'acme_private_helpers', searched: ROS jazzy",
+    )
+    (found,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert "apt" not in found.fix
+    assert "python module acme_private_helpers" in found.fix
+
+
+def test_a_missing_module_names_the_release_that_was_searched():
+    from rosio.collect import launch_declared
+
+    message = "No module named 'controller_manager'"
+    assert (
+        launch_declared.relabel_module(message, ["/opt/ros/jazzy/setup.bash"])
+        == f"{message}, searched: ROS jazzy"
+    )
+    assert launch_declared.relabel_module(message, ["/home/me/ws/install/setup.bash"]) == message
+    assert launch_declared.missing_module(f"{message}, searched: ROS jazzy") == (
+        "controller_manager",
+        "jazzy",
+    )
+
+
 def test_launch_raised_is_silent_when_the_file_is_not_in_the_atlas():
     builder = _builder()
     builder.add_run(DECLARED, profile=NAV, input_digest="deadbeef", exceptions=[_RAISED_ROW])
@@ -1563,6 +1606,13 @@ def test_below_budget_fires_and_names_the_rate_the_budget_and_the_profile():
     assert [item.subject for item in found] == [NAV]
     assert "0.692" in found[0].say and "0.950" in found[0].say
     assert found[0].severity == rules.severity_of("resolution.below_budget")
+
+
+def test_below_budget_counts_one_unresolved_site_in_the_singular():
+    (found,) = build_rules.resolution_below_budget(_budget_atlas(unresolved=1).build(), 0.95)
+    assert "with 1 unresolved site," in found.detail
+    (found,) = build_rules.resolution_below_budget(_budget_atlas(unresolved=4).build())
+    assert "with 4 unresolved sites," in found.detail
 
 
 def test_below_budget_is_silent_when_the_rate_clears_the_budget():
@@ -1704,6 +1754,7 @@ def test_every_rule_id_is_committed_and_implemented_once():
         "extract.input_refused",
         "launch.file_not_installed",
         "model.mesh_missing",
+        "build.unbuilt",
     }
     assert set(frame_rules.RULES) | set(build_rules.RULES) == committed
     assert not set(frame_rules.RULES) & set(build_rules.RULES)
@@ -1930,6 +1981,75 @@ def test_extract_input_refused_keeps_its_id_across_two_runs():
     assert first == second and len(first) == 1
 
 
+def test_extract_input_refused_says_an_exported_manifest_is_not_installed():
+    """theta star exports a manifest it does not install, and the fix said to make the file
+    readable."""
+    builder = _builder()
+    manifest = ids.build_file("nav2_theta_star_planner", "global_planner_plugin.xml")
+    builder.node(
+        manifest,
+        attrs={"loadable": False, "refused_because": "plugin_manifest_missing", "exists": False},
+    )
+    (found,) = build_rules.extract_input_refused(builder.build())
+    assert found.fix.startswith(
+        "nav2_theta_star_planner/package.xml exports "
+        "nav2_theta_star_planner/global_planner_plugin.xml, which the package does not install"
+    )
+    assert "readable" not in found.fix
+
+
+def _unbuilt_atlas(because: str) -> AtlasBuilder:
+    builder = _builder()
+    package = ids.build_pkg("rcd_demo")
+    builder.node(package)
+    reader = ids.build_file("rcd_demo", "bringup/launch/demo.launch.py")
+    builder.node(reader)
+    for relpath in ("config/demo_controllers.yaml", "urdf/demo.urdf.xacro"):
+        file_id = ids.build_file("rcd_demo", relpath)
+        attrs = {"loadable": False, "refused_because": because, "refused_detail": because}
+        if because == "file_after_build":
+            attrs["found_elsewhere"] = [f"bringup/{relpath}"]
+        builder.node(file_id, attrs=attrs)
+        builder.edge(model.EdgeKind.CONTAINS.value, package, file_id)
+        builder.unresolved(
+            Unresolved(
+                want=model.Want.OTHER.value,
+                owner=file_id,
+                expr=relpath.rsplit("/", 1)[1],
+                reason=because,
+                evidence=[Source(file=reader, locator="parameters", line_hint=30)],
+            )
+        )
+    return builder
+
+
+def test_build_unbuilt_reports_one_finding_with_where_the_source_holds_each_file():
+    """Two dozen refusals for one missing `colcon build` buried the one action that repairs
+    them all."""
+    atlas = _unbuilt_atlas("file_after_build").build()
+    (found,) = build_rules.build_unbuilt(atlas)
+    assert found.subject == "pkg:rcd_demo"
+    assert found.severity == "warn"
+    assert "colcon build --packages-up-to rcd_demo" in found.fix
+    assert (
+        "rcd_demo: config/demo_controllers.yaml is in the source at "
+        "bringup/config/demo_controllers.yaml" in found.detail
+    )
+    assert found.title.startswith("rcd_demo is not built, and 2 files read from a package share")
+    assert [row.file for row in found.where] == ["file:rcd_demo|bringup/launch/demo.launch.py"]
+    assert build_rules.extract_input_refused(atlas) == []
+    again = build_rules.build_unbuilt(_unbuilt_atlas("file_after_build").build())
+    assert [item.id for item in again] == [found.id]
+
+
+def test_build_unbuilt_is_silent_on_a_file_no_tree_holds():
+    atlas = _unbuilt_atlas("file_missing").build()
+    assert build_rules.build_unbuilt(atlas) == []
+    refused = build_rules.extract_input_refused(atlas)
+    assert len(refused) == 2
+    assert all(item.fix.startswith("correct the path that names") for item in refused)
+
+
 def test_extract_input_refused_reads_a_recording_and_an_unknown_reason():
     builder = _builder()
     bag_id = ids.build_bag("2026_08_12-14_03_05_site")
@@ -2102,12 +2222,23 @@ BODY = "package://nx_description/meshes/body.stl"
 WHEEL = "package://nx_description/meshes/wheel.stl"
 
 
-def _mesh_atlas(*, loaded: bool = True, installed: bool = False, build_type: str = "ament_cmake"):
+MOVED_WHEEL = "package://nx_description/models/nx/meshes/wheel.stl"
+
+
+def _mesh_atlas(
+    *,
+    loaded: bool = True,
+    installed: bool = False,
+    build_type: str = "ament_cmake",
+    moved: bool = False,
+):
     builder = _builder()
     builder.node(ids.build_pkg("nx_description"), attrs={"build_type": build_type})
     robot = ids.build_file("nx_description", "urdf/robot.urdf")
     attrs = {"missing_meshes": [WHEEL] if installed else sorted([BODY, WHEEL])}
     attrs["meshes_absent"] = [WHEEL]
+    if moved:
+        attrs["meshes_elsewhere"] = {WHEEL: [MOVED_WHEEL]}
     if not installed:
         attrs["meshes_not_installed"] = [BODY]
     builder.node(robot, attrs=attrs)
@@ -2165,6 +2296,22 @@ def test_model_mesh_missing_is_silent_on_an_installed_mesh_and_on_a_model_nobody
     assert build_rules.model_mesh_missing(_mesh_atlas(loaded=False)) == []
 
 
+def test_model_mesh_missing_names_the_place_the_package_holds_the_mesh():
+    """nav2's tb3 model names models/tire.dae and the package holds it under
+    models/turtlebot3_model/meshes, so committing the mesh was the wrong advice."""
+    found = build_rules.model_mesh_missing(_mesh_atlas(moved=True))
+    wheel = next(item for item in found if WHEEL in item.say)
+    assert wheel.fix == (
+        f"change the mesh filename {WHEEL} in nx_description/urdf/robot.urdf to {MOVED_WHEEL}"
+    )
+    assert MOVED_WHEEL in wheel.say and "commit" not in wheel.say
+    plain = next(
+        item for item in build_rules.model_mesh_missing(_mesh_atlas()) if WHEEL in item.say
+    )
+    assert "commit the mesh" in plain.fix
+    assert wheel.id == plain.id
+
+
 def test_model_mesh_missing_keeps_its_ids_across_two_runs():
     first = _ids(build_rules.model_mesh_missing(_mesh_atlas()))
     second = _ids(build_rules.model_mesh_missing(_mesh_atlas()))
@@ -2202,8 +2349,9 @@ def test_launch_raised_names_every_unset_variable_the_walk_saw():
     assert found.fix.startswith("set TURTLEBOT3_MODEL and LDS_MODEL under env of profile")
 
 
-def test_below_budget_titles_differ_per_profile_and_point_at_unresolved():
-    """Four identical lines quoted the global rate and named no profile."""
+def test_below_budget_is_one_finding_that_names_the_worst_profiles_first():
+    """One finding per profile repeated the run's rate once per profile and blamed a profile
+    holding one blind spot as loudly as the one holding four."""
     builder = _budget_atlas(unresolved=4)
     other = _node(builder, "/mapper", SIM, {"executable": "mapper"})
     builder.unresolved(
@@ -2215,9 +2363,11 @@ def test_below_budget_titles_differ_per_profile_and_point_at_unresolved():
             evidence=[Source(file=ids.build_file("mapper", "src/node.cpp"))],
         )
     )
-    found = build_rules.resolution_below_budget(builder.build())
-    titles = {item.subject: item.title for item in found}
-    assert titles[NAV].startswith("profile nx_navigation holds 4 of the 5 unresolved sites")
-    assert titles[SIM].startswith(f"profile {ids.parse_profile(SIM)} holds 1 of the 5")
-    assert all("rosio unresolved" in item.say for item in found)
-    assert all("resolution_budget in rosio.yaml" in item.fix for item in found)
+    (found,) = build_rules.resolution_below_budget(builder.build())
+    assert found.subject == NAV
+    assert found.title.endswith(
+        f"most blind spots in nx_navigation (4), {ids.parse_profile(SIM)} (1)"
+    )
+    assert set(found.profiles) == {NAV, SIM}
+    assert "rosio unresolved" in found.say
+    assert "resolution_budget in rosio.yaml" in found.fix

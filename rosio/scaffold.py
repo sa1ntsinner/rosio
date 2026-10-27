@@ -9,7 +9,9 @@ person merges the entry points that start together and states their arguments.
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import yaml
@@ -20,6 +22,7 @@ from rosio.config import (
     Config,
     Entrypoint,
     ProfileSpec,
+    _slug_for,
     default_config,
 )
 from rosio.errors import UsageError
@@ -44,8 +47,44 @@ SETUP_VARIABLES = ("AMENT_", "COLCON_", "ROS_")
 ROS_DISTRO is not asking the person who writes the profile."""
 
 
+def offered(cfg: Config) -> Config:
+    """The fallback configuration less the launch files init does not offer as profiles."""
+    kept = [
+        profile
+        for profile in cfg.profiles
+        if not any(_not_offered(item) for item in profile.entrypoints)
+    ]
+    return replace(cfg, profiles=tuple(_one_slug_rule(kept)))
+
+
+def _one_slug_rule(profiles: Sequence[ProfileSpec]) -> list[ProfileSpec]:
+    """Every slug a file stem, or every slug `package.stem` once one stem names two files in
+    the tree. The fallback prefixes only the files that collide, which wrote
+    `nav2_bringup.localization` next to `navigation` and `slam`. Decided over the whole
+    tree, as the fallback is, so a package filter never renames a profile."""
+    if all(profile.slug == _stem(profile) for profile in profiles):
+        return list(profiles)
+    names = [_package_stem(profile) for profile in profiles]
+    if not all(names) or len(set(names)) != len(names):
+        return list(profiles)
+    renamed = [replace(profile, slug=name) for profile, name in zip(profiles, names, strict=True)]
+    return sorted(renamed, key=lambda profile: profile.slug)
+
+
+def _stem(profile: ProfileSpec) -> str:
+    if len(profile.entrypoints) != 1 or profile.entrypoints[0].verb != "launch":
+        return ""
+    return _slug_for(profile.entrypoints[0].target)
+
+
+def _package_stem(profile: ProfileSpec) -> str:
+    stem = _stem(profile)
+    return f"{profile.entrypoints[0].pkg}.{stem}" if stem else ""
+
+
 def render(cfg: Config, base: Path) -> str:
     """The configuration as yaml, paths relative to the workspace when they sit inside it."""
+    cfg = offered(cfg)
     payload: dict = {
         "roots": [{"kind": spec.kind, "path": _relative(spec.path, base)} for spec in cfg.roots],
         "ignore": list(cfg.ignore),
@@ -81,6 +120,29 @@ def _profile(profile: ProfileSpec) -> str:
     return text
 
 
+TEST_MARKERS = ("import launch_testing", "from launch_testing", "generate_test_description")
+"""What a launch_testing file holds. It describes a test run with its own assertions, which
+is not a system anybody starts, and as a profile it only reported its test dependencies."""
+
+FRONTENDS = {".xml": ("launch_xml",), ".yaml": ("launch_yaml",), ".yml": ("launch_yaml",)}
+
+
+def _not_offered(entry: Entrypoint) -> bool:
+    """A launch file init leaves out: a launch_testing file, or a markup file no installed
+    frontend parses, which extraction could only refuse."""
+    if entry.verb != "launch" or entry.origin is None:
+        return False
+    path = Path(entry.origin.path)
+    if path.suffix != ".py":
+        wanted = FRONTENDS.get(path.suffix, ("launch_xml", "launch_yaml"))
+        return not any(importlib.util.find_spec(name) for name in wanted)
+    try:
+        source = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(marker in source for marker in TEST_MARKERS)
+
+
 def _unset_environment(entry: Entrypoint) -> tuple[str, ...]:
     """What the launch file of one entry point reads from the environment with no default,
     less what a sourced setup file exports."""
@@ -110,7 +172,7 @@ def write(
     directory instead, and the returned path says so. A named file that cannot be written is
     refused with the two ways out.
     """
-    cfg = default_config(str(workspace), packages)
+    cfg = offered(default_config(str(workspace), packages))
     wanted = target or workspace / CONFIG_NAME
     try:
         return _write(wanted, cfg, force), cfg

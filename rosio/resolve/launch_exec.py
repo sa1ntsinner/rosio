@@ -334,6 +334,14 @@ class Children:
 
 NOTE_SOURCE_SHARE = "the share directory of {} was read from its source tree"
 
+MISSING_SHARE = "/@package_not_found"
+"""The directory a package lookup is answered with while a launch file builds its
+description and no tree holds the package. Nothing exists under it, so whatever reads from it
+fails on its own, and the walk keeps every action that does not."""
+
+PACKAGE_NOT_FOUND = "package_not_found"
+"""The blind spot reason of an include that reads from a package nothing holds."""
+
 
 def source_shares(workspace: Workspace | None) -> dict[str, str]:
     """The packages a source root holds and no install root does, by name.
@@ -826,7 +834,7 @@ def _refuse(
         result.loadable = False
         result.notes.append("only a python launch file can be read as source")
         return result
-    if text.lstrip().startswith("<"):
+    if entry.endswith(".py") and text.lstrip().startswith("<"):
         result = _empty(entry, args, env, workspace, strategy="refused")
         result.loadable = False
         result.notes.append(NOTE_MARKUP)

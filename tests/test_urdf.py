@@ -811,6 +811,114 @@ def test_a_missing_package_mesh_says_whether_the_source_holds_it(tmp_path: Path)
     assert attrs["meshes_not_installed"] == ["package://bot/meshes/body.stl"]
     assert attrs["meshes_absent"] == ["package://bot/meshes/gone.stl"]
     assert atlas.entities[ids.build_pkg("bot")].attrs["build_type"] == "ament_python"
+    assert "meshes_elsewhere" not in attrs
+
+
+def test_a_missing_mesh_the_package_holds_elsewhere_names_where(tmp_path: Path) -> None:
+    """nav2's tb3 model names models/tire.dae, which the package holds under
+    models/turtlebot3_model/meshes."""
+    share = tmp_path / "install" / "share" / "bot"
+    (share / "urdf").mkdir(parents=True)
+    (share / "models" / "bot_model" / "meshes").mkdir(parents=True)
+    (share / "package.xml").write_text(
+        "<package format='3'><name>bot</name></package>", encoding="utf-8"
+    )
+    (share / "models" / "bot_model" / "meshes" / "tire.dae").write_text("x", encoding="utf-8")
+    (share / "urdf" / "bot.urdf").write_text(
+        '<robot name="bot"><link name="wheel">'
+        '<visual><geometry><mesh filename="package://bot/models/tire.dae"/></geometry></visual>'
+        "</link></robot>",
+        encoding="utf-8",
+    )
+    roots = (RootSpec("install", str(tmp_path / "install")),)
+    builder = model.AtlasBuilder()
+    urdf_collect.UrdfCollector().collect(
+        CollectContext(
+            ws=Workspace.discover(roots), cfg=Config(roots=roots, profiles=()), builder=builder
+        )
+    )
+    attrs = builder.build().entities[ids.build_file("bot", "urdf/bot.urdf")].attrs
+    assert attrs["meshes_absent"] == ["package://bot/models/tire.dae"]
+    assert attrs["meshes_elsewhere"] == {
+        "package://bot/models/tire.dae": ["package://bot/models/bot_model/meshes/tire.dae"]
+    }
+
+
+@pytest.mark.ros
+def test_xacro_finds_a_package_an_unbuilt_source_root_holds(tmp_path: Path) -> None:
+    """ros2_control_demos includes `$(find ros2_control_demo_description)/...` from every
+    example, and an unbuilt checkout refused all of them with `package not found`."""
+    if not urdf_collect.xacro_available():
+        pytest.skip("the xacro tool is not on PATH")
+    src = tmp_path / "src"
+    for name in ("demo_description", "demo_robot"):
+        (src / name / "urdf").mkdir(parents=True)
+        (src / name / "package.xml").write_text(
+            f"<package format='3'><name>{name}</name></package>", encoding="utf-8"
+        )
+    (src / "demo_description" / "urdf" / "arm.xacro").write_text(
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro">'
+        '<xacro:macro name="arm"><link name="arm_link"/></xacro:macro></robot>',
+        encoding="utf-8",
+    )
+    (src / "demo_robot" / "urdf" / "robot.urdf.xacro").write_text(
+        '<robot name="demo" xmlns:xacro="http://www.ros.org/wiki/xacro">'
+        '<xacro:include filename="$(find demo_description)/urdf/arm.xacro"/>'
+        '<link name="base_link"/><xacro:arm/></robot>',
+        encoding="utf-8",
+    )
+    roots = (RootSpec("src", str(src)),)
+    builder = model.AtlasBuilder()
+    urdf_collect.UrdfCollector().collect(
+        CollectContext(
+            ws=Workspace.discover(roots), cfg=Config(roots=roots, profiles=()), builder=builder
+        )
+    )
+    atlas = builder.build()
+    robot = atlas.entities[ids.build_file("demo_robot", "urdf/robot.urdf.xacro")]
+    assert "refused_because" not in robot.attrs
+    assert ids.build_frame("arm_link") in atlas.entities
+    with pytest.raises(CollectorError, match="not found") as raised:
+        urdf_collect.expand_xacro(str(src / "demo_robot" / "urdf" / "robot.urdf.xacro"))
+    assert "searching" not in str(raised.value)
+
+
+@pytest.mark.ros
+def test_a_xacro_include_only_a_build_puts_in_place_is_refused_as_such(tmp_path: Path) -> None:
+    """ros2_control_demos installs description/ros2_control as ros2_control, so an unbuilt
+    model reads `$(find pkg)/ros2_control/...` where the source holds no such directory."""
+    if not urdf_collect.xacro_available():
+        pytest.skip("the xacro tool is not on PATH")
+    package = tmp_path / "src" / "demo_robot"
+    (package / "description" / "urdf").mkdir(parents=True)
+    (package / "description" / "ros2_control").mkdir()
+    (package / "package.xml").write_text(
+        "<package format='3'><name>demo_robot</name></package>", encoding="utf-8"
+    )
+    (package / "description" / "ros2_control" / "arm.ros2_control.xacro").write_text(
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro"/>', encoding="utf-8"
+    )
+    (package / "description" / "urdf" / "robot.urdf.xacro").write_text(
+        '<robot name="demo" xmlns:xacro="http://www.ros.org/wiki/xacro">'
+        '<xacro:include filename="$(find demo_robot)/ros2_control/arm.ros2_control.xacro"/>'
+        '<link name="base_link"/></robot>',
+        encoding="utf-8",
+    )
+    roots = (RootSpec("src", str(tmp_path / "src")),)
+    builder = model.AtlasBuilder()
+    urdf_collect.UrdfCollector().collect(
+        CollectContext(
+            ws=Workspace.discover(roots), cfg=Config(roots=roots, profiles=()), builder=builder
+        )
+    )
+    attrs = (
+        builder.build()
+        .entities[ids.build_file("demo_robot", "description/urdf/robot.urdf.xacro")]
+        .attrs
+    )
+    assert attrs["refused_because"] == "file_after_build"
+    assert attrs["needs"] == [ids.build_file("demo_robot", "ros2_control/arm.ros2_control.xacro")]
+    assert attrs["found_elsewhere"] == ["description/ros2_control/arm.ros2_control.xacro"]
 
 
 # ---------------------------------------------------------------------------

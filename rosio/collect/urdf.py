@@ -28,16 +28,17 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
 from rosio import ids, model, workspace
-from rosio.collect import CollectContext, register
+from rosio.collect import BUILT_ONLY, CollectContext, register, same_name_in_package
 from rosio.errors import CollectorError, ContractError
-from rosio.resolve import records
+from rosio.resolve import launch_exec, records
 
 LAYER = model.Layer.DECLARED.value
 NAME = "urdf"
@@ -61,6 +62,7 @@ REFUSAL_ROLES = {
     "xacro_argument_missing": "xacro",
     "xacro_tool_missing": "xacro",
     "xacro_failed": "xacro",
+    BUILT_ONLY: "xacro",
 }
 """Why a description file gave nothing, and which reader met it."""
 
@@ -70,6 +72,7 @@ REFUSAL_FIXES = {
     "xacro_argument_missing": ("supply the argument in the profile",),
     "xacro_tool_missing": ("install the xacro tool",),
     "xacro_failed": ("fix what the xacro tool refused",),
+    BUILT_ONLY: ("build the workspace and add its install tree as a root",),
 }
 
 XACRO_DIRECTIVES = frozenset(
@@ -846,12 +849,53 @@ def xacro_available() -> bool:
     return shutil.which("xacro") is not None
 
 
-def expand_xacro(path: str, args: Sequence[tuple[str, str]] = ()) -> str:
+_SOURCE_SHARES = """\
+import json, sys
+from ament_index_python import packages
+shares = json.loads(sys.argv[1])
+original = packages.get_package_share_directory
+def lookup(name, *rest, **kwargs):
+    try:
+        return original(name, *rest, **kwargs)
+    except packages.PackageNotFoundError:
+        if name not in shares:
+            raise
+        return shares[name]
+packages.get_package_share_directory = lookup
+import xacro
+sys.argv = ["xacro", *sys.argv[2:]]
+xacro.main()
+"""
+"""The xacro tool with `$(find pkg)` answered from the source tree of a package no install
+root holds, after the ament index refused it, which is the rule the launch walk keeps."""
+
+
+def _xacro_command(
+    path: str, args: Sequence[tuple[str, str]], shares: Mapping[str, str]
+) -> list[str]:
+    mapped = [f"{key}:={value}" for key, value in args]
+    if not shares:
+        return ["xacro", path, *mapped]
+    tool = shutil.which("xacro") or ""
+    try:
+        head = Path(tool).read_text(encoding="utf-8", errors="replace").split("\n", 1)[0]
+    except OSError:
+        head = ""
+    interpreter = head[2:].split() if head.startswith("#!") else [sys.executable]
+    return [*interpreter, "-c", _SOURCE_SHARES, model.dumps(dict(shares)), path, *mapped]
+
+
+def expand_xacro(
+    path: str, args: Sequence[tuple[str, str]] = (), shares: Mapping[str, str] | None = None
+) -> str:
     """Run the xacro tool. A missing tool and a missing argument both raise, with the reason
-    in the message, because a silently skipped model loses the whole frame tree."""
+    in the message, because a silently skipped model loses the whole frame tree.
+
+    `shares` names the packages a source root holds and no install root does, so a model in
+    an unbuilt workspace finds the description package beside it."""
     if not xacro_available():
         raise CollectorError(f"{path} needs the xacro tool, which is not on PATH", LAYER, NAME)
-    command = ["xacro", path, *[f"{key}:={value}" for key, value in args]]
+    command = _xacro_command(path, args, shares or {})
     try:
         done = subprocess.run(
             command,
@@ -863,9 +907,32 @@ def expand_xacro(path: str, args: Sequence[tuple[str, str]] = ()) -> str:
     except (OSError, subprocess.SubprocessError) as exc:
         raise CollectorError(f"xacro failed on {path}: {exc}", LAYER, NAME) from exc
     if done.returncode != 0:
-        message = " ".join((done.stderr or done.stdout or "").split())[:400]
+        message = " ".join((done.stderr or done.stdout or "").split())
+        # The prefixes the index searched name this machine and nothing a reader can act on.
+        message = _SEARCHING.sub("", message)[:400]
         raise CollectorError(f"xacro refused {path}: {message}", LAYER, NAME)
     return done.stdout
+
+
+_SEARCHING = re.compile(r", searching: \[[^\]]*\]")
+
+_NO_SUCH_FILE = re.compile(r"No such file or directory: '?([^'\s]+)")
+
+
+def _after_build(ws: Any, message: str) -> dict[str, Any]:
+    """The include a model reads from an unbuilt package and the source holds elsewhere, as
+    the attributes its refusal carries, or nothing. The tool stops at the first one."""
+    found = _NO_SUCH_FILE.search(message)
+    if found is None:
+        return {}
+    missing = found.group(1)
+    package = ws.packages.get(ws.package_of(missing) or "")
+    if package is None or package.share_path:
+        return {}
+    moved = same_name_in_package(ws, missing)
+    if not moved:
+        return {}
+    return {"needs": [ws.file_id(missing)], "found_elsewhere": moved}
 
 
 def parse_xacro_file(
@@ -873,8 +940,9 @@ def parse_xacro_file(
     args: Sequence[tuple[str, str]] = (),
     *,
     resolve_package: PackageResolver | None = None,
+    shares: Mapping[str, str] | None = None,
 ) -> UrdfModel:
-    text = expand_xacro(path, args)
+    text = expand_xacro(path, args, shares)
     found = parse_urdf_text(text, path=path, resolve_package=resolve_package)
     found.strategy = "xacro"
     found.xacro_args = tuple(args)
@@ -891,6 +959,7 @@ class UrdfCollector:
     layer: str = LAYER
     xacro_args: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
     """Arguments per xacro file basename, for the models that declare no default."""
+    _moved: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def collect(self, ctx: CollectContext) -> None:
         ws = ctx.ws
@@ -915,6 +984,7 @@ class UrdfCollector:
                 # want out of the atlas with nothing but a run exception row to show it.
                 exceptions.append(_exception_row(ctx, path, exc))
                 refusals.append((path, "urdf_unreadable", str(exc)))
+        shares = launch_exec.source_shares(ws)
         for path in xacros:
             try:
                 scan = scan_xacro(path, resolve_package=ws.share)
@@ -938,10 +1008,17 @@ class UrdfCollector:
                 refusals.append((path, "xacro_tool_missing", "xacro"))
                 continue
             try:
-                parsed.append((path, parse_xacro_file(path, args, resolve_package=ws.share)))
+                parsed.append(
+                    (path, parse_xacro_file(path, args, resolve_package=ws.share, shares=shares))
+                )
             except CollectorError as exc:
                 exceptions.append(_exception_row(ctx, path, exc))
-                refusals.append((path, "xacro_failed", str(exc)))
+                moved = _after_build(ws, str(exc))
+                if moved:
+                    refusals.append((path, BUILT_ONLY, str(exc)))
+                    self._moved[path] = moved
+                else:
+                    refusals.append((path, "xacro_failed", str(exc)))
         run = builder.add_run(
             LAYER,
             profile=profile if ctx.profile else None,
@@ -1184,10 +1261,9 @@ class UrdfCollector:
         # The detail is compared data and it can quote a tool message, so the machine
         # path in it becomes the file id and every other path its label or its name.
         detail = ws.stated_message(detail.replace(path, file_id), ctx.cfg.ros_setup)
-        ctx.builder.node(
-            file_id,
-            attrs={"loadable": False, "refused_because": reason, "refused_detail": detail},
-        )
+        attrs = {"loadable": False, "refused_because": reason, "refused_detail": detail}
+        attrs.update(self._moved.get(path) or {})
+        ctx.builder.node(file_id, attrs=attrs)
         package = ws.package_of(path)
         if package:
             pkg_id = ids.build_pkg(package)
@@ -1220,9 +1296,12 @@ def emit_loaded(
 
     A frame both expansions declare keeps the geometry the default expansion wrote, so the
     attribute does not depend on which pass ran first."""
-    found = parse_xacro_file(path, args, resolve_package=ctx.ws.share)
+    shares = launch_exec.source_shares(ctx.ws)
+    found = parse_xacro_file(path, args, resolve_package=ctx.ws.share, shares=shares)
     try:
-        default: UrdfModel | None = parse_xacro_file(path, (), resolve_package=ctx.ws.share)
+        default: UrdfModel | None = parse_xacro_file(
+            path, (), resolve_package=ctx.ws.share, shares=shares
+        )
     except CollectorError:
         default = None
     if default is not None and (default.links, default.joints) == (found.links, found.joints):
@@ -1328,6 +1407,7 @@ def _file_entity(ctx: CollectContext, path: str, found: UrdfModel) -> str:
         attrs["missing_meshes"] = missing
     # A package mesh looked for and not found, split by whether the package source holds it.
     absent: dict[str, list[str]] = {"meshes_not_installed": [], "meshes_absent": []}
+    elsewhere: dict[str, list[str]] = {}
     for mesh in found.meshes:
         if not mesh.path or mesh.exists:
             continue
@@ -1341,7 +1421,15 @@ def _file_entity(ctx: CollectContext, path: str, found: UrdfModel) -> str:
                 builder.node(ids.build_pkg(owner.name), attrs={"build_type": owner.build_type})
         else:
             absent["meshes_absent"].append(spelled)
+            # A mesh the package holds under another directory is a path that moved, and
+            # where it does exist is the fix.
+            moved = same_name_in_package(ws, mesh.path)
+            if moved:
+                head = spelled[: len(spelled) - len(_package_relative(spelled))]
+                elsewhere[spelled] = [head + item for item in moved]
     attrs.update({key: sorted(rows) for key, rows in absent.items() if rows})
+    if elsewhere:
+        attrs["meshes_elsewhere"] = dict(sorted(elsewhere.items()))
     builder.node(file_id, attrs=attrs)
     package = ws.package_of(path)
     if package:
@@ -1349,6 +1437,11 @@ def _file_entity(ctx: CollectContext, path: str, found: UrdfModel) -> str:
         builder.node(pkg_id)
         builder.edge(model.EdgeKind.CONTAINS.value, pkg_id, file_id)
     return file_id
+
+
+def _package_relative(spelled: str) -> str:
+    """`models/tire.dae` out of `package://pkg/models/tire.dae`."""
+    return spelled[len("package://") :].partition("/")[2]
 
 
 INCLUDE_LIMIT = 64

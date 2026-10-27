@@ -21,6 +21,7 @@ builds anything and an optional dependency stays unimported until the collector 
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from rosio import model
@@ -167,6 +168,37 @@ class _Pass:
         self._inner.collect(ctx)
 
 
+BUILT_ONLY = "file_after_build"
+"""A file a launch file or a robot model reads from the share of a package that is not built,
+which the package source holds under another directory. The install rule puts it where the
+reader looks, so it exists only after a build and nothing in the reader is wrong."""
+
+ELSEWHERE_LIMIT = 3
+"""How many same named files one missing file names. A package holding more than that under
+one name gives a reader a list to search rather than a path to use."""
+
+
+def same_name_in_package(ws: Workspace, path: str) -> list[str]:
+    """The package relative paths of other files that carry the name of `path` inside the
+    package directory it points into, sorted. A launch file or a robot model naming a file
+    the package holds under another directory is an install rule or a path that moved, and
+    the place it does exist is the useful half of the answer."""
+    name = ws.package_of(path)
+    package = ws.packages.get(name or "")
+    if package is None:
+        return []
+    target = Path(ws.localise(path))
+    for base in (package.share_path, package.src_path):
+        if base and target.is_relative_to(base):
+            found = sorted(
+                item.relative_to(base).as_posix()
+                for item in Path(base).rglob(target.name)
+                if item.is_file() and item != target
+            )
+            return found[:ELSEWHERE_LIMIT]
+    return []
+
+
 REGISTRY: dict[str, Callable[[], Collector]] = {}
 
 
@@ -196,6 +228,7 @@ def names(layer: str = "") -> list[str]:
 
 
 __all__ = [
+    "BUILT_ONLY",
     "BUNDLE_READERS",
     "BUNDLE_WRITERS",
     "REGISTRY",
@@ -204,4 +237,5 @@ __all__ = [
     "get",
     "names",
     "register",
+    "same_name_in_package",
 ]

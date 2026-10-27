@@ -72,6 +72,7 @@ they stay two rules."""
 REFUSED_ROS1 = "ros1_xml"
 REFUSED_MARKUP = "markup_frontend"
 REFUSED_UNAVAILABLE = "launch_unavailable"
+REFUSED_MISSING = "launch_file_missing"
 """Why a file was not read, recorded beside the message so a rule states what is true about
 the file instead of one sentence for three different causes."""
 
@@ -298,6 +299,8 @@ class LaunchDeclaredCollector:
                         "phase": "import",
                         "exc_type": "MissingLaunchFile",
                         "message": f"no launch file in the workspace matches {entry.label}",
+                        "note": RULE_UNLOADABLE,
+                        "refused_because": REFUSED_MISSING,
                     }
                 )
                 continue
@@ -314,6 +317,8 @@ class LaunchDeclaredCollector:
                     "exc_type": failure.exc_type,
                     "message": relabel_searched(ctx.ws, failure.message, ctx.cfg.ros_setup),
                 }
+                if failure.exc_type == "ModuleNotFoundError":
+                    row["message"] = relabel_module(row["message"], ctx.cfg.ros_setup)
                 if failure.kept:
                     row["kept"] = failure.kept
                 if failure.env:
@@ -394,6 +399,20 @@ class LaunchDeclaredCollector:
                 "run_entrypoints": sorted(other_verbs),
             },
         )
+
+        for label in missing:
+            # A profile that names a file no package holds read nothing for that entry point,
+            # and the rate has to fall with it rather than stay perfect over what was read.
+            ctx.builder.unresolved(
+                model.Unresolved(
+                    want=model.Want.OTHER.value,
+                    owner=profile_id,
+                    expr=label,
+                    reason=REFUSED_MISSING,
+                    role="entrypoint",
+                    resolvable_by=["name a launch file a package in the roots holds"],
+                )
+            )
 
         placed: list[_Placed] = []
         for walk in walks:
@@ -1493,6 +1512,31 @@ def missing_package(message: str) -> tuple[str, str] | None:
     return found.group(1), distro.group(1) if distro else ""
 
 
+_MISSING_MODULE = re.compile(r"No module named '([A-Za-z0-9_]+)")
+
+
+def missing_module(message: str) -> tuple[str, str] | None:
+    """The top level module a `ModuleNotFoundError` names and the ROS release that was
+    sourced, when `relabel_module` wrote it."""
+    found = _MISSING_MODULE.search(message)
+    if found is None:
+        return None
+    distro = _SEARCHED_DISTRO.search(message)
+    return found.group(1), distro.group(1) if distro else ""
+
+
+def relabel_module(message: str, ros_setup: Sequence[str] = ()) -> str:
+    """A missing module, with the ROS release whose python path was searched for it."""
+    distros = [
+        found.group(1)
+        for found in (_DISTRO_PREFIX.fullmatch(str(Path(setup).parent)) for setup in ros_setup)
+        if found
+    ]
+    if not distros or "searched:" in message:
+        return message
+    return f"{message}, searched: ROS {distros[0]}"
+
+
 def relabel_searched(ws: Workspace, message: str, ros_setup: Sequence[str] = ()) -> str:
     """`searching: ['@outside']` as the trees a person configured, by label.
 
@@ -1553,6 +1597,8 @@ def unloadable_title(label: str, because: str = "") -> str:
         return f"{label} was never loaded: the launch machinery could not be imported"
     if because == REFUSED_MARKUP:
         return f"{label} is a launch frontend this walk does not execute"
+    if because == REFUSED_MISSING:
+        return f"no package in the roots holds the launch file {label}"
     return f"{label} is not a loadable ROS 2 launch file"
 
 
@@ -1567,7 +1613,14 @@ def unloadable_fix(because: str = "") -> str:
             "name a python launch file that includes this one in the profile, or write this "
             "entry point as a python launch description"
         )
-    return "port the file to the ROS 2 launch format or drop it from the profile that names it"
+    if because == REFUSED_MISSING:
+        return (
+            "correct the package or the file name of the entry point in rosio.yaml, or add the "
+            "root that holds the package"
+        )
+    if because == REFUSED_ROS1:
+        return "port the file to the ROS 2 launch format or drop it from the profile that names it"
+    return "make the file build a launch description, or drop it from the profile that names it"
 
 
 def unloadable_say(label: str, because: str = "") -> str:
@@ -1587,6 +1640,11 @@ def unloadable_say(label: str, because: str = "") -> str:
         return (
             f"{label} is a ROS 1 style launch file, so nothing in it was read and none of "
             "its nodes are in this atlas."
+        )
+    if because == REFUSED_MISSING:
+        return (
+            f"the profile names the launch file {label}, which no package in the roots holds, "
+            "so that entry point added nothing to this atlas."
         )
     return f"{label} could not be loaded, so none of its nodes are in this atlas."
 
@@ -2321,10 +2379,13 @@ __all__ = [
     "NAME",
     "NO_PROFILE",
     "REFUSED_MARKUP",
+    "REFUSED_MISSING",
     "REFUSED_ROS1",
     "REFUSED_UNAVAILABLE",
     "LaunchDeclaredCollector",
+    "missing_module",
     "missing_package",
+    "relabel_module",
     "relabel_searched",
     "unloadable_fix",
     "unloadable_say",

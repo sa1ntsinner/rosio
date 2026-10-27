@@ -52,7 +52,7 @@ two different rules.
 
 | layer | what it claims | how it is produced |
 | --- | --- | --- |
-| `declared` | what the repository says should run: launch files, yaml parameter profiles, urdf and xacro, interface definitions, pluginlib manifests, and the non launch entry points that compose real profiles (a desktop launcher building `ros2 launch` and `ros2 run` command strings) | static reading plus sandboxed execution of `generate_launch_description` |
+| `declared` | what the repository says should run: launch files, yaml parameter profiles, urdf and xacro, interface definitions, pluginlib manifests, and the non launch entry points that compose real profiles (a desktop launcher building `ros2 launch` and `ros2 run` command strings) | static reading plus sandboxed execution of `generate_launch_description` and of XML and YAML launch frontends |
 | `coded` | what the C++ and Python sources actually publish, subscribe, declare, read and broadcast | AST and source analysis, never execution |
 | `observed` | what a live system reports: node names, endpoints with QoS, effective parameter values, TF, rates, lifecycle state | a short rclpy probe |
 | `recorded` | what a real run contains: rosbag2 metadata and per topic statistics | rosbag2 metadata reading |
@@ -450,6 +450,10 @@ with per candidate provenance.
   launched node (`lifecycle_manager:` when the node is `lifecycle_manager_navigation`,
   `map_saver:` when the node is `map_saver_server`) gets state `owner_name_mismatch` and no
   effective value, so it can never be read as live configuration.
+* A key a file sets for a node whose code the join read whole and which declares no such
+  parameter wins nothing in that profile: the node ignores it. The join takes the win off the
+  line and notes why on the candidate, and a parameter that wins in no profile is
+  `undeclared`, so `rosio param` and `param.set_undeclared` say the same thing about it.
 * A parameter value's authority is the candidate chain, not the observed layer. This is the
   one documented exception to the precedence in section 6, and the reason is concrete: the
   observed value can come from a merged temp file that exists in no repository, so an agent
@@ -680,7 +684,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.18`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.19`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -788,6 +792,17 @@ What was added, in the order it arrived:
   part of the entry id, so no finding id moved; the detail of such a finding changed, and with
   it the fingerprint.
 
+* in `1.19`, the rule id `build.unbuilt`, the `refused_because` value `file_after_build` with
+  the file attributes `found_elsewhere` and `needs`, and the model file attribute
+  `meshes_elsewhere`. A file a launch file reads from the share of a package no install root
+  holds, which the package source holds under another directory, is refused as
+  `file_after_build` and names in `found_elsewhere` where the source holds a file of that name.
+  A robot model whose xacro include is such a file is refused the same way and names the
+  include in `needs`. `build.unbuilt` reports all of them in one finding instead of
+  `extract.input_refused` once per file. A `package://` mesh no tree holds names in
+  `meshes_elsewhere` the paths inside the same package that hold a file of that name, and
+  `model.mesh_missing` names them as the fix.
+
 One observed key was renamed in `1.17` without a major bump. The process table wrote the
 whole command line of a node under `argv`, the key under which the declared layer states only
 the arguments a launch file passes, so every launched node with arguments disagreed with
@@ -854,7 +869,31 @@ node whose executable is its package is named once in prose (`the rviz2 node in 
 which changed the detail and the fingerprint of findings naming one. No release had shipped,
 so no stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.18` file: `Atlas.from_json` compares the major
+Inside `1.19` several findings moved without a new key. `resolution.below_budget` is one
+finding per run, about the profile that owns the most blind spots and naming the worst three,
+where it was one per profile, so its id moved. `param.orphan_block` is one finding per file and
+block with the profiles it is dead in, its discriminator the block name alone where it was
+`<profile>.<block>`, so one deletable block is one finding and its id moved. A
+`ModuleNotFoundError` row names the ROS release whose python path was searched
+(`searched: ROS jazzy`), so its `launch.raised` id moved, and a module a released ROS package
+ships gets the apt package as its fix. An import that fails on a missing module is no longer
+`launch.unloadable` as well: the file is a launch file that cannot run here, and
+`launch.raised` says why. `launch.unloadable` fires on a profile entry point naming a launch file
+no package in the roots holds, about the profile, discriminated by the entry point, and the
+blind spot `launch_file_missing` owned by the profile takes the rate down with it. An XML or
+YAML launch file is walked through the frontend `ros2 launch` uses instead of being refused by
+shape. A package lookup that fails while a launch file builds its description is answered with
+a directory that does not exist, so the description builds, the row the failure always gave is
+kept, and the include that reads from that package is the blind spot `package_not_found`
+rather than every node of the profile lost. A parameter a file sets and the node's code never
+declares wins in no profile and is `undeclared` once no profile is left where it wins, with no
+effective value; its candidate keeps the note that the node ignores it. A `model.mesh_missing`
+finding over a mesh the package holds elsewhere changed its detail and its fingerprint.
+`plugin.unused` is silent on a manifest read from an install tree with no source beside it,
+and no finding cites a file of rosio itself as where it is true. No release had shipped, so no
+stored id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.19` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -900,6 +939,7 @@ time.frozen                 time.zero                     time.gap
 time.drift
 rmw.mixed                   zenoh.router_unreachable      qos.incompatible
 param.sim_time_mixed        launch.file_not_installed     model.mesh_missing
+build.unbuilt
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -920,6 +960,14 @@ does not, read the way `launch.file_not_installed` reads it, and the fix names t
 install line by build type. It is `warn` when no tree holds the mesh, a wrong path or a file
 never committed, and the fix names the filename in the model. A model no profile loads is not
 reported, and a mesh that is not a package name stays the blind spot the urdf collector left.
+
+`build.unbuilt` is `warn`. It fires once per atlas when launch files or robot models read
+files from the share directory of a package no install root holds, the files are missing at
+that path and the package source holds a file of the same name under another directory, which
+is an install rule a build has not applied. It names each package, each file and where the
+source holds it, its subject is the first such package by name, and the fix is `colcon build`
+and the install tree as a root. A missing file the source holds nowhere stays
+`extract.input_refused`, because a wrong path and a generated file read alike.
 
 `param.sim_time_mixed` is `warn`. It fires once per profile whose nodes state both values of
 `use_sim_time` in their winning candidates, names the minority side and the line that sets

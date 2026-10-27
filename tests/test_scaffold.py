@@ -28,7 +28,7 @@ def test_the_written_file_reads_back_as_the_same_configuration(workspace: Path) 
     read = load_config(str(target), workspace=str(workspace))
     assert [profile.slug for profile in read.profiles] == [p.slug for p in written.profiles]
     assert [profile.slug for profile in read.profiles] == [
-        p.slug for p in default_config(str(workspace)).profiles
+        p.slug for p in scaffold.offered(default_config(str(workspace))).profiles
     ]
     assert {Path(spec.path).resolve() for spec in read.roots} == {
         Path(spec.path).resolve() for spec in written.roots
@@ -281,3 +281,44 @@ def scaffold_ignore() -> tuple[str, ...]:
     from rosio.config import INSTALL_PREFIX_IGNORE
 
     return INSTALL_PREFIX_IGNORE
+
+
+def test_init_does_not_offer_a_launch_testing_file_as_a_profile(workspace: Path) -> None:
+    """ros2_control_demos keeps a launch_testing file per example, and each became a profile
+    that only ever reported its test dependencies."""
+    launch = workspace / "src" / "lx_bringup" / "launch"
+    (launch / "test_bringup.launch.py").write_text(
+        "import launch_testing\ndef generate_test_description():\n    return None\n",
+        encoding="utf-8",
+    )
+    (launch / "test_named_like_a_test.launch.py").write_text(
+        "from launch import LaunchDescription\n"
+        "def generate_launch_description():\n"
+        "    return LaunchDescription([])\n",
+        encoding="utf-8",
+    )
+    _target, written = scaffold.write(workspace)
+    targets = {item.target for profile in written.profiles for item in profile.entrypoints}
+    assert "test_bringup.launch.py" not in targets
+    assert "test_named_like_a_test.launch.py" in targets
+    assert "test_bringup.launch.py" not in scaffold.render(
+        default_config(str(workspace)), workspace
+    )
+
+
+def test_init_prefixes_every_slug_once_one_stem_names_two_files(tmp_path: Path) -> None:
+    install = tmp_path / "ws" / "install"
+    _installed(install / "alpha", "alpha")
+    _installed(install / "beta", "beta")
+    _installed(install / "gamma", "gamma", "slam.launch.py")
+    payload = yaml.safe_load(scaffold.render(default_config(str(install)), install))
+    assert [row["slug"] for row in payload["profiles"]] == [
+        "alpha.bringup",
+        "beta.bringup",
+        "gamma.slam",
+    ]
+
+
+def test_init_keeps_bare_stems_when_no_two_files_share_one(merged: Path) -> None:
+    payload = yaml.safe_load(scaffold.render(default_config(str(merged)), merged))
+    assert [row["slug"] for row in payload["profiles"]] == ["beta", "bringup"]

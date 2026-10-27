@@ -138,30 +138,42 @@ class _SourceShares:
 
     Only a package that a source root holds and no install root does is answered here, and
     only after the index refused it, so an installed copy wins as it does at run time.
+
+    While a launch file builds its description, a package nothing holds is answered too, with
+    a directory that does not exist, and remembered. A description that looks up a driver
+    package while it is built otherwise raises before it returns a single action, and the one
+    missing package takes every sibling node of the profile with it. The include that reads
+    from that directory then fails on its own, as one blind spot.
     """
 
     def __init__(self, shares: dict[str, str]) -> None:
         self.shares = dict(shares)
         self.used: set[str] = set()
+        self.lenient = False
+        self.missing: dict[str, BaseException] = {}
         self._saved: list[tuple[Any, str, Any]] = []
 
     def install(self) -> None:
-        if not self.shares:
+        try:
+            import ament_index_python
+            from ament_index_python import packages
+            from launch_ros.substitutions import find_package
+        except ImportError:
             return
-        import ament_index_python
-        from ament_index_python import packages
-        from launch_ros.substitutions import find_package
 
         original = packages.get_package_share_directory
 
         def lookup(package_name, *rest, **kwargs):
             try:
                 return original(package_name, *rest, **kwargs)
-            except packages.PackageNotFoundError:
-                if package_name not in self.shares:
+            except packages.PackageNotFoundError as exc:
+                if package_name in self.shares:
+                    self.used.add(package_name)
+                    return self.shares[package_name]
+                if not self.lenient:
                     raise
-                self.used.add(package_name)
-                return self.shares[package_name]
+                self.missing.setdefault(package_name, exc)
+                return f"{launch_exec.MISSING_SHARE}/{package_name}"
 
         for owner in (packages, ament_index_python, find_package):
             self._saved.append((owner, "get_package_share_directory", original))
@@ -659,12 +671,14 @@ class Walker:
         self.commands.install()
         self.models.install()
         try:
-            module = self._load()
-            if module is not None:
-                description = self._describe(module)
-                if description is not None:
-                    self._walk(description)
-                    self._bind_lifecycle_events()
+            if self.entry.endswith(".py"):
+                module = self._load()
+                description = self._describe(module) if module is not None else None
+            else:
+                description = self._markup()
+            if description is not None:
+                self._walk(description)
+                self._bind_lifecycle_events()
         finally:
             self.models.restore()
             self.commands.restore()
@@ -692,9 +706,30 @@ class Walker:
             return load_python_launch_file_as_module(self.entry)
         except BaseException as exc:
             self._raised("import", exc, self.entry)
-            # A module that reads an unset variable at import is a launch file the profile
-            # has not configured yet, which launch.raised says, and not a file of another kind.
-            self.result.loadable = bool(self.result.exceptions[-1].env)
+            # A module that reads an unset variable at import, or imports a package this
+            # machine lacks, is a launch file that cannot run here yet, which launch.raised
+            # says, and not a file of another kind.
+            self.result.loadable = bool(self.result.exceptions[-1].env) or isinstance(
+                exc, ImportError
+            )
+            return None
+
+    def _markup(self):
+        """An XML or YAML launch file, parsed by the frontend that `ros2 launch` uses."""
+        from launch.frontend import Parser
+        from launch.launch_description_sources.frontend_launch_file_utilities import (
+            get_launch_description_from_frontend_launch_file,
+        )
+
+        Parser.load_parser_implementations()
+        if not Parser.frontend_parsers:
+            self.result.loadable = False
+            self.result.notes.append(launch_exec.NOTE_MARKUP)
+            return None
+        try:
+            return get_launch_description_from_frontend_launch_file(self.entry)
+        except BaseException as exc:
+            self._raised("import", exc, self.entry)
             return None
 
     def _describe(self, module):
@@ -703,11 +738,19 @@ class Walker:
             self.result.loadable = False
             self.result.notes.append("no generate_launch_description in this file")
             return None
+        self.shares.lenient = True
         try:
-            return function()
+            description = function()
         except BaseException as exc:
-            self._raised("describe", exc, self.entry)
-            return None
+            # A package that is missing explains whatever its directory broke afterwards.
+            if not self.shares.missing:
+                self._raised("describe", exc, self.entry)
+            description = None
+        finally:
+            self.shares.lenient = False
+        for name in sorted(self.shares.missing):
+            self._raised("describe", self.shares.missing[name], self.entry)
+        return description
 
     def _walk(self, description) -> None:
         try:
@@ -876,14 +919,21 @@ class Walker:
         except BaseException as exc:
             location = _location(source)[0]
             command = _command_text(location)
-            if command is None:
+            absent = _missing_share(location)
+            if command is None and not absent:
                 self._raised("include", exc, frame.file, "IncludeLaunchDescription")
             self.result.includes.append(
                 records.LaunchInclude(
-                    path=command if command is not None else location,
+                    path=command if command is not None else absent or location,
                     site=_action_site(action, frame.file, "IncludeLaunchDescription"),
                     resolved=False,
-                    reason="command_substitution" if command is not None else "",
+                    reason=(
+                        "command_substitution"
+                        if command is not None
+                        else launch_exec.PACKAGE_NOT_FOUND
+                        if absent
+                        else ""
+                    ),
                 )
             )
             return
@@ -1967,6 +2017,16 @@ def _under(path: str, base: str) -> bool:
 
 
 _REPR_MARK = " object at 0x"
+
+
+def _missing_share(location: str) -> str:
+    """An include path under the directory a missing package was answered with, spelled the
+    way a launch file names a package share, or an empty string."""
+    head = launch_exec.MISSING_SHARE + "/"
+    if head not in location:
+        return ""
+    name, _sep, rest = location.split(head, 1)[1].partition("/")
+    return f"$(find-pkg-share {name})" + (f"/{rest}" if rest else "")
 
 
 def _location(source) -> tuple[str, bool]:

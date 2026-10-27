@@ -126,7 +126,7 @@ def _ids(atlas: model.Atlas, rule: str) -> list[str]:
 
 
 def test_the_committed_vocabulary_is_the_one_in_the_contract():
-    assert len(rules.COMMITTED) == len(set(rules.COMMITTED)) == 46
+    assert len(rules.COMMITTED) == len(set(rules.COMMITTED)) == 47
     assert rules.COMMITTED[0] == "param.shadowed"
     assert set(rules.SEVERITY) == set(rules.COMMITTED)
 
@@ -607,7 +607,9 @@ def test_param_restated_identical_finding_id_is_stable_across_two_runs():
 # param.set_undeclared
 
 
-def _undeclared_atlas(name: str = "max_speed", declared: tuple[str, ...] = ()) -> model.Atlas:
+def _undeclared_atlas(
+    name: str = "max_speed", declared: tuple[str, ...] = (), states_node: bool = True
+) -> model.Atlas:
     builder = _builder()
     for other in declared:
         builder.fact(
@@ -618,6 +620,8 @@ def _undeclared_atlas(name: str = "max_speed", declared: tuple[str, ...] = ()) -
         )
     source_file = ids.build_file("demo_pkg", "src/demo_server.cpp")
     builder.node(source_file)
+    if states_node:
+        builder.atlas.entities[source_file].attrs["nodes"] = [{"name": "demo_server"}]
     builder.fact(
         NODE,
         CODED,
@@ -663,6 +667,14 @@ def test_param_set_undeclared_is_silent_when_the_code_builds_a_name_at_run_time(
         )
     )
     assert _run(atlas, "param.set_undeclared") == []
+
+
+def test_param_set_undeclared_is_silent_when_the_bound_source_only_runs_a_class():
+    """A `main` constructing a class defined in another file read none of its declarations."""
+    atlas = _undeclared_atlas(states_node=False)
+    assert _run(atlas, "param.set_undeclared") == []
+    entity = _joined(atlas).get(ids.build_param(NODE, "max_speed"))
+    assert entity.state == model.ParamState.EFFECTIVE.value
 
 
 def test_param_set_undeclared_is_silent_for_a_parameter_the_client_library_declares():
@@ -719,6 +731,36 @@ def test_param_set_undeclared_is_silent_when_the_code_declares_the_key():
         evidence=[_source(source_file, "DemoServer::DemoServer", 20)],
     )
     assert _run(builder.recompute(), "param.set_undeclared") == []
+
+
+def _joined(atlas: model.Atlas) -> model.Atlas:
+    from rosio import join
+
+    builder = model.AtlasBuilder()
+    builder.atlas = atlas
+    join._ignore_undeclared(builder)
+    return builder.recompute()
+
+
+def test_a_parameter_the_node_never_declares_wins_nothing_and_is_undeclared():
+    """`rosio param` called stop_distnce effective while drift said the node ignores it."""
+    before = _run(_undeclared_atlas(), "param.set_undeclared")
+    atlas = _joined(_undeclared_atlas())
+    entity = atlas.get(ids.build_param(NODE, "max_speed"))
+    assert entity.state == model.ParamState.UNDECLARED.value
+    assert entity.effective == {}
+    (row,) = entity.candidates
+    assert not row.wins and "never declares" in row.note
+    after = _run(atlas, "param.set_undeclared")
+    assert [item.id for item in after] == [item.id for item in before]
+    assert _joined(atlas).to_bytes() == atlas.to_bytes()
+
+
+def test_a_parameter_the_node_declares_stays_effective():
+    atlas = _joined(_undeclared_atlas("max_speed", declared=("max_speed",)))
+    entity = atlas.get(ids.build_param(NODE, "max_speed"))
+    assert entity.state == model.ParamState.EFFECTIVE.value
+    assert entity.effective
 
 
 def test_param_set_undeclared_finding_id_is_stable_across_two_runs():
@@ -1210,6 +1252,55 @@ def test_node_text_tells_two_unnamed_nodes_apart_by_namespace():
     assert rules.node_text(other) == "the nav2_map_server map_server node"
 
 
+def _orphan_in_profiles(files: dict[str, str]) -> model.Atlas:
+    """One dead block per profile, each read from the file the profile names."""
+    builder = _builder()
+    selector = "velocity_smoother"
+    state = model.ParamState.OWNER_NAME_MISMATCH.value
+    for profile, file_id in sorted(files.items()):
+        builder.fact(NODE, DECLARED, profile=profile, values={"form": "node"})
+        for index in range(2):
+            param_id = ids.build_param(ids.build_node(f"/{selector}"), f"key_{index}")
+            builder.fact(
+                param_id,
+                DECLARED,
+                profile=profile,
+                values={"state": state, "selector": selector},
+                evidence=[_source(file_id, selector, 38)],
+            )
+            builder.set_param(
+                param_id,
+                state=state,
+                candidates=[
+                    _candidate(
+                        index,
+                        model.Mechanism.YAML_BASE.value,
+                        _source(file_id, f"{selector}.ros__parameters.key_{index}", 40 + index),
+                        rank=0,
+                        profile=profile,
+                    )
+                ],
+            )
+    return builder.recompute()
+
+
+def test_param_orphan_block_read_by_two_profiles_is_one_finding_naming_both():
+    """nav2's shared parameters file made one deletable line one finding per profile."""
+    atlas = _orphan_in_profiles({PROFILE: BASE, OTHER_PROFILE: BASE})
+    (found,) = _run(atlas, "param.orphan_block")
+    assert found.profiles == [PROFILE, OTHER_PROFILE]
+    assert found.discriminator == "velocity_smoother"
+    assert "profiles demo and other launch no node" in found.say
+    again = _run(_orphan_in_profiles({PROFILE: BASE, OTHER_PROFILE: BASE}), "param.orphan_block")
+    assert [item.id for item in again] == [found.id]
+
+
+def test_param_orphan_block_in_two_files_stays_two_findings():
+    atlas = _orphan_in_profiles({PROFILE: BASE, OTHER_PROFILE: OVERLAY})
+    found = _run(atlas, "param.orphan_block")
+    assert sorted(item.subject for item in found) == sorted([BASE, OVERLAY])
+
+
 def test_param_orphan_block_finding_id_is_stable_across_two_runs():
     assert _ids(_orphan_atlas(), "param.orphan_block") == _ids(
         _orphan_atlas(), "param.orphan_block"
@@ -1288,7 +1379,9 @@ def test_plugin_inert_by_design_finding_id_is_stable_across_two_runs():
 # plugin.unused and plugin.unresolved
 
 
-def _plugin_atlas(*, selected: bool, exported: bool = True, loaded: bool = True) -> model.Atlas:
+def _plugin_atlas(
+    *, selected: bool, exported: bool = True, loaded: bool = True, installed: bool = False
+) -> model.Atlas:
     builder = _builder()
     if loaded:
         # A controller server runs in the profile and selects its controllers from a list.
@@ -1309,7 +1402,13 @@ def _plugin_atlas(*, selected: bool, exported: bool = True, loaded: bool = True)
         DECLARED,
         values={"base_class": "nav2_core::Controller", "lookup_name": "demo_controller/Spare"},
         confidence=model.Confidence.CERTAIN.value,
-        evidence=[_source(manifest, "class[demo_controller/Spare]")],
+        evidence=[
+            model.Source(
+                file=manifest,
+                locator="class[demo_controller/Spare]",
+                root=model.Root.INSTALL.value if installed else model.Root.SRC.value,
+            )
+        ],
     )
     if exported:
         builder.edge(model.EdgeKind.PROVIDES_PLUGIN.value, package, plugin_id)
@@ -1336,6 +1435,11 @@ def test_plugin_unused_fires_for_a_class_this_workspace_builds_and_never_selects
 
 def test_plugin_unused_is_silent_when_one_profile_selects_it():
     assert _run(_plugin_atlas(selected=True), "plugin.unused") == []
+
+
+def test_plugin_unused_is_silent_on_a_package_only_an_install_tree_holds():
+    """23 infos on /opt/ros/jazzy told a reader to stop exporting an apt package's plugin."""
+    assert _run(_plugin_atlas(selected=False, installed=True), "plugin.unused") == []
 
 
 def test_plugin_unused_is_silent_when_no_profile_loads_that_kind_of_plugin():

@@ -822,10 +822,126 @@ def join(builder: model.AtlasBuilder) -> JoinReport:
         _bind_instance(builder, item, found, via, report, count=first)
     _retire_bound_remaps(builder, report)
     _retire_resolved_sites(builder, report)
+    _ignore_undeclared(builder)
     if first:
         atlas.x[MARKER] = report.summary()
     builder.recompute()
     return report
+
+
+AUTO_DECLARED = frozenset({"use_sim_time"})
+AUTO_DECLARED_PREFIXES = ("qos_overrides.",)
+"""Names the client library declares for every node, so no source states them."""
+
+
+def auto_declared(name: str) -> bool:
+    return name in AUTO_DECLARED or name.startswith(AUTO_DECLARED_PREFIXES)
+
+
+def blind_files(atlas: model.Atlas, want: str) -> set[str]:
+    """Files holding a site whose `want` could not be read.
+
+    A claim that something is absent from a node's code cannot be made when that code holds
+    such a site: the missing name may be the one it built at run time.
+    """
+    out: set[str] = set()
+    for entry in atlas.unresolved:
+        if entry.want != want:
+            continue
+        kind = ids.kind_of(entry.owner)
+        if kind == "file":
+            out.add(entry.owner)
+        elif kind == "sym":
+            parsed = ids.parse_sym(entry.owner)
+            out.add(ids.build_file(parsed.package, parsed.relpath))
+    return out
+
+
+def declared_names(atlas: model.Atlas) -> dict[str, set[str]]:
+    """Owner node id to the parameter names its source declares."""
+    out: dict[str, set[str]] = {}
+    for node in atlas.by_kind(model.NodeKind.PARAM.value):
+        if any(fact.layer == CODED and fact.values.get("declared_in_code") for fact in node.facts):
+            parsed = ids.parse_param(node.id)
+            out.setdefault(parsed.owner, set()).add(parsed.name)
+    return out
+
+
+def ignored(
+    atlas: model.Atlas,
+    node: model.Node,
+    profile: str,
+    blind: set[str],
+    declared: dict[str, set[str]],
+) -> bool:
+    """Whether the node a parameter belongs to runs code, in this profile, that never declares
+    it. A node ignores a parameter it never declares, so the value a file sets is not live.
+
+    Only a node whose code the join bound and read whole can say so: a source holding a
+    parameter name built at run time may declare this one, and a `main` that only constructs
+    a class defined in another file, with no declaration bound, read none of them.
+    """
+    parsed = ids.parse_param(node.id)
+    owner = atlas.entities.get(parsed.owner)
+    if owner is None or auto_declared(parsed.name):
+        return False
+    coded = owner.fact(CODED, profile)
+    if (
+        coded is None
+        or coded.confidence == model.Confidence.UNKNOWN.value
+        or coded.values.get("via_known_wrapper")
+    ):
+        return False
+    sources = set(coded.values.get("coded_sources") or [])
+    if sources & blind:
+        return False
+    if parsed.owner not in declared and not any(_states_node(atlas, s) for s in sources):
+        return False
+    own = node.fact(CODED, profile)
+    return not (own is not None and own.values.get("declared_in_code"))
+
+
+def _states_node(atlas: model.Atlas, source: str) -> bool:
+    """Whether a bound source names the node it runs."""
+    entity = atlas.entities.get(source)
+    if entity is None:
+        return False
+    return bool(entity.attrs.get("nodes")) or any(
+        fact.values.get("nodes") for fact in entity.facts if fact.layer == CODED
+    )
+
+
+IGNORED_NOTE = "the node never declares this parameter, so it ignores the value"
+
+
+def _ignore_undeclared(builder: model.AtlasBuilder) -> None:
+    """A parameter a file sets and the node's code never declares wins nothing.
+
+    The chain still states which line would win, and nothing does: the profile's candidates
+    lose their win, and a parameter that wins in no profile any more is `undeclared` with no
+    effective value (AGENTS section 7), which is what the drift rule says of it.
+    """
+    atlas = builder.atlas
+    blind = blind_files(atlas, model.Want.PARAM_NAME.value)
+    declared = declared_names(atlas)
+    for node in atlas.by_kind(model.NodeKind.PARAM.value):
+        if node.state != model.ParamState.EFFECTIVE.value:
+            continue
+        dropped = {
+            row.profile
+            for row in node.candidates
+            if row.wins and ignored(atlas, node, row.profile, blind, declared)
+        }
+        if not dropped:
+            continue
+        node.candidates = [
+            replace(row, wins=False, note=IGNORED_NOTE)
+            if row.profile in dropped and row.wins
+            else row
+            for row in node.candidates
+        ]
+        if not any(row.wins for row in node.candidates):
+            node.state = model.ParamState.UNDECLARED.value
 
 
 def _resolve_interface_constants(builder: model.AtlasBuilder) -> None:
@@ -1795,10 +1911,15 @@ def _param_value(atlas: model.Atlas, item: Instance, name: str) -> Any:
     except ContractError:
         return None
     entity = atlas.entities.get(param_id)
-    if entity is None or entity.state != model.ParamState.EFFECTIVE.value:
+    if entity is None or entity.state not in (
+        model.ParamState.EFFECTIVE.value,
+        model.ParamState.UNDECLARED.value,
+    ):
         return None
+    # A line the node ignores is read as the first run read it, so a second run binds the
+    # same records.
     for candidate in sorted(entity.candidates, key=model.Candidate.sort_key):
-        if candidate.wins and candidate.profile == item.profile:
+        if (candidate.wins or candidate.note == IGNORED_NOTE) and candidate.profile == item.profile:
             return candidate.value
     return None
 

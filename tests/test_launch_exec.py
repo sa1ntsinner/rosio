@@ -256,9 +256,62 @@ def test_a_variable_read_at_import_leaves_a_launch_file_loadable(tmp_path: Path)
     walk = launch_exec.walk(str(entry))
     assert [(e.phase, e.env) for e in walk.exceptions] == [("import", "ROSIO_TEST_MODEL")]
     assert walk.loadable
-    broken = tmp_path / "import_error.launch.py"
-    broken.write_text("import not_a_module_anywhere\n")
+    missing = tmp_path / "import_error.launch.py"
+    missing.write_text("import not_a_module_anywhere\n")
+    walk = launch_exec.walk(str(missing))
+    # A launch file that imports a module this machine lacks is still a launch file.
+    assert walk.loadable
+    assert [e.exc_type for e in walk.exceptions] == ["ModuleNotFoundError"]
+    broken = tmp_path / "syntax_error.launch.py"
+    broken.write_text("def generate_launch_description(:\n")
     assert not launch_exec.walk(str(broken)).loadable
+
+
+MISSING_DRIVER = """\
+import os
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    lidar = os.path.join(get_package_share_directory("rosio_no_such_driver"), "launch")
+    return LaunchDescription([
+        IncludeLaunchDescription(PythonLaunchDescriptionSource([lidar, "/driver.launch.py"])),
+        Node(package="lx", executable="base", name="base"),
+    ])
+"""
+
+
+@pytest.mark.ros
+def test_a_missing_driver_package_costs_its_include_and_not_the_profile(tmp_path: Path):
+    """turtlebot3's robot.launch.py looks up the lidar driver while it builds its description,
+    and one missing driver emptied the whole robot profile."""
+    entry = tmp_path / "robot.launch.py"
+    entry.write_text(MISSING_DRIVER, encoding="utf-8")
+    walk = launch_exec.walk(str(entry))
+    assert [(node.pkg, node.name) for node in walk.nodes] == [("lx", "base")]
+    assert [(e.phase, e.exc_type) for e in walk.exceptions] == [
+        ("describe", "PackageNotFoundError")
+    ]
+    assert "rosio_no_such_driver" in walk.exceptions[0].message
+    (include,) = walk.includes
+    assert not include.resolved
+    assert include.reason == launch_exec.PACKAGE_NOT_FOUND
+    assert include.path == "$(find-pkg-share rosio_no_such_driver)/launch/driver.launch.py"
+
+
+@pytest.mark.ros
+def test_a_description_that_raises_for_another_reason_still_says_so(tmp_path: Path):
+    entry = tmp_path / "broken.launch.py"
+    entry.write_text(
+        "def generate_launch_description():\n    raise RuntimeError('boom')\n", encoding="utf-8"
+    )
+    walk = launch_exec.walk(str(entry))
+    assert [(e.phase, e.exc_type) for e in walk.exceptions] == [("describe", "RuntimeError")]
+    assert walk.nodes == []
 
 
 @pytest.mark.ros
@@ -1283,16 +1336,22 @@ def _write(tmp_path: Path, name: str, text: str) -> str:
     return str(target)
 
 
-def test_a_ros2_xml_launch_file_is_not_called_a_ros_1_file(tmp_path: Path) -> None:
+@pytest.mark.ros
+def test_a_ros2_xml_launch_file_is_walked_through_its_frontend(tmp_path: Path) -> None:
+    """jazzy ships launch_xml, so an XML entry point is read the way `ros2 launch` reads it
+    instead of being refused by shape."""
     path = _write(
         tmp_path,
         "sensors.launch.xml",
-        '<?xml version="1.0"?>\n<launch>\n  <node pkg="lx" exec="driver"/>\n</launch>\n',
+        '<?xml version="1.0"?>\n<launch>\n  <arg name="ns" default="front"/>\n'
+        '  <node pkg="lx" exec="driver" name="driver" namespace="$(var ns)"/>\n</launch>\n',
     )
     walk = launch_exec.walk(path)
-    assert walk.loadable is False
-    assert walk.notes == [launch_exec.NOTE_MARKUP]
-    assert "ROS 1" not in walk.notes[0]
+    assert walk.loadable is True
+    assert walk.exceptions == []
+    assert [(node.pkg, node.executable, node.namespace, node.name) for node in walk.nodes] == [
+        ("lx", "driver", "/front", "driver")
+    ]
 
 
 def test_a_ros1_xml_launch_file_keeps_its_own_note(tmp_path: Path) -> None:

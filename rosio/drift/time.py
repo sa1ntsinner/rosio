@@ -96,8 +96,9 @@ def _findings(
                 else:
                     identity = ids.parse_bagtopic(entity.id)
                     topic = identity.topic
-                    heading = f"{topic}: {kind} of {measured}"
-                    say = f"{topic} in recording {identity.bag} has a {kind} of {measured}."
+                    shown = f"{_measured(evidence[measurement], unit)} {unit}"
+                    heading = f"{topic}: {kind} of {shown}"
+                    say = f"{topic} in recording {identity.bag} has a {kind} of {shown}."
                     detail = f"{result['message']}."
                     verdict_on = ids.build_bag(identity.bag)
                     where = rules.sources(fact.evidence)
@@ -118,6 +119,13 @@ def _findings(
                     )
                 )
     return out
+
+
+def _measured(value: Any, unit: str) -> str:
+    """Seconds to the millisecond, as the stamps command prints them."""
+    if unit == "s" and isinstance(value, float):
+        return f"{value:.3f}"
+    return rules.value_text(value)
 
 
 @rules.register("time.backward")

@@ -70,6 +70,7 @@ COMMITTED = (
     "param.sim_time_mixed",
     "launch.file_not_installed",
     "model.mesh_missing",
+    "build.unbuilt",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -128,6 +129,7 @@ SEVERITY: dict[str, str] = {
     "param.sim_time_mixed": WARN,
     "launch.file_not_installed": ERROR,
     "model.mesh_missing": ERROR,
+    "build.unbuilt": WARN,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {
@@ -235,8 +237,15 @@ def findings_for(atlas: model.Atlas, only: Iterable[str] = ()) -> list[model.Fin
             if finding.id in seen:
                 raise ContractError(f"duplicate finding id {finding.id}")
             seen[finding.id] = name
+            finding.where = [row for row in finding.where if row.file not in TOOL_FILES]
             out.append(finding)
     return sorted(out, key=model.Finding.sort_key)
+
+
+TOOL_FILES = frozenset({ids.build_file(ids.REPO_PKG, "rosio/resolve/known_names.py")})
+"""Files of rosio itself that a fact may cite as evidence: the committed name table is data
+with a citation per row (AGENTS section 3.4). A finding is read as a pointer into the user's
+tree, so it never cites one of them."""
 
 
 # ---------------------------------------------------------------------------
@@ -308,22 +317,10 @@ def in_profile(entity: model.Node, profile: str) -> bool:
 
 
 def blind_files(atlas: model.Atlas, want: str) -> set[str]:
-    """Files holding a site whose `want` could not be read.
+    """Files holding a site whose `want` could not be read. One definition, in the join."""
+    from rosio import join
 
-    A rule that claims something is absent from a node's code cannot make the claim when
-    that code holds such a site: the missing name may be the one it built at run time.
-    """
-    out: set[str] = set()
-    for entry in atlas.unresolved:
-        if entry.want != want:
-            continue
-        kind = ids.kind_of(entry.owner)
-        if kind == "file":
-            out.add(entry.owner)
-        elif kind == "sym":
-            parsed = ids.parse_sym(entry.owner)
-            out.add(ids.build_file(parsed.package, parsed.relpath))
-    return out
+    return join.blind_files(atlas, want)
 
 
 def coded_sources(atlas: model.Atlas, node_id: str, profile: str) -> set[str]:

@@ -301,6 +301,22 @@ def test_declared_not_observed_fires_on_a_node_that_did_not_start(bench: Bench) 
     assert found[0].where == [SOURCE]
 
 
+def test_a_finding_never_cites_a_file_of_rosio_itself() -> None:
+    """The committed name table is evidence for a fact, and a finding that cited it sent a
+    reader to `rosio/resolve/known_names.py`, which is in no tree of theirs."""
+    from rosio.drift import rules
+
+    bench = Bench()
+    table = model.Source(
+        file=ids.build_file(ids.REPO_PKG, "rosio/resolve/known_names.py"),
+        locator=f"{PKG}/motion_supervisor",
+    )
+    bench.atlas.entities[SUPERVISOR].fact(DECLARED, bench.profile).evidence.append(table)
+    assert table in fired(bench.atlas, "node.declared_not_observed")[0].where
+    (found,) = rules.findings_for(bench.atlas, ["node.declared_not_observed"])
+    assert found.where == [SOURCE]
+
+
 def test_declared_not_observed_is_silent_on_a_gated_node(bench: Bench) -> None:
     assert GATED not in subjects(fired(bench.atlas, "node.declared_not_observed"))
 

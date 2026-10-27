@@ -418,6 +418,36 @@ def test_a_missing_launch_file_is_reported(ws: Workspace) -> None:
     assert atlas.by_kind("run")[0].attrs["exceptions"][0]["exc_type"] == "MissingLaunchFile"
 
 
+def _ghost_atlas(ws: Workspace, target: str) -> model.Atlas:
+    entry = Entrypoint(verb="launch", pkg="lx_bringup", target=target)
+    return _run_profile(ws, "ghost", entry)[0]
+
+
+def test_a_profile_naming_a_missing_launch_file_fails_the_gate(ws: Workspace) -> None:
+    """A typo in an entry point passed `--fail-on error` with a perfect rate."""
+    atlas = _ghost_atlas(ws, "rtabmap.py")
+    profile = ids.build_profile("ghost")
+    (blind,) = [item for item in atlas.unresolved if item.owner == profile]
+    assert blind.reason == launch_declared.REFUSED_MISSING
+    assert atlas.counters["resolution_rate"][model.Want.OTHER.value] < 1
+    (found,) = drift_build.launch_unloadable(atlas)
+    assert found.severity == model.Severity.ERROR.value
+    assert found.subject == profile
+    assert "lx_bringup/rtabmap.py" in found.say
+    assert "rosio.yaml" in found.fix
+    again = drift_build.launch_unloadable(_ghost_atlas(ws, "rtabmap.py"))
+    assert [item.id for item in again] == [found.id]
+
+
+def test_a_profile_naming_a_launch_file_that_exists_has_no_missing_finding(
+    ws: Workspace,
+) -> None:
+    atlas = _ghost_atlas(ws, entry_for("plain_node").target)
+    profile = ids.build_profile("ghost")
+    assert not [item for item in atlas.unresolved if item.owner == profile]
+    assert not [item for item in drift_build.launch_unloadable(atlas) if item.subject == profile]
+
+
 # ---------------------------------------------------------------------------
 # node identity
 
@@ -1777,16 +1807,9 @@ def test_a_ros2_xml_file_with_a_launch_suffix_is_not_called_ros1(tmp_path: Path)
     workspace = Workspace.discover((RootSpec(kind="src", path=str(tmp_path / "src")),))
     entry = Entrypoint(verb="launch", pkg="gz_demo", target="server.launch")
     atlas, _ctx = _run_profile(workspace, "gz", entry)
-    rows = [
-        row
-        for entity in atlas.by_kind("run")
-        for row in entity.attrs["exceptions"]
-        if row.get("note") == launch_declared.RULE_UNLOADABLE
-    ]
-    assert len(rows) == 1
-    assert rows[0]["refused_because"] != launch_declared.REFUSED_ROS1
-    found = [item for item in atlas.findings if item.rule == launch_declared.RULE_UNLOADABLE]
-    assert "ROS 1" not in found[0].say
+    rows = [row for entity in atlas.by_kind("run") for row in entity.attrs["exceptions"]]
+    assert all(row.get("refused_because") != launch_declared.REFUSED_ROS1 for row in rows)
+    assert all("ROS 1" not in item.say for item in atlas.findings)
 
 
 def test_a_ros1_file_still_reads_as_a_ros1_file(ws: Workspace) -> None:

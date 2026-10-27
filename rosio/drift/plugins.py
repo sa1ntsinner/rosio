@@ -351,6 +351,9 @@ def _profile_text(profiles: list[str]) -> str:
 def unused(atlas: model.Atlas) -> list[model.Finding]:
     """A plugin this workspace builds and exports that no profile selects.
 
+    A manifest read from an install tree with no source copy is not built here, and a plugin
+    an installed release exports is not this workspace's to stop exporting, so it is skipped.
+
     The claim is made for the profiles whose launch tree was read and for no others. A
     profile that did select the class keeps the rule quiet whether its tree was read or not,
     because a selection is positive evidence and needs no completeness.
@@ -377,6 +380,10 @@ def unused(atlas: model.Atlas) -> list[model.Finding]:
         if not package or _instantiated(atlas, plugin.id):
             continue
         source = _manifest(plugin)
+        if source is not None and source.root == model.Root.INSTALL.value:
+            # Read from an install tree with no source beside it: a package this workspace
+            # does not build, such as one apt installed, so there is nothing to stop exporting.
+            continue
         at = rules.where(source)
         key = _selector_for(parsed.base_class)
         selector = key or "selector"

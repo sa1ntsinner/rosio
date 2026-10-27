@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORD_NUMBERS = {
     "twelve": 12,
     "twenty": 20,
-    "forty six": 46,
+    "forty seven": 47,
 }
 
 SERVED_TOOLS = (
@@ -116,8 +116,8 @@ def test_the_contract_rule_block_is_the_committed_vocabulary():
 
 
 def test_the_published_rule_counts_match_the_registry():
-    assert WORD_NUMBERS["forty six"] == len(rules.COMMITTED)
-    assert "Forty six rules with a committed vocabulary" in doc("README.md")
+    assert WORD_NUMBERS["forty seven"] == len(rules.COMMITTED)
+    assert "Forty seven rules with a committed vocabulary" in doc("README.md")
 
 
 # ---------------------------------------------------------------------------

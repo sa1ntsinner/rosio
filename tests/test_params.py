@@ -3707,8 +3707,9 @@ def test_a_parameters_file_that_cannot_be_read_says_so(ws: Workspace):
     blind = [item for item in atlas.unresolved if item.owner == file_id]
     assert len(blind) == 1
     assert blind[0].expr == "lx_absent.yaml"
-    assert blind[0].reason.startswith("cannot read lx_absent.yaml")
-    assert str(WS) not in blind[0].reason
+    # A file that is not there is refused for that, whichever reader reached it.
+    assert blind[0].reason == "file_missing"
+    assert atlas.get(file_id).attrs["refused_because"] == "file_missing"
 
 
 @pytest.mark.parametrize(
@@ -3883,3 +3884,75 @@ def test_a_blind_value_names_a_root_by_its_label(tmp_path: Path) -> None:
     params_collect.ParamsCollector()._blind(ctx, owner, pending)
     (blind,) = builder.build().unresolved
     assert blind.expr == "'@install/share/turtlebot3_navigation2/map/map.yaml'"
+
+
+def _unbuilt(tmp_path: Path) -> Workspace:
+    """A source package whose install rule copies bringup/config to config, never built."""
+    package = tmp_path / "src" / "demo_bringup"
+    (package / "bringup" / "config").mkdir(parents=True)
+    (package / "launch").mkdir()
+    (package / "package.xml").write_text(
+        "<package format='3'><name>demo_bringup</name></package>", encoding="utf-8"
+    )
+    (package / "bringup" / "config" / "demo.yaml").write_text(
+        "demo:\n  ros__parameters:\n    rate: 5\n", encoding="utf-8"
+    )
+    (package / "launch" / "demo.launch.py").write_text("", encoding="utf-8")
+    return Workspace.discover((RootSpec(kind="src", path=str(tmp_path / "src")),))
+
+
+def _collect(workspace: Workspace, walks: list[records.LaunchWalk]) -> model.Atlas:
+    builder = model.AtlasBuilder()
+    ctx = CollectContext(
+        ws=workspace,
+        cfg=Config(roots=workspace.roots, profiles=()),
+        builder=builder,
+        declared=records.DeclaredBundle(walks=walks),
+    )
+    params_collect.ParamsCollector().collect(ctx)
+    return builder.build()
+
+
+def _reading(
+    workspace: Workspace, profile: str, path: str, *, as_model: bool
+) -> records.LaunchWalk:
+    entry = str(Path(workspace.packages["demo_bringup"].src_path) / "launch" / "demo.launch.py")
+    reader = node(
+        pkg="demo_bringup",
+        executable="demo",
+        name="demo",
+        params=() if as_model else (repo_file(0, path),),
+        file_reads=(records.FileRead(path=path, role="robot_model"),) if as_model else (),
+    )
+    return records.LaunchWalk(
+        entry_path=entry, profile=profile, entry_pkg="demo_bringup", nodes=[reader]
+    )
+
+
+def test_two_profiles_reaching_one_missing_file_two_ways_leave_one_refusal(tmp_path: Path):
+    """ros2_control_demos read one missing file as a parameters file in one profile and as a
+    node argument in another, and the second refusal stopped the whole parameter pass."""
+    workspace = _unbuilt(tmp_path)
+    path = str(tmp_path / "src" / "demo_bringup" / "config" / "absent.yaml")
+    walks = [
+        _reading(workspace, "a", path, as_model=False),
+        _reading(workspace, "b", path, as_model=True),
+    ]
+    file_id = workspace.file_id(path)
+    first = _collect(workspace, walks).get(file_id).attrs
+    second = _collect(workspace, list(reversed(walks))).get(file_id).attrs
+    assert first["refused_because"] == params_collect.MISSING_FILE
+    assert first == second
+
+
+def test_a_file_only_a_build_puts_in_place_is_refused_as_such(tmp_path: Path):
+    workspace = _unbuilt(tmp_path)
+    path = str(tmp_path / "src" / "demo_bringup" / "config" / "demo.yaml")
+    atlas = _collect(workspace, [_reading(workspace, "a", path, as_model=False)])
+    attrs = atlas.get(workspace.file_id(path)).attrs
+    assert attrs["refused_because"] == params_collect.BUILT_ONLY
+    assert attrs["found_elsewhere"] == ["bringup/config/demo.yaml"]
+    file_id = workspace.file_id(path)
+    assert [item.reason for item in atlas.unresolved if item.owner == file_id] == [
+        params_collect.BUILT_ONLY
+    ]

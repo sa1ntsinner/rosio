@@ -33,6 +33,7 @@ from rosio.collect.bag import BAG_PKG
 from rosio.drift import rules
 from rosio.errors import ContractError
 from rosio.model import Atlas, Finding, Source
+from rosio.render import plural
 from rosio.resolve import launch_exec
 
 RULE_UNLOADABLE = "launch.unloadable"
@@ -153,7 +154,7 @@ def launch_unloadable(atlas: Atlas) -> list[Finding]:
     executes. The file is recorded with `loadable` false and contributes no node, which is
     exactly the case a profile that still names it needs told about.
     """
-    findings: list[Finding] = []
+    findings = _missing_entrypoints(atlas)
     grouped = _refusals(atlas, RULE_UNLOADABLE)
     for key in sorted(grouped):
         rows = sorted(grouped[key], key=lambda item: (item.profile, item.phase))
@@ -177,6 +178,47 @@ def launch_unloadable(atlas: Atlas) -> list[Finding]:
             )
         )
     return findings
+
+
+def _missing_entrypoints(atlas: Atlas) -> list[Finding]:
+    """A profile entry point naming a launch file no package in the roots holds.
+
+    There is no launch file entity to hang it on, so the profile is the subject, and one
+    profile naming two missing files is two findings. A typo in rosio.yaml is the likeliest
+    mistake a configuration holds, and it used to pass the gate with a perfect rate.
+    """
+    out: list[Finding] = []
+    for run in atlas.by_kind(model.NodeKind.RUN.value):
+        profile = str(run.attrs.get("profile") or "")
+        for row in run.attrs.get("exceptions") or []:
+            if str(row.get("refused_because", "")) != launch_declared.REFUSED_MISSING:
+                continue
+            if not profile:
+                continue
+            subject = _profile_id(profile)
+            if subject not in atlas.entities:
+                continue
+            label = str(row.get("path", ""))
+            because = launch_declared.REFUSED_MISSING
+            out.append(
+                Finding(
+                    rule=RULE_UNLOADABLE,
+                    severity=rules.severity_of(RULE_UNLOADABLE),
+                    subject=subject,
+                    title=launch_declared.unloadable_title(label, because),
+                    detail=(
+                        f"Profile {rules.slug_of(subject)} names {label} as an entry point and "
+                        "no package in the roots holds a launch file by that name, so nothing "
+                        "was read for it."
+                    ),
+                    fix=launch_declared.unloadable_fix(because),
+                    say=launch_declared.unloadable_say(label, because),
+                    discriminator=_disc(label),
+                    profiles=[subject],
+                    layers=[model.Layer.DECLARED.value],
+                )
+            )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +252,11 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
         say = _raised_say(first.label, first.exc_type, first.phase, first.message, first.kept)
         slugs = ", ".join(ids.parse_profile(item) for item in _profile_ids(rows))
         package = launch_declared.missing_package(first.message)
+        module = (
+            launch_declared.missing_module(first.message)
+            if first.exc_type == "ModuleNotFoundError"
+            else None
+        )
         if first.env and not first.kept and slugs:
             names = _and(first.env.split())
             variables = "variables" if " " in first.env else "variable"
@@ -230,6 +277,12 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
                     "no sourced setup file provides, so the nodes it starts are missing from "
                     f"this atlas: {fix}."
                 )
+        elif module and not sandboxed:
+            fix = _module_fix(*module)
+            say = (
+                f"{first.label} imports the python module {module[0]}, which this machine "
+                f"does not have, so the nodes it starts are missing from this atlas: {fix}."
+            )
         findings.append(
             Finding(
                 rule=RULE_RAISED,
@@ -255,6 +308,18 @@ def _package_fix(package: str, distro: str) -> str:
     apt = f"ros-{distro or '$ROS_DISTRO'}-{package.replace('_', '-')}"
     return (
         f"install {package} (sudo apt install {apt} when it is a released package), "
+        "or add the tree that holds it as a root in rosio.yaml"
+    )
+
+
+def _module_fix(module: str, distro: str) -> str:
+    """The apt package when a ROS package of that name ships the module, else pip."""
+    from rosio.migrate import distros
+
+    if distros.is_ros_package(module):
+        return _package_fix(module, distro)
+    return (
+        f"install the python module {module} for the interpreter that walks launch files, "
         "or add the tree that holds it as a root in rosio.yaml"
     )
 
@@ -458,6 +523,7 @@ def model_mesh_missing(atlas: Atlas) -> list[Finding]:
             rules.slug_of(item) for item in profiles
         )
         links = _mesh_links(atlas, model_id)
+        elsewhere = node.attrs.get("meshes_elsewhere") or {}
         for name, uninstalled in sorted(cases):
             package, _, relpath = name[len(_PACKAGE_URI) :].partition("/")
             used_by = links.get(name) or []
@@ -481,17 +547,28 @@ def model_mesh_missing(atlas: Atlas) -> list[Finding]:
                 )
                 variant = ""
             else:
-                fix = (
-                    f"correct the mesh filename {name} in {label} to a file {package} holds, "
-                    f"or commit the mesh at {package}/{relpath}"
-                )
+                moved = list(elsewhere.get(name) or ())
                 title = f"{label} names {name}, which no tree holds"
                 why = f"neither the source nor the install tree of {package} holds {relpath}"
-                say = (
-                    f"{label} names the mesh {name}, which no tree holds, so the {drawn} "
-                    f"nothing in {named}; correct the filename in {label} or commit "
-                    "the mesh."
-                )
+                if moved:
+                    held = " or ".join(moved)
+                    fix = f"change the mesh filename {name} in {label} to {held}"
+                    why += f", while the package holds a file of that name at {held}"
+                    say = (
+                        f"{label} names the mesh {name}, which no tree holds, so the {drawn} "
+                        f"nothing in {named}; {package} holds the file at {held}, so change "
+                        f"the filename in {label} to that."
+                    )
+                else:
+                    fix = (
+                        f"correct the mesh filename {name} in {label} to a file {package} "
+                        f"holds, or commit the mesh at {package}/{relpath}"
+                    )
+                    say = (
+                        f"{label} names the mesh {name}, which no tree holds, so the {drawn} "
+                        f"nothing in {named}; correct the filename in {label} or commit "
+                        "the mesh."
+                    )
                 variant = "absent"
             findings.append(
                 Finding(
@@ -568,6 +645,91 @@ def build_stale(atlas: Atlas) -> list[Finding]:
 
 
 # ---------------------------------------------------------------------------
+# build.unbuilt
+
+
+RULE_UNBUILT = "build.unbuilt"
+
+
+@rules.register(RULE_UNBUILT)
+def build_unbuilt(atlas: Atlas) -> list[Finding]:
+    """Packages with no install tree whose launch files and models read files only a build
+    puts in place.
+
+    A source workspace is read as it stands, and a launch file looks in the package share,
+    which for an unbuilt package is its source tree. An install rule that copies
+    `bringup/config` to `config` makes every such read miss, and one refusal per file buried
+    the one action that repairs them all, so this is one finding for the run. It names each
+    package, each file and where the source holds it, and its subject is the first package by
+    name.
+    """
+    grouped: dict[str, list[model.Node]] = {}
+    for node in sorted(atlas.entities.values(), key=lambda item: item.id):
+        if node.attrs.get(REFUSED_KEY) == params_collector.BUILT_ONLY:
+            grouped.setdefault(ids.parse_file(node.id).package, []).append(node)
+    packages = [name for name in sorted(grouped) if ids.build_pkg(name) in atlas.entities]
+    if not packages:
+        return []
+    nodes = [node for name in packages for node in grouped[name]]
+    placed = "; ".join(
+        f"{name}: " + ", ".join(map(_built_only, grouped[name])) for name in packages
+    )
+    files = plural(len(nodes), "file")
+    exist = "exists" if len(nodes) == 1 else "exist"
+    named = packages[0] if len(packages) == 1 else plural(len(packages), "package")
+    are = "is" if len(packages) == 1 else "are"
+    readers = sorted(
+        {
+            row
+            for node in nodes
+            for entry in atlas.unresolved
+            if entry.owner == node.id
+            for row in entry.evidence
+            if row.file != node.id
+        },
+        key=lambda row: (row.file, row.locator, row.line_hint or 0, row.root),
+    )
+    target = f" --packages-up-to {packages[0]}" if len(packages) == 1 else ""
+    fix = (
+        f"build the workspace (colcon build{target}) and add its install tree as a root in "
+        "rosio.yaml, then extract again"
+    )
+    return [
+        Finding(
+            rule=RULE_UNBUILT,
+            severity=rules.severity_of(RULE_UNBUILT),
+            subject=ids.build_pkg(packages[0]),
+            title=(
+                f"{named} {are} not built, and {files} read from a package share "
+                f"{exist} only after a build"
+            ),
+            detail=(
+                "Launch files and robot models read these from package share directories no "
+                "install tree holds, so the source tree stood in and the install rules were "
+                f"never applied. {placed}. What they state is missing from this atlas."
+            ),
+            fix=fix,
+            say=(
+                f"{named} {are} not built, so {files} that only the install rules put in place "
+                f"{'is' if len(nodes) == 1 else 'are'} missing from this atlas: {fix}."
+            ),
+            layers=[model.Layer.DECLARED.value],
+            where=readers,
+        )
+    ]
+
+
+def _built_only(node: model.Node) -> str:
+    relpath = ids.parse_file(node.id).relpath
+    held = " or ".join(node.attrs.get("found_elsewhere") or ["another directory"])
+    needs = node.attrs.get("needs") or []
+    if needs:
+        included = ids.parse_file(needs[0]).relpath
+        return f"{relpath} includes {included}, which the source holds at {held}"
+    return f"{relpath} is in the source at {held}"
+
+
+# ---------------------------------------------------------------------------
 # resolution.below_budget
 
 
@@ -577,10 +739,11 @@ def resolution_below_budget(
 ) -> list[Finding]:
     """The CI gate surface: the extraction resolved less than the budget allows.
 
-    Reported per profile, with the rate, the budget and the wants that fell, because the
-    unit a user extracts and gates on is a profile. The overall rate is a property of the
-    whole run and is stated as such, and each profile carries the count of blind spots its
-    own entities own, so the profile that has to be repaired is named rather than guessed.
+    One finding for the run, because the rate is a property of the whole run: one per
+    profile repeated the same rate fifty times over and blamed a profile holding one blind
+    spot as loudly as the one holding forty. The profiles that hold the most blind spots are
+    named, worst first, and the worst one is the subject, so the finding opens on the profile
+    to repair.
     """
     overall, per_want = _budget(atlas, budget)
     rates = dict(atlas.counters.get("resolution_rate") or {})
@@ -598,55 +761,38 @@ def resolution_below_budget(
     if rate >= overall and not fallen:
         return []
     owners = _unresolved_owners(atlas)
-    findings: list[Finding] = []
-    for node in atlas.by_kind(model.NodeKind.PROFILE.value):
-        count = len(owners.get(node.id, ()))
-        if not count:
-            continue
-        slug = ids.parse_profile(node.id)
-        findings.append(
-            Finding(
-                rule="resolution.below_budget",
-                severity=rules.severity_of("resolution.below_budget"),
-                subject=node.id,
-                title=(
-                    f"profile {slug} holds {count} of the {len(atlas.unresolved)} unresolved "
-                    f"sites that keep the rate at {rate:.3f}, under the budget {overall:.3f}"
-                ),
-                detail=_budget_detail(rate, overall, count, fallen, rates, resolved, unresolved),
-                fix=BUDGET_FIX,
-                say=(
-                    f"In profile {slug}, {count} names, values or frames stay unresolved, and "
-                    f"the run as a whole resolves {rate:.3f} against a budget of "
-                    f"{overall:.3f}; rosio unresolved lists each one with the line that asked "
-                    "for it."
-                ),
-                discriminator=_disc(f"{overall:.6f}", *fallen),
-                profiles=[node.id],
-                layers=sorted(atlas.counters.get("layers_present") or []),
-            )
-        )
-    subject = _whole_run_subject(atlas)
-    if findings or not subject:
-        return findings
-    # No profile owns a blind spot (or the workspace declares none), and a failed gate
-    # still has to say so once.
+    counts = sorted(
+        (
+            (len(owners[node.id]), node.id)
+            for node in atlas.by_kind(model.NodeKind.PROFILE.value)
+            if owners.get(node.id)
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    subject = counts[0][1] if counts else _whole_run_subject(atlas)
+    if not subject:
+        return []
+    worst = ", ".join(f"{ids.parse_profile(profile)} ({count})" for count, profile in counts[:3])
+    if len(counts) > 3:
+        worst += f" and {len(counts) - 3} more profiles"
+    held = f"; most blind spots in {worst}" if counts else ""
     return [
         Finding(
             rule="resolution.below_budget",
             severity=rules.severity_of("resolution.below_budget"),
             subject=subject,
-            title=f"the resolution rate {rate:.3f} is under the budget {overall:.3f}",
+            title=f"the resolution rate {rate:.3f} is under the budget {overall:.3f}{held}",
             detail=_budget_detail(
-                rate, overall, len(atlas.unresolved), fallen, rates, resolved, unresolved
+                rate, overall, len(atlas.unresolved), fallen, rates, resolved, unresolved, worst
             ),
             fix=BUDGET_FIX,
             say=(
                 f"the extraction resolved {rate:.3f} of what it read against a budget of "
-                f"{overall:.3f}, so the atlas is missing answers a rule needs; rosio "
-                "unresolved lists each one with the line that asked for it."
+                f"{overall:.3f}{held}; rosio unresolved lists each one with the line that "
+                "asked for it."
             ),
             discriminator=_disc(f"{overall:.6f}", *fallen),
+            profiles=[profile for _count, profile in counts],
             layers=sorted(atlas.counters.get("layers_present") or []),
         )
     ]
@@ -703,11 +849,12 @@ def _budget_detail(
     rates: Mapping[str, float],
     resolved: Mapping[str, int],
     unresolved: Mapping[str, int],
+    held_by: str = "",
 ) -> str:
     parts = [
         f"the run resolved {rate:.6f} of the names, values and frames it read, against a "
-        f"budget of {overall:.6f}, and {count} unresolved sites are owned by entities of "
-        "this profile"
+        f"budget of {overall:.6f}, with {plural(count, 'unresolved site')}"
+        + (f", most of them owned by profiles {held_by}" if held_by else "")
     ]
     worst = sorted(rates, key=lambda want: (rates[want], want))[:3]
     for want in worst:
@@ -816,6 +963,7 @@ REFUSAL_COSTS = {
     "bag_unreadable": "every topic, type and count this recording holds",
     "generator_list_unreadable": "the interface list this build file names",
     "interface_unreadable": "the fields of the type this file defines",
+    "file_missing": "whatever this file states",
     "params_file_unreadable": "every parameter value this file sets",
     "plugin_manifest_missing": "the plugin classes this manifest exports",
     "plugin_manifest_unreadable": "the plugin classes this manifest exports",
@@ -847,7 +995,7 @@ def extract_input_refused(atlas: Atlas) -> list[Finding]:
     findings: list[Finding] = []
     for node in sorted(atlas.entities.values(), key=lambda item: item.id):
         because = str(node.attrs.get(REFUSED_KEY) or "")
-        if not because or because == params_collector.NOT_INSTALLED:
+        if not because or because in (params_collector.NOT_INSTALLED, params_collector.BUILT_ONLY):
             continue
         label = _refused_label(node)
         detail = str(node.attrs.get("refused_detail") or "")
@@ -865,7 +1013,7 @@ def extract_input_refused(atlas: Atlas) -> list[Finding]:
                     "never reached this atlas. Until this rule existed, the blind spot it "
                     "owns and the rate that fell with it were all a reader met."
                 ),
-                fix=f"make {label} readable and extract again, or take it out of the roots",
+                fix=_refused_fix(node, because, label),
                 say=f"{label} was refused with {because}, so this atlas does not hold {cost}.",
                 layers=sorted(node.layers),
                 profiles=sorted(node.profiles),
@@ -873,6 +1021,20 @@ def extract_input_refused(atlas: Atlas) -> list[Finding]:
             )
         )
     return findings
+
+
+def _refused_fix(node: model.Node, because: str, label: str) -> str:
+    """What repairs one refusal, in the words its own cause deserves."""
+    if because == "plugin_manifest_missing" and node.kind == model.NodeKind.FILE.value:
+        package = ids.parse_file(node.id).package
+        return (
+            f"{package}/package.xml exports {label}, which the package does not install: "
+            f"correct the export or the install rule of {package}, or report it upstream "
+            "when it is a released package, which nothing in this workspace can change"
+        )
+    if because == params_collector.MISSING_FILE:
+        return f"correct the path that names {label} or add the file, then extract again"
+    return f"make {label} readable and extract again, or take it out of the roots"
 
 
 def _refused_label(node: model.Node) -> str:
@@ -916,6 +1078,7 @@ def _refused_where(atlas: Atlas, node: model.Node) -> list[Source]:
 
 RULES: dict[str, Callable[[Atlas], list[Finding]]] = {
     "build.stale": build_stale,
+    "build.unbuilt": build_unbuilt,
     "extract.input_refused": extract_input_refused,
     "extract.pass_incomplete": extract_pass_incomplete,
     "launch.file_not_installed": launch_file_not_installed,
@@ -948,8 +1111,10 @@ __all__ = [
     "RULE_MESH_MISSING",
     "RULE_NOT_INSTALLED",
     "RULE_REFUSED",
+    "RULE_UNBUILT",
     "UNKNOWN_COST",
     "build_stale",
+    "build_unbuilt",
     "collect",
     "extract_input_refused",
     "extract_pass_incomplete",

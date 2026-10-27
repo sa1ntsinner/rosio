@@ -66,7 +66,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from rosio import ids, model
+from rosio import ids, join, model
 from rosio.drift import plugins, rules
 from rosio.errors import ContractError
 
@@ -77,9 +77,8 @@ FILE = model.NodeKind.FILE.value
 NODE = model.NodeKind.NODE.value
 EFFECTIVE = model.ParamState.EFFECTIVE.value
 
-AUTO_DECLARED = frozenset({"use_sim_time"})
-AUTO_DECLARED_PREFIXES = ("qos_overrides.",)
-"""Names the client library declares for every node, so no source states them."""
+AUTO_DECLARED = join.AUTO_DECLARED
+AUTO_DECLARED_PREFIXES = join.AUTO_DECLARED_PREFIXES
 
 FILE_MECHANISMS = frozenset(
     {
@@ -168,8 +167,7 @@ def _layers(*candidates: model.Candidate) -> list[str]:
     )
 
 
-def _auto_declared(name: str) -> bool:
-    return name in AUTO_DECLARED or name.startswith(AUTO_DECLARED_PREFIXES)
+_auto_declared = join.auto_declared
 
 
 def _restated_severity(row: _Row) -> str:
@@ -395,26 +393,19 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
     one letter off from a declared parameter is a typo far more often than a new parameter.
     """
     out: list[model.Finding] = []
-    declared = _declared_names(atlas)
+    declared = join.declared_names(atlas)
     blind = rules.blind_files(atlas, model.Want.PARAM_NAME.value)
     for node in _params(atlas):
         owner_id = ids.parse_param(node.id).owner
         name = ids.parse_param(node.id).name
         owner = atlas.get(owner_id)
-        if owner is None or _auto_declared(name):
+        if owner is None:
             continue
         for profile, chain in _by_profile(node).items():
-            if not _live(node, profile):
+            if not _live(node, profile) or not join.ignored(atlas, node, profile, blind, declared):
                 continue
-            if not rules.usable(owner.fact(CODED, profile)):
-                continue
-            if rules.coded_sources(atlas, owner_id, profile) & blind:
-                # A declaration whose name is built at run time may be this one.
-                continue
-            coded = node.fact(CODED, profile)
-            if coded is not None and coded.values.get("declared_in_code"):
-                continue
-            winner = next((row for row in chain if row.wins), None)
+            # The join took the win off the line the node ignores and said so on it.
+            winner = next((row for row in chain if row.wins or row.note == join.IGNORED_NOTE), None)
             if winner is None:
                 continue
             slug = rules.slug_of(profile)
@@ -456,16 +447,6 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
                     where=[winner.source],
                 )
             )
-    return out
-
-
-def _declared_names(atlas: model.Atlas) -> dict[str, set[str]]:
-    """Owner node id to the parameter names its source declares."""
-    out: dict[str, set[str]] = {}
-    for node in _params(atlas):
-        if any(fact.layer == CODED and fact.values.get("declared_in_code") for fact in node.facts):
-            parsed = ids.parse_param(node.id)
-            out.setdefault(parsed.owner, set()).add(parsed.name)
     return out
 
 
@@ -1038,38 +1019,48 @@ def owner_name_mismatch(atlas: model.Atlas) -> list[model.Finding]:
 
 @rules.register("param.orphan_block")
 def orphan_block(atlas: model.Atlas) -> list[model.Finding]:
-    """A parameter block no node of the profile can own.
+    """A parameter block no node of a profile can own.
 
-    Reported once per block, because one deletable block is one edit. A profile that holds a
-    process whose runtime name rosio could not form cannot prove the block owns nothing,
-    so the same finding drops to info and says which half of the claim is unproven.
+    Reported once per block and file, with the profiles it is dead in, because one deletable
+    block is one edit: a shared parameters file read by eleven profiles made one line eleven
+    findings. A profile that holds a process whose runtime name rosio could not form cannot
+    prove the block owns nothing, so such a finding drops to info and says which half of the
+    claim is unproven.
 
-    The instruction is scoped to the profile the claim is scoped to. A bare delete tells a
+    The instruction is scoped to the profiles the claim is scoped to. A bare delete tells a
     reader to remove a block that another profile of the same workspace does launch.
     """
-    out: list[model.Finding] = []
     gated = _gated(atlas)
+    grouped: dict[tuple[str, str], list[_Block]] = defaultdict(list)
     for block in _blocks(atlas):
         if (block.profile, block.selector) in gated:
             continue
         if block.proven and _near_names(atlas, block.profile, block.selector):
             continue
-        slug = rules.slug_of(block.profile)
-        at = rules.where(block.source)
-        blind = 0 if block.proven else _unnamed(atlas, block.profile)
-        variant = "shared" if block.live_in else ("" if block.proven else "unproven")
+        grouped[(block.file, block.selector)].append(block)
+    out: list[model.Finding] = []
+    for (file_id, selector), blocks in sorted(grouped.items()):
+        first = min(blocks, key=lambda block: (_line(block.source), block.profile))
+        dead = sorted({block.profile for block in blocks})
+        slugs = _and([rules.slug_of(item) for item in dead])
+        named = ("profiles " if len(dead) > 1 else "profile ") + slugs
+        at = rules.where(first.source)
+        live_in = sorted({item for block in blocks for item in block.live_in} - set(dead))
+        unproven = [block for block in blocks if not block.proven]
+        variant = "shared" if live_in else ("unproven" if len(unproven) == len(blocks) else "")
         severity = rules.severity_of("param.orphan_block", variant)
-        caveat = (
-            ""
-            if not blind
-            else (
-                f" {blind} processes of this profile carry no name rosio could form, so the "
-                "block is dead unless one of them answers to it."
+        caveat = ""
+        if unproven:
+            blind = sum(_unnamed(atlas, block.profile) for block in unproven)
+            where = _and([rules.slug_of(block.profile) for block in unproven])
+            caveat = (
+                f" {blind} processes of {'profiles' if len(unproven) > 1 else 'profile'} "
+                f"{where} carry no name rosio could form, so the block is dead there unless "
+                "one of them answers to it."
             )
-        )
-        if block.live_in:
-            count = len(block.live_in)
-            others = ", ".join(rules.slug_of(item) for item in block.live_in[:3])
+        if live_in:
+            count = len(live_in)
+            others = ", ".join(rules.slug_of(item) for item in live_in[:3])
             if count > 3:
                 others += f" and {count - 3} more"
             launch = f"profile {others} launches" if count == 1 else f"profiles {others} launch"
@@ -1077,33 +1068,45 @@ def orphan_block(atlas: model.Atlas) -> list[model.Finding]:
                 f" The file is shared: {launch} a node that reads this block, so it is not "
                 "dead configuration."
             )
+        keys = _keys(len(set().union(*(block.keys for block in blocks))))
         out.append(
             model.Finding(
                 rule="param.orphan_block",
                 severity=severity,
-                subject=block.file,
-                discriminator=f"{slug}.{block.selector}",
-                title=f"block {block.selector} owns nothing in {slug}",
+                subject=file_id,
+                discriminator=selector,
+                title=f"block {selector} owns nothing in {slugs}",
                 detail=(
-                    f"The block {block.selector} carries {_keys(len(block.keys))} and no node "
-                    f"launched by profile {slug} answers to that name."
+                    f"The block {selector} carries {keys} and no node launched by {named} "
+                    "answers to that name."
                 ),
                 fix=(
-                    f"Launch the node in profile {slug}, or delete the {block.selector} block "
-                    "once no profile launches it."
+                    f"Launch the node in {named}, or delete the {selector} block once no "
+                    "profile launches it."
                 ),
                 say=(
-                    f"{at} configures a node called {block.selector} with "
-                    f"{_keys(len(block.keys))} and profile {slug} launches no node by that "
-                    f"name or a similar one.{caveat} Launch the node in {slug}, or delete the "
-                    f"block at {at} once no profile launches it."
+                    f"{at} configures a node called {selector} with {keys} and {named} "
+                    f"launch{'' if len(dead) > 1 else 'es'} no node by that name or a similar "
+                    f"one.{caveat} Launch the node there, or delete the block at {at} once no "
+                    "profile launches it."
                 ),
-                profiles=[block.profile],
+                profiles=dead,
                 layers=[DECLARED],
-                where=[block.source],
+                where=rules.sources(
+                    [
+                        block.source
+                        for block in sorted(
+                            blocks, key=lambda block: (_line(block.source), block.profile)
+                        )
+                    ]
+                ),
             )
         )
     return out
+
+
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def silences(atlas: model.Atlas) -> list[dict[str, str]]:

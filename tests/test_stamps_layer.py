@@ -260,3 +260,18 @@ def test_the_stamps_tool_answers_from_the_atlas(recordings: Path, tmp_path: Path
     assert tools.stamps(atlas, bag="absent").startswith("no recording named absent")
     (tmp_path / "none").mkdir()
     assert tools.stamps(_extract(tmp_path / "none", None)).startswith("no recording in this atlas")
+
+
+def test_a_recorded_offset_title_prints_seconds_to_the_millisecond() -> None:
+    builder = model.AtlasBuilder()
+    subject = ids.build_bagtopic("run", "/scan")
+    check = {
+        "check": "epoch_offset",
+        "severity": "warning",
+        "message": "measured stamp failure",
+        "evidence": {"median_offset_s": -36.979999781},
+    }
+    builder.fact(subject, "recorded", values={"stamps": {"checks": [check]}})
+    (found,) = rules.findings_for(builder.build(), only=["time.epoch_offset"])
+    assert found.title == "/scan: stamp epoch offset of -36.980 s"
+    assert "-36.980 s" in found.say

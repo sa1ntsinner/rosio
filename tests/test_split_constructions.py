@@ -190,7 +190,7 @@ PUBLIC_SOURCES = {
         "findings": {
             "extract.input_refused": 1,
             "param.set_undeclared": 1,
-            "resolution.below_budget": 2,
+            "resolution.below_budget": 1,
         },
         # The yaml or the code default reads publish_acceleration and publish_filtered_gps
         # false in four node profiles, so four publishes edges, the uses_type edge and the

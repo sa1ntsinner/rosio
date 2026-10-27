@@ -65,7 +65,13 @@ from pathlib import Path
 from typing import Any
 
 from rosio import ids, model
-from rosio.collect import CollectContext, entrypoints, register
+from rosio.collect import (
+    BUILT_ONLY,
+    CollectContext,
+    entrypoints,
+    register,
+    same_name_in_package,
+)
 from rosio.errors import CollectorError, ContractError, UsageError
 from rosio.resolve import (
     identity,
@@ -94,6 +100,11 @@ NOT_INSTALLED = "file_not_installed"
 installed while the package source holds it. The fix is in the build file, not the yaml."""
 
 MISSING_FILE = "file_missing"
+
+
+_REFUSAL_ORDER = (NOT_INSTALLED, BUILT_ONLY, MISSING_FILE, REFUSED_PARAMS_FILE)
+"""Which refusal of one file wins when two readers state it differently, strongest first.
+Two profiles reaching one file have to leave one refusal on it in either order."""
 
 SELECTOR_KEYS = (
     "behavior_plugins",
@@ -2453,25 +2464,24 @@ class ParamsCollector:
                         or Path(ctx.ws.localise(read.path)).exists()
                     ):
                         continue
-                    reason = NOT_INSTALLED if ctx.ws.src_twin(read.path) else MISSING_FILE
-                    seen[read.path] = (reason, read.site or node.site, read.role)
+                    seen[read.path] = (MISSING_FILE, read.site or node.site, read.role)
         for path in sorted(seen):
             reason, reader, role = seen[path]
             if not reason:
                 continue
-            missing = not Path(ctx.ws.localise(path)).exists() and ctx.ws.src_twin(path)
-            because = (
-                NOT_INSTALLED
-                if missing
-                else (MISSING_FILE if reason == MISSING_FILE else REFUSED_PARAMS_FILE)
-            )
+            exists = Path(ctx.ws.localise(path)).exists()
+            expr = exprs.get(path)
+            # A file that is not there is refused for that, whichever reader reached it, so
+            # two profiles naming one missing file state one refusal.
+            because = REFUSED_PARAMS_FILE if exists else _missing_reason(ctx.ws, path)
+            if not exists and expr is None:
+                reason = because
             owner = self._refused_file_entity(ctx, path, reason, because) or profile_id
             evidence = []
-            if owner.startswith("file:") and Path(ctx.ws.localise(path)).exists():
+            if owner.startswith("file:") and exists:
                 evidence.append(ctx.ws.source(ctx.ws.site(path)))
-            if (missing or reason == MISSING_FILE) and reader is not None:
+            if not exists and reader is not None:
                 evidence.append(ctx.ws.source(reader))
-            expr = exprs.get(path)
             if expr is not None:
                 if reader is not None and not evidence:
                     evidence.append(ctx.ws.source(reader))
@@ -2507,14 +2517,24 @@ class ParamsCollector:
         if not _readable(ws, path):
             return ""
         file_id = ws.file_id(path)
-        ctx.builder.node(
-            file_id,
-            attrs={
-                "loadable": False,
-                "refused_because": because,
-                "refused_detail": reason,
-            },
-        )
+        attrs: dict[str, Any] = {
+            "loadable": False,
+            "refused_because": because,
+            "refused_detail": reason,
+        }
+        if because == BUILT_ONLY:
+            attrs["found_elsewhere"] = same_name_in_package(ws, path)
+        held = ctx.builder.atlas.entities.get(file_id)
+        stated = held.attrs.get("refused_because") if held is not None else None
+        if held is not None and stated:
+            # One file keeps one refusal: a weaker one another profile stated gives way, in
+            # place, so the order the profiles were read in decides nothing.
+            if stated in _REFUSAL_ORDER and _REFUSAL_ORDER.index(because) < _REFUSAL_ORDER.index(
+                stated
+            ):
+                held.attrs.update(attrs)
+            return file_id
+        ctx.builder.node(file_id, attrs=attrs)
         package, _relpath = ws.rel(path)
         if package and package != ids.REPO_PKG:
             pkg_id = ids.build_pkg(package)
@@ -2882,6 +2902,17 @@ def _entry_token(ws: Workspace, path: str) -> str:
         return Path(path).name
 
 
+def _missing_reason(ws: Workspace, path: str) -> str:
+    """Why a file a launch file names is not there: never installed, installed only by a
+    build that has not happened, or simply absent."""
+    if ws.src_twin(path):
+        return NOT_INSTALLED
+    package = ws.packages.get(ws.package_of(path) or "")
+    if package is not None and not package.share_path and same_name_in_package(ws, path):
+        return BUILT_ONLY
+    return MISSING_FILE
+
+
 def _readable(ws: Workspace, path: str) -> bool:
     try:
         ws.file_id(path)
@@ -2905,6 +2936,7 @@ register("params", ParamsCollector)
 
 
 __all__ = [
+    "BUILT_ONLY",
     "LAYER",
     "NOT_INSTALLED",
     "NO_WALK",
