@@ -438,7 +438,7 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             if parsed.name in join.declared_in(declared, parsed.owner, row.profile) | declared.get(
                 (parsed.owner, join.REACHED), set()
             ):
-                needed.add((parsed.name, row.source.file, row.source.locator, row.source.line_hint))
+                needed.add((parsed.name, row.source.file, row.source.locator))
     lines: dict[tuple[str, str, int], list[_Ignored]] = defaultdict(list)
     for node in _params(atlas):
         owner_id = ids.parse_param(node.id).owner
@@ -453,12 +453,7 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             winner = next((row for row in chain if row.wins or row.note == join.IGNORED_NOTE), None)
             if winner is None:
                 continue
-            if (
-                name,
-                winner.source.file,
-                winner.source.locator,
-                winner.source.line_hint,
-            ) in needed:
+            if (name, winner.source.file, winner.source.locator) in needed:
                 continue
             near = _nearest_name(name, join.declared_in(declared, owner_id, profile))
             source = winner.source
@@ -466,15 +461,15 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
                 _Ignored(profile, node.id, owner_id, name, winner, near, _read_by(owner, profile))
             )
     # The line number only groups. A yaml line is named by its key, and a launch action that
-    # hands keys to nodes (a SetParameter loop, an inline dict) by the nodes it hands them to,
-    # so a key added to that action moves no id.
+    # hands keys to nodes (a SetParameter loop, an inline dict) by its locator, which names
+    # the action and not the nodes, so neither a key added to it nor a profile that starts one
+    # more node moves the id.
     merged: dict[str, list[_Ignored]] = defaultdict(list)
     for key in sorted(lines):
         rows = lines[key]
         source = rows[0].winner.source
-        by = "owner" if rows[0].winner.mechanism in _HANDED else "name"
-        parts = sorted({getattr(row, by) for row in rows})
-        merged[ids.digest(source.file, source.locator, *parts)].extend(rows)
+        names = [] if rows[0].winner.mechanism in _HANDED else sorted({row.name for row in rows})
+        merged[ids.digest(source.file, source.locator, *names)].extend(rows)
     return [_undeclared_line(disc, merged[disc]) for disc in sorted(merged)]
 
 

@@ -1148,6 +1148,12 @@ class _Reader:
         if kind == "if_statement":
             self._if(node)
             return
+        if kind == "case_statement" or kind in _LOOPS:
+            # A switch arm or a loop body may not run, which states no guard but is a branch.
+            self.conditions.append(("", str(node.start_byte), None))
+            self._children(node)
+            self.conditions.pop()
+            return
         if kind == "call_expression":
             self._call(node)
             self._children(node)
@@ -2546,18 +2552,17 @@ def _is_node_handle(node: Any, src: bytes) -> bool:
 
 
 def name_literals(source: bytes) -> list[str]:
-    """Every string literal of a source shaped like a ROS name, a remap could name it."""
+    """Every string literal of a source shaped like a ROS name, a remap could name it. A
+    comment and a character literal are no string literal."""
     text = source.decode("utf-8", "replace")
     return sorted(
-        {
-            value
-            for value in _STRING_LITERAL.findall(text)
-            if len(value) <= 200 and py_code.NAME_LITERAL.fullmatch(value)
-        }
+        {value for value in _STRING_LITERAL.findall(text) if py_code.is_name_literal(value)}
     )
 
 
-_STRING_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+_STRING_LITERAL = re.compile(
+    r'"((?:[^"\\\n]|\\.)*)"|\'(?:[^\'\\\n]|\\.)*\'|//[^\n]*|/\*.*?\*/', re.S
+)
 
 
 _DEFAULT_BLOCKED = object()

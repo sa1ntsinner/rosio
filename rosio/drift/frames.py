@@ -802,12 +802,13 @@ def _looked_up_not_in_urdf(
 
 RENAMED = "renamed"
 """The variant of `frame.not_in_urdf` for a frame the code broadcasts by a literal name under a
-link of the loaded model, while the model names a child of that link almost the same way."""
+link of the loaded model, while the model names a child of that link by the same stem with
+another suffix."""
 
 
 def _renamed_in_model(atlas: Atlas, declared: Mapping[str, Any]) -> list[Finding]:
     """A literal broadcast under a link of a loaded model, of a child no model declares, where
-    that model places a child of the same link under a close name: one part, two frame names.
+    that model places a child of the same link under the same stem: one part, two frame names.
 
     The broadcast is in the tree, so the plain rule skips it as tied. No code collector states
     the origin of a broadcast, so the name alone pairs the two."""
@@ -831,7 +832,7 @@ def _renamed_in_model(atlas: Atlas, declared: Mapping[str, Any]) -> list[Finding
             continue
         for model_id, profiles in loaded.items():
             siblings = joints.get((model_id, row.parent), {})
-            near = _nearest(child, siblings) if row.profile in profiles else ""
+            near = _same_part(child, siblings) if row.profile in profiles else ""
             if near:
                 hit = (row.profile, row, siblings[near])
                 found.setdefault((child, model_id, near), []).append(hit)
@@ -876,6 +877,27 @@ def _renamed_in_model(atlas: Atlas, declared: Mapping[str, Any]) -> list[Finding
     return findings
 
 
+_NAME_SUFFIXES = ("_link", "_frame")
+
+
+def _stem(frame: str) -> str:
+    lowered = frame.lower()
+    for suffix in _NAME_SUFFIXES:
+        if lowered.endswith(suffix) and len(lowered) > len(suffix):
+            return lowered[: -len(suffix)]
+    return lowered
+
+
+def _same_part(child: str, siblings: Mapping[str, Any]) -> str:
+    """The sibling that names the same part as `child` with another frame suffix
+    (`laser_frame` beside `laser_link`), or nothing.
+
+    Close spelling is not enough here: `imu_link` and `gps_link`, `left_wheel` and
+    `right_wheel`, and `camera_link` and `camera_link_optical` are close and are two frames."""
+    stem = _stem(child)
+    return next((item for item in sorted(siblings) if _stem(item) == stem), "")
+
+
 def _nearest(frame: str, declared: Mapping[str, Any]) -> str:
     """The declared link a mistyped frame most likely meant, or nothing when none is close."""
     import difflib
@@ -893,7 +915,7 @@ def frame_not_in_urdf(atlas: Atlas) -> list[Finding]:
     atlas names is skipped, and so is every REP 105 world frame, because neither is a link
     the robot model is expected to own. One tied frame is not skipped: a frame the code
     broadcasts by name under a link of the loaded model, where the model names that child
-    almost the same way.
+    by the same stem with another suffix (`laser_frame` and `laser_link`).
 
     Two more silences, both about the consequence the finding asserts rather than about the
     claim. A driver whose configuration says it broadcasts its own transforms publishes the
@@ -1442,9 +1464,12 @@ def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
                 node = atlas.entities.get(node_id)
                 if node is None or profile not in node.profiles:
                     continue
+                prefix, _colon, _rest = source.rpartition(":")
+                if prefix and prefix != _node_scope(node_id)[1]:
+                    # `ctrl:status` applies to the node named ctrl alone
+                    continue
                 read = rules.coded_sources(atlas, node_id, profile)
                 ends = _endpoint_names(atlas, node_id, profile)
-                prefix, _colon, _rest = source.rpartition(":")
                 renamed = _remap_source(name, node_id)
                 own = {
                     _remap_source(raw, node_id) for raw in {raw for _kind, raw in ends} | _BUILT_IN
@@ -1452,8 +1477,6 @@ def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
                 if (
                     not read
                     or not ends
-                    # `ctrl:status` applies to the node named ctrl alone
-                    or (prefix and prefix != _node_scope(node_id)[1])
                     or _hands_off_unread(read, classes, defined, functions)
                     or _python_handoffs(atlas, read)
                     or _literal(atlas, read, name)

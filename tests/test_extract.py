@@ -1325,9 +1325,9 @@ def test_summary_is_a_pure_function_of_the_atlas(tmp_path: Path, ws: Workspace):
 # the size of an atlas, over an input a stranger holds
 
 FIXTURE_CEILING_BYTES = 510_000
-"""The size gate, over the committed fixture workspace. Measured in a clone at 459,358 bytes
-with the launch walks executed against a sourced ROS 2, and at 277,912 without one, so the
-number covers the larger of the two and carries 9.9 percent of headroom: adding a fixture
+"""The size gate, over the committed fixture workspace. Measured in a clone at 467,916 bytes
+with the launch walks executed against a sourced ROS 2, and at 300,600 without one, so the
+number covers the larger of the two and carries 8.3 percent of headroom: adding a fixture
 package is then a measurement and not a failure. A tree with no `.git` reads 100 bytes less
 in both states, because `Workspace.checkout` then states no place for either root, and the
 `generated` block is inside the file and outside `canonical_bytes`.
@@ -1340,9 +1340,9 @@ three waves went stale twice in them, both times because that workspace gained p
 rather than because the encoder changed."""
 
 FIXTURE_BYTES_PER_ENTITY = 3_800
-"""The same gate as a ratio, over the same committed input. Measured at 3,428 bytes per
-entity with a sourced ROS 2 and 3,431 without one, and the number covers the larger of the
-two with 9.7 percent of headroom. This is the gate that catches an encoder that started
+"""The same gate as a ratio, over the same committed input. Measured at 3,466 bytes per
+entity with a sourced ROS 2 and 3,666 without one, and the number covers the larger of the
+two with 3.5 percent of headroom. This is the gate that catches an encoder that started
 writing more per row, because here the input cannot move under the number: a whole atlas
 that grows because a fixture package arrived moves the ratio hardly at all."""
 

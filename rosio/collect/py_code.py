@@ -172,6 +172,21 @@ _PLAIN_BASES = frozenset({"abc", "typing", "enum", "dataclasses", "object", "rcl
 NAME_LITERAL = re.compile(r"[~/]?[A-Za-z_]\w*(?:/[A-Za-z_]\w*)*/?", re.ASCII)
 """A string literal shaped like a ROS name, which a remap could be written against."""
 
+_FILESYSTEM_PATH = re.compile(
+    r"/(bin|boot|dev|etc|home|lib|media|mnt|opt|proc|root|run|srv|sys|tmp|usr|var)/."
+)
+
+
+def is_name_literal(value: str) -> bool:
+    """A string literal shaped like a ROS name. A path under a filesystem root (`/tmp/pose`,
+    `/dev/ttyUSB0`, a home directory) is a file, and would name the machine in compared data."""
+    return (
+        len(value) <= 200
+        and NAME_LITERAL.fullmatch(value) is not None
+        and not _FILESYSTEM_PATH.match(value)
+    )
+
+
 _CREATE_NODE = "rclpy.create_node"
 AUTO_DECLARE_OPTIONS = frozenset(
     {"automatically_declare_parameters_from_overrides", "allow_undeclared_parameters"}
@@ -1769,9 +1784,19 @@ class PyFile:
         }
         return self._qual(dotted) if head in top else dotted
 
-    @staticmethod
-    def _looks_like_action(node: ast.Call) -> bool:
-        return len(node.args) >= 3
+    def _looks_like_action(self, node: ast.Call) -> bool:
+        return len(self._action_arguments(node)) >= 3
+
+    def _action_arguments(self, node: ast.Call) -> list[ast.expr]:
+        """The node, type and name of an rclpy action call, positional or by keyword:
+        `ActionClient(node=self, action_type=Fibonacci, action_name='fib')`."""
+        args = self._positional(node)
+        for key in ("node", "action_type", "action_name")[len(args) :]:
+            value = self._keyword(node, key)
+            if value is None:
+                break
+            args.append(value)
+        return args
 
     # -- parameters --------------------------------------------------------
 
@@ -1996,7 +2021,7 @@ class PyFile:
 
     def _action(self, node: ast.Call, ctx: Ctx, call: str) -> None:
         kind, name_index, type_index = _ACTION_CALLS[call]
-        args = self._positional(node)
+        args = self._action_arguments(node)
         if len(args) <= name_index:
             return
         record = self._named_endpoint(kind, "other", args[name_index], args[type_index], ctx, node)
@@ -2609,8 +2634,7 @@ class PyFile:
             for node in ast.walk(self.tree)
             if isinstance(node, ast.Constant)
             and isinstance(node.value, str)
-            and len(node.value) <= 200
-            and NAME_LITERAL.fullmatch(node.value)
+            and is_name_literal(node.value)
         }
         if literals:
             record["name_literals"] = sorted(literals)

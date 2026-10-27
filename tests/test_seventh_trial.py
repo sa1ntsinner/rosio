@@ -1336,3 +1336,139 @@ def test_a_name_two_branches_assign_literals_is_neither_literal():
     """Section 7: a condition choosing between names could build any of them, so the
     declaration is a blind spot and declares neither. A straight reassignment is read in order."""
     assert _names(BRANCHED_LITERALS) == (["delta", "gamma"], ["name"])
+
+
+# ---------------------------------------------------------------------------
+# review 14
+
+
+@pytest.mark.cpp
+@pytest.mark.parametrize(
+    ("model_child", "code_child"),
+    [
+        ("imu_link", "gps_link"),
+        ("lidar_link", "imu_link"),
+        ("camera_link", "camera_link_optical"),
+        ("left_wheel", "right_wheel"),
+        ("base_footprint", "base_link_inertia"),
+    ],
+)
+def test_a_broadcast_beside_a_link_of_close_spelling_and_another_stem_is_not_renamed(
+    tmp_path: Path, model_child: str, code_child: str
+):
+    """Two frames spelled alike are two parts unless only their frame suffix differs."""
+    atlas = _bot(tmp_path, model_child, code_child)
+    assert [
+        item
+        for item in findings(atlas, "frame.not_in_urdf")
+        if item.subject == f"frame:{code_child}"
+    ] == []
+
+
+HANDED = """from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node, SetParameter
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('with_b', default_value='false'),
+        SetParameter(name='bogus', value=1.0),
+        Node(package='p', executable='a', name='a'),
+        Node(package='p', executable='b', name='b',
+             condition=IfCondition(LaunchConfiguration('with_b'))),
+    ])
+"""
+
+
+def test_a_profile_that_starts_one_more_node_of_a_set_parameter_moves_no_id(tmp_path: Path):
+    package(
+        tmp_path,
+        "p",
+        {
+            "p/__init__.py": "",
+            "p/a.py": python_node("a", "        self.declare_parameter('rate', 1.0)\n"),
+            "p/b.py": python_node("b", "        self.declare_parameter('rate', 1.0)\n"),
+            "setup.py": SETUP.format("'a = p.a:main', 'b = p.b:main'"),
+            "run.launch.py": HANDED,
+        },
+    )
+    entry = Entrypoint("launch", "p", "run.launch.py")
+    with_b = Entrypoint("launch", "p", "run.launch.py", args=(("with_b", "true"),))
+
+    def found(profiles: tuple[ProfileSpec, ...]) -> list[model.Finding]:
+        cfg = Config(
+            roots=(RootSpec("src", str(tmp_path / "src")),),
+            profiles=profiles,
+            out_dir=str(tmp_path / "out"),
+            deterministic=True,
+        )
+        return findings(extract.run(cfg, Workspace.discover(cfg.roots)), "param.set_undeclared")
+
+    (one,) = found((ProfileSpec("p1", entrypoints=(entry,)),))
+    (both,) = found(
+        (ProfileSpec("p1", entrypoints=(entry,)), ProfileSpec("p2", entrypoints=(with_b,)))
+    )
+    assert one.id == both.id
+    assert "/b" in both.detail and "/b" not in one.detail
+
+
+def test_a_set_parameter_is_located_by_its_group_and_never_by_a_line(tmp_path: Path):
+    found = _groups(tmp_path, "speed", "speed")
+    locators = sorted(row.locator for item in found for row in item.where)
+    assert len(set(locators)) == 2
+    assert all(item.startswith("SetParameter(") for item in locators)
+
+
+SWITCHED = """class N : public rclcpp::Node {
+  N() : Node("n") {
+    std::string n = "front";
+    switch (mode_) {
+      case 0: n = "left"; break;
+      case 1: n = "right"; break;
+    }
+    declare_parameter(n, 1.0);
+    std::string m = "base";
+    for (auto & s : items_) { m = "item"; }
+    declare_parameter(m, 1.0);
+    std::string w = "idle";
+    while (busy_) { w = "busy"; }
+    declare_parameter(w, 1.0);
+    std::string t = "one";
+    try { t = "two"; } catch (...) {}
+    declare_parameter(t, 1.0);
+  }
+};
+"""
+
+
+@pytest.mark.cpp
+def test_a_name_a_switch_arm_or_a_loop_body_assigns_is_neither_literal():
+    assert _names(SWITCHED) == (["two"], ["m", "n", "w"])
+
+
+def test_a_name_literal_is_no_file_path_and_no_comment():
+    from rosio.collect import cpp_code, py_code
+
+    source = (
+        b'auto a = "/scan"; auto b = "/tmp/amcl_saved_pose"; auto c = "/dev/ttyUSB0";\n'
+        b'// see "/var/lib/map"\n/* "commented" */ auto d = \'"\'; auto e = "odom";\n'
+    )
+    assert cpp_code.name_literals(source) == ["/scan", "odom"]
+    assert [
+        item
+        for item in ("/scan", "/tmp/pose", "/media/u/map", "/dev/ttyUSB0", "/tmp")
+        if py_code.is_name_literal(item)
+    ] == ["/scan", "/tmp"]
+
+
+def test_an_action_client_built_by_keywords_is_an_endpoint_and_no_handoff(tmp_path: Path):
+    atlas, found = _python_dead(
+        tmp_path,
+        "        self.c = ActionClient(node=self, action_type=Go, action_name='go_to')\n",
+        '("go_too", "/x")',
+        "from rclpy.action.client import ActionClient\nfrom p.msg import Go\n",
+    )
+    assert "node_handoffs" not in atlas.entities["file:p|p/ctrl.py"].fact("coded").values
+    assert len(found) == 1
+    assert "go_to" in found[0].say

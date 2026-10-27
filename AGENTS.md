@@ -447,8 +447,11 @@ Notes on specific kinds:
 * `tf_parent` runs from the child to the parent in every layer: a urdf joint, a broadcast
   the code sends, a transform the probe observed. The edge says the parent of `src` is
   `dst`, so a tree holds one parent per child, and one pair stated by two layers is one
-  source and one destination with a key per site: the layers meet on the pair and are
-  compared there. A reader never reads the direction off the source of a fact.
+  source and one destination with a key per site. Each site keeps its own keyed edge, so the
+  `conflicts` of one edge hold one layer and nothing compares the layers on it: the layers
+  meet on the pair, a reader that walks the pair (`rosio path`, the frame tree) sees every
+  site of it, and a tree view shows one child per pair, the model's row when a model states it.
+  A reader never reads the direction off the source of a fact.
 
 ## 6. Facts, and how disagreement is represented
 
@@ -1392,6 +1395,26 @@ constructor owns no longer carries the header's line beside the source file it c
 this reader reads (`create_publisher()`, `bind()`) among its `node_handoffs`, while it now
 lists the free functions and classes handed a node interface (`get_node_topics_interface()`).
 No release had shipped, so no stored id or waiver existed.
+
+Later inside `1.29` several ids and texts moved with no new key. A `SetParameter` or
+`SetParametersFromFile` site is located by the scope it pushes into,
+`SetParameter(<digest>)`, a digest over the processes and includes of its group as the launch
+file writes them, and an inline dict a launch action hands its node by that action,
+`Node(<name>).parameters`, where both were a bare word told apart by the line alone. Every
+candidate, blind spot and finding that cites such a site moved. `param.set_undeclared` names
+a handed line by that locator alone, no longer by the nodes it reaches, so a profile that
+starts one more node of the group, or the same node in another namespace, moves no id, and
+whether another node needs the line is decided by file and locator without the line hint.
+The renamed variant of `frame.not_in_urdf` fires only when the two names share a stem and
+differ by a `_link` or `_frame` suffix, so `imu_link` beside `gps_link` and `camera_link`
+beside `camera_link_optical` are no longer one part. A C++ name a `switch` arm or a loop body
+assigns is a blind spot outside that arm or body, as one an `if` assigns is, which moved
+parameter records and `param_name` entries. `name_literals` leaves out a path under a
+filesystem root (`/tmp/...`, `/dev/...`, a home directory) and, in C++, the text of comments and
+character literals. An rclpy `ActionClient` or `ActionServer` given its node, type and name by
+keyword is an action endpoint, where it was a node handoff. `remap.matches_nothing` reads a
+remap scoped to one node of a site that starts several for that node and skips the others,
+where it gave up on the remap. No release had shipped, so no stored id or waiver existed.
 
 A reader pinned to `1.0` still loads a `1.29` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re

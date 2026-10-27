@@ -601,7 +601,7 @@ MOVING = """    if (moving_) {
 
 
 @pytest.mark.cpp
-@pytest.mark.parametrize("kind", ["tf_parent", "publishes", "subscribes"])
+@pytest.mark.parametrize("kind", ["tf_parent", "broadcasts_tf", "publishes", "subscribes"])
 def test_a_site_inserted_before_another_moves_no_edge_id(tmp_path: Path, kind: str):
     """Review 5: the first site of one symbol kept the plain key, so a sibling written above
     it took that key and moved the edge id of the one already there."""

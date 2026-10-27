@@ -144,9 +144,10 @@ def test_group_scoped_rules_cite_the_action_that_pushed_them(tmp_path: Path) -> 
     sites = {(r.frm, r.to): r.site for r in node.remaps}
     assert sites[("/map", "map")] == records.Site(str(parent), "SetRemap", 7)
     assert sites[("chatter", "/out")].path == str(child)
+    scope = node.params[0].site.locator.partition("(")[2]
     assert [(p.site.path, p.site.locator, p.site.line_hint) for p in node.params] == [
-        (str(parent), "SetParameter", 8),
-        (str(parent), "SetParametersFromFile", 9),
+        (str(parent), f"SetParameter({scope}", 8),
+        (str(parent), f"SetParametersFromFile({scope}", 9),
     ]
 
 

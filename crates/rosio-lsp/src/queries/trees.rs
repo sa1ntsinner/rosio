@@ -339,7 +339,15 @@ pub(super) fn frame_tree(atlas: &Atlas, index: &Index, params: &Value) -> Value 
         parented.insert(edge.fields.src.clone());
     }
     for children in links.values_mut() {
-        children.sort_by(|a, b| a.0.cmp(&b.0));
+        // urdf and code state one pair on two edges: one row, the model's when there is one
+        let modelled: BTreeSet<String> = children
+            .iter()
+            .filter(|(_, row)| !row["model"].is_null())
+            .map(|(child, _)| child.clone())
+            .collect();
+        children.retain(|(child, row)| !(row["model"].is_null() && modelled.contains(child)));
+        children.sort_by(|a, b| (&a.0, a.1["model"].as_str()).cmp(&(&b.0, b.1["model"].as_str())));
+        children.dedup_by(|a, b| a.0 == b.0 && a.1["model"] == b.1["model"]);
     }
     fn branch(
         id: &str,
@@ -573,6 +581,27 @@ mod tests {
             result[0]["children"][0]["children"][0]["children"],
             json!([])
         );
+    }
+
+    #[test]
+    fn one_pair_the_model_and_the_code_state_is_one_child() {
+        let atlas = Atlas::parse(
+            r#"{"schema_version":"1.29","entities":{
+            "frame:base":{"kind":"frame"},"frame:laser":{"kind":"frame"}},
+            "edges":{"urdf":{"kind":"tf_parent","src":"frame:laser","dst":"frame:base",
+            "facts":[{"layer":"declared","profile":"*","values":{"model":"file:p|bot.urdf","joint":"j"}}]},
+            "code":{"kind":"tf_parent","src":"frame:laser","dst":"frame:base",
+            "facts":[{"layer":"coded","profile":"*","values":{}}]},
+            "again":{"kind":"tf_parent","src":"frame:laser","dst":"frame:base",
+            "facts":[{"layer":"coded","profile":"*","values":{}}]}}}"#,
+        )
+        .unwrap();
+        let result = frame_tree(&atlas, &Index::default(), &json!({}));
+        assert_eq!(result.as_array().unwrap().len(), 1);
+        let children = result[0]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0]["model"], "file:p|bot.urdf");
+        assert_eq!(children[0]["joint"], "j");
     }
 
     #[test]

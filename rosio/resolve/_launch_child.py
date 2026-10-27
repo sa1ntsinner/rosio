@@ -679,6 +679,32 @@ def _action_site(action, file: str, locator: str) -> records.Site:
     return records.Site(file, locator, lines.get(file))
 
 
+_SCOPE_FIELDS = ("_Node__package", "_Node__node_executable", "_Node__node_name")
+
+
+def _scope_disc(entities) -> str:
+    """The scope a group scoped action pushes into, as the launch file writes the processes
+    and includes it holds, unperformed. One action spelled alike in two groups is two places
+    without a line number, and a profile that starts one more node of the group moves
+    nothing."""
+    from rosio import ids
+
+    parts: list[str] = []
+    for entity in entities:
+        kind = type(entity).__name__
+        if kind in _SCOPED_LISTS or kind.startswith(("Push", "Pop", "DeclareLaunchArgument")):
+            continue
+        fields = [
+            substitutions.describe_value(getattr(entity, item, None)) for item in _SCOPE_FIELDS
+        ]
+        source = getattr(entity, "launch_description_source", None)
+        location = substitutions.describe_value(
+            getattr(source, "_LaunchDescriptionSource__location", None)
+        )
+        parts.extend([kind, *fields, re.split(r"[/\\]", location)[-1]])
+    return ids.digest(*parts)
+
+
 class _PushedPair(tuple):
     site: records.Site | None = None
 
@@ -733,6 +759,7 @@ class Walker:
         self.produced: dict[str, str] = {}
         """Temp files a process of this walk writes when it runs, with the command that does."""
         self._touched: list[tuple[int, str, str]] = []
+        self._scope: list[Any] = []
         self.result = records.LaunchWalk(
             entry_path=self.entry,
             args=tuple(self.args),
@@ -885,8 +912,13 @@ class Walker:
         if depth > MAX_DEPTH:
             self.result.notes.append("the action tree is deeper than the walk follows")
             return
-        for entity in entities or ():
-            self._entity(entity, frame, depth)
+        entities = list(entities or ())
+        outer, self._scope = self._scope, entities
+        try:
+            for entity in entities:
+                self._entity(entity, frame, depth)
+        finally:
+            self._scope = outer
 
     def _entity(self, entity, frame: _Frame, depth: int) -> None:
         import launch
@@ -934,7 +966,10 @@ class Walker:
         start = len(configurations.get(key) or ())
         self._visit(entity, frame, depth)
         entries = configurations.get(key) or []
-        site = _action_site(entity, frame.file, type(entity).__name__)
+        locator = type(entity).__name__
+        if key == "global_params":
+            locator = f"{locator}({_scope_disc(self._scope)})"
+        site = _action_site(entity, frame.file, locator)
         for index in range(start, len(entries)):
             entries[index] = _pushed(entries[index], site)
 
@@ -1503,7 +1538,7 @@ class Walker:
         for index, item in enumerate(raw):
             value = evaluated[index] if index < len(evaluated) else None
             described = provenance[index] if index < len(provenance) else None
-            source = self._param(item, value, order, frame, described)
+            source = self._param(item, value, order, frame, described, kept)
             if source is not None:
                 out.append(source)
                 order += 1
@@ -1528,11 +1563,12 @@ class Walker:
         )
 
     def _param(
-        self, item, value, order: int, frame: _Frame, described=None
+        self, item, value, order: int, frame: _Frame, described=None, kept=""
     ) -> records.ParamSource | None:
         if described is None:
             described = self._described(item, order)
         text = _item_text(item)
+        handed = f"{kept}.parameters" if kept else "parameters"
         described = None if described is None else replace(described, order=order, text=text)
         if described is not None:
             if described.kind == "rewritten_file":
@@ -1551,7 +1587,7 @@ class Walker:
                 order=order,
                 kind="inline_dict",
                 values=tuple(sorted((str(key), _plain(inner)) for key, inner in value.items())),
-                site=records.Site(frame.file, "parameters"),
+                site=records.Site(frame.file, handed),
             )
         if value is not None and hasattr(value, "evaluate") and not isinstance(value, Path):
             try:
@@ -1563,7 +1599,7 @@ class Walker:
                 kind="inline_dict",
                 values=((str(key), _plain(evaluated)),),
                 note="a single Parameter description",
-                site=records.Site(frame.file, "parameters"),
+                site=records.Site(frame.file, handed),
             )
         if value is None:
             return None
