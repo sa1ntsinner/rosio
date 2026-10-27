@@ -1,0 +1,15 @@
+deck:
+  rate:
+    type: double
+    default_value: 10.0
+  limits:
+    upper:
+      type: double
+      default_value: 1.0
+  joints:
+    type: string_array
+    default_value: ["wheel"]
+  __map_joints:
+    p:
+      type: double
+      default_value: 1.0

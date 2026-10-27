@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>deck_modules</name>
+  <version>0.0.1</version>
+  <description>Modules the deck node loads by a name its parameters choose.</description>
+  <maintainer email="maintainer@example.com">Maintainer</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>deck</depend>
+  <depend>pluginlib</depend>
+</package>

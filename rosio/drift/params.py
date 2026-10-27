@@ -400,16 +400,21 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
     When the node declares a name close to the one the file sets, the finding names it: a key
     one letter off from a declared parameter is a typo far more often than a new parameter.
 
-    A line every node of the profile reads, a `/**` key or a launch `SetParameter`, is silent
-    on a node that ignores it while another node of the profile declares the name: the line
-    exists for that node and deleting it breaks it.
+    A line another node of the profile also reads and declares, a `/**` key or a launch
+    `SetParameter` that reaches several nodes, is silent on a node that ignores it: the line
+    exists for that node and deleting it breaks it. A `/**` block in a file only this node is
+    handed reaches this node alone, so it is reported like any other line.
     """
     out: list[model.Finding] = []
-    declared = join.declared_names(atlas)
-    blind = join.blind_names(atlas, model.Want.PARAM_NAME.value)
-    shared_names: dict[str, set[str]] = {}
-    for (_, profile), names in declared.items():
-        shared_names.setdefault(profile, set()).update(names)
+    blind, declared = join.parameter_declarations(atlas)
+    needed: set[tuple[str, str, str, str]] = set()
+    for node in _params(atlas):
+        parsed = ids.parse_param(node.id)
+        for row in node.candidates:
+            if parsed.name in join.declared_in(declared, parsed.owner, row.profile) | declared.get(
+                (parsed.owner, join.REACHED), set()
+            ):
+                needed.add((row.profile, parsed.name, row.source.file, row.source.locator))
     for node in _params(atlas):
         owner_id = ids.parse_param(node.id).owner
         name = ids.parse_param(node.id).name
@@ -423,9 +428,7 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             winner = next((row for row in chain if row.wins or row.note == join.IGNORED_NOTE), None)
             if winner is None:
                 continue
-            if _shared_line(winner.source.locator) and name in (
-                shared_names.get(profile, set()) | shared_names.get(model.ANY_PROFILE, set())
-            ):
+            if (profile, name, winner.source.file, winner.source.locator) in needed:
                 continue
             slug = rules.slug_of(profile)
             at = rules.where(winner.source)
@@ -483,10 +486,6 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
                 )
             )
     return out
-
-
-def _shared_line(locator: str) -> bool:
-    return locator == "SetParameter" or locator.startswith("/**.")
 
 
 def _nearest_name(name: str, declared: set[str]) -> str:

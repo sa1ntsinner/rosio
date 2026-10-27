@@ -1,0 +1,4 @@
+<library path="deck_modules">
+  <class type="deck_modules::Stop" base_class_type="deck::Module"/>
+  <class type="deck_modules::Slow" base_class_type="deck::Module"/>
+</library>

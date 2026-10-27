@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>deck_ctrl</name>
+  <version>0.0.1</version>
+  <description>A controller class a node of another package hands itself to.</description>
+  <maintainer email="maintainer@example.com">Maintainer</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+</package>

@@ -782,15 +782,32 @@ def test_param_set_undeclared_is_silent_on_a_shared_line_another_node_reads(loca
     a node that ignores it does not make the line deletable while the planner reads it."""
     atlas = _undeclared_atlas("wheel_base", locator=locator)
     assert len(_run(atlas, "param.set_undeclared")) == 1
-    planner = ids.build_node("/planner")
     atlas = _undeclared_atlas("wheel_base", locator=locator)
-    atlas.entities[ids.build_param(planner, "wheel_base")] = model.Node(
-        id=ids.build_param(planner, "wheel_base"),
-        kind="param",
-        label="wheel_base",
-        facts=[model.LayerFact(layer=CODED, profile=PROFILE, values={"declared_in_code": True})],
-    )
+    _planner_declares(atlas, "wheel_base", locator)
     assert _run(atlas, "param.set_undeclared") == []
+
+
+def _planner_declares(atlas: model.Atlas, name: str, locator: str) -> None:
+    planner = ids.build_param(ids.build_node("/planner"), name)
+    atlas.entities[planner] = model.Node(
+        id=planner,
+        kind="param",
+        label=name,
+        facts=[model.LayerFact(layer=CODED, profile=PROFILE, values={"declared_in_code": True})],
+        candidates=[
+            _candidate(
+                1.0, model.Mechanism.YAML_BASE.value, _source(BASE, locator, 12), rank=0, wins=True
+            )
+        ],
+    )
+
+
+def test_a_shared_key_only_this_node_is_handed_is_still_reported():
+    """A `/**` block in a file handed to one node reaches that node alone. Another node
+    declaring the name from another line does not make this line needed."""
+    atlas = _undeclared_atlas("wheel_base", locator="/**.ros__parameters.wheel_base")
+    _planner_declares(atlas, "wheel_base", "planner.ros__parameters.wheel_base")
+    assert len(_run(atlas, "param.set_undeclared")) == 1
 
 
 def test_a_name_another_profile_declares_is_still_undeclared_in_this_one():

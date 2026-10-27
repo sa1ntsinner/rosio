@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>deck</name>
+  <version>0.0.1</version>
+  <description>A node whose parameters are declared by code the node does not hold.</description>
+  <maintainer email="maintainer@example.com">Maintainer</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>deck_ctrl</depend>
+  <depend>generate_parameter_library</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+</package>

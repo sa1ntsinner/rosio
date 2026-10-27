@@ -1,0 +1,21 @@
+deck:
+  ros__parameters:
+    gain: 1.0
+    depth: 3
+    enabled: true
+    ratio: 0.5
+    limit: 2.0
+    kp: 0.1
+    opt:
+      weight: 0.4
+    modules: ["deck_modules::Stop", "deck_modules::Slow"]
+    stop:
+      margin: 0.2
+    slow:
+      hold: 1.0
+    rate: 20.0
+    limits:
+      upper: 2.0
+    wheel:
+      p: 3.0
+    unused_key: 1

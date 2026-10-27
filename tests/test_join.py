@@ -978,6 +978,7 @@ def test_the_record_block_has_one_spelling_per_record_kind():
         "plugin_parameters",
         "tf_broadcasts",
         "tf_lookups",
+        "plugin_loaders",
     )
     assert len(set(join.RECORD_KEYS)) == len(join.RECORD_KEYS)
     assert not hasattr(join, "LEGACY_NODE_KEY")

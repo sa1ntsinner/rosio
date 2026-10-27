@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+import yaml
+
 from rosio import ids, model
 from rosio.collect import CollectContext, register
 from rosio.errors import CollectorError, ContractError
@@ -320,6 +322,9 @@ class CmakeScan:
     not one of them, so its installed state comes from the install tree or stays false."""
     unresolved_targets: tuple[UnresolvedTarget, ...] = ()
     include_dirs: tuple[str, ...] = ()
+    parameter_libraries: tuple[tuple[str, str], ...] = ()
+    """`generate_parameter_library(<target> <definition yaml>)`, the target a node links to
+    have its parameters declared from the definition."""
 
 
 def usable_target(name: str) -> bool:
@@ -337,6 +342,7 @@ def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
     installed: set[str] = set()
     unresolved: list[UnresolvedTarget] = []
     include_dirs: list[str] = []
+    parameter_libraries: list[tuple[str, str]] = []
 
     def expand(args: Sequence[str]) -> list[str]:
         out: list[str] = []
@@ -487,6 +493,12 @@ def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
                     break
                 if usable_target(item):
                     installed.add(item)
+        elif (
+            command.name == "generate_parameter_library"
+            and len(args) > 1
+            and usable_target(args[0])
+        ):
+            parameter_libraries.append((args[0], args[1]))
         elif command.name == "set_target_properties" and args and "OUTPUT_NAME" in args:
             # image_rotate builds `image_rotate_bin` and installs it as `image_rotate`
             raw_targets.setdefault(args[0], {})["output_name"] = _keyword_value(args, "OUTPUT_NAME")
@@ -515,7 +527,61 @@ def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
             sorted(unresolved, key=lambda item: (item.command, item.expression, item.line_hint))
         ),
         include_dirs=tuple(dict.fromkeys(include_dirs)),
+        parameter_libraries=tuple(sorted(set(parameter_libraries))),
     )
+
+
+def parameter_definition(text: str) -> tuple[list[str], list[str]]:
+    """The names a generate_parameter_library definition declares, and the expressions of
+    the names it builds at run time.
+
+    The top level key is the namespace of the generated struct and names no parameter. A
+    mapping holding a `type` is one parameter, and the keys above it fold into its dotted
+    name. A `__map_<param>` group repeats its parameters once per value of `<param>`, so a
+    name under it is an expression, `"gains." + joints + ".p"`, which states the literal
+    pieces the name has to hold.
+    """
+    loaded = yaml.safe_load(text)
+    names: list[str] = []
+    patterns: list[str] = []
+
+    def expression(path: list[str | None], mapped: list[str]) -> str:
+        pieces: list[str] = []
+        literal = ""
+        runtime = iter(mapped)
+        for position, segment in enumerate(path):
+            literal += "." if position else ""
+            if segment is None:
+                if literal:
+                    pieces.append(f'"{literal}"')
+                literal = ""
+                pieces.append(next(runtime))
+            else:
+                literal += segment
+        if literal:
+            pieces.append(f'"{literal}"')
+        return " + ".join(pieces)
+
+    def walk(node: dict[Any, Any], path: list[str | None], mapped: list[str]) -> None:
+        for key, value in node.items():
+            if not isinstance(value, dict):
+                continue
+            key = str(key)
+            if key.startswith("__map_"):
+                walk(value, [*path, None], [*mapped, key.removeprefix("__map_")])
+            elif isinstance(value.get("type"), str):
+                if mapped:
+                    patterns.append(expression([*path, key], mapped))
+                else:
+                    names.append(".".join(str(item) for item in [*path, key]))
+            else:
+                walk(value, [*path, key], mapped)
+
+    if isinstance(loaded, dict):
+        for top in loaded.values():
+            if isinstance(top, dict):
+                walk(top, [], [])
+    return sorted(set(names)), sorted(set(patterns))
 
 
 def _keyword_value(args: Sequence[str], keyword: str) -> str | None:
@@ -1486,6 +1552,28 @@ class PluginsCollector:
                     "linked_targets": sorted(target.linked_targets),
                 }
             )
+        for name, path in build.scan.parameter_libraries:
+            definition = Path(build.base) / path
+            try:
+                definition_id = ctx.ws.file_id(str(definition))
+            except ContractError:
+                continue
+            ctx.builder.node(definition_id)
+            row = {
+                "target": name,
+                "sources": [],
+                "linked_targets": [],
+                "definition": definition_id,
+            }
+            try:
+                names, patterns = parameter_definition(_read(ctx.ws, definition))
+                row["parameters"] = names
+                if patterns:
+                    row["parameter_patterns"] = patterns
+            except (CollectorError, yaml.YAMLError):
+                row["parameters_unread"] = True
+            rows.append(row)
+        rows.sort(key=lambda row: row["target"])
         if rows:
             file_id = ctx.ws.file_id(build.cmake_path)
             ctx.builder.fact(

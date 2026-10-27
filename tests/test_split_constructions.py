@@ -188,8 +188,8 @@ PUBLIC_SOURCES = {
     },
     "rl_src": {
         # The C++ reading of the fifth trial left fewer blind spots and lifted the rate over
-        # the budget.
-        "unresolved": 46,
+        # the budget, and the lambda that declares each covariance names it.
+        "unresolved": 45,
         "findings": {
             "extract.input_refused": 1,
             "param.set_undeclared": 1,
@@ -197,8 +197,9 @@ PUBLIC_SOURCES = {
         # The yaml or the code default reads publish_acceleration and publish_filtered_gps
         # false in four node profiles, so four publishes edges, the uses_type edge and the
         # /accel/filtered topic are not bound.
+        # Each of the three filters declares its two covariances through that lambda.
         "entities": 1684,
-        "edges": 2328,
+        "edges": 2334,
     },
 }
 

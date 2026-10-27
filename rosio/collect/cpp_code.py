@@ -87,8 +87,19 @@ IMAGE_QOS_POSITION = {
 CALLBACK_CALLS = frozenset({"add_on_set_parameters_callback", "add_post_set_parameters_callback"})
 
 DECLARE_CALLS = frozenset(
-    {"declare_parameter", "declare_parameter_if_not_declared", "declare_or_get_parameter"}
+    {
+        "declare_parameter",
+        "declare_parameter_if_not_declared",
+        "declare_or_get_parameter",
+        "get_or_declare_parameter",
+    }
 )
+NODE_FIRST_DECLARE_CALLS = frozenset(
+    {"declare_parameter_if_not_declared", "get_or_declare_parameter"}
+)
+"""Free functions handed the node first: nav2 `declare_parameter_if_not_declared(node, name,
+value)` and `autoware_utils::get_or_declare_parameter<T>(node, name)`, whose definition is
+not in a workspace that only depends on it."""
 DECLARE_MAP_CALLS = frozenset({"declare_parameters"})
 PLUGIN_DECLARE_CALLS = frozenset({"declareParameter"})
 """`nav2_costmap_2d::Layer::declareParameter` prefixes the layer instance name itself, so
@@ -495,6 +506,10 @@ class Unit:
     lookups: list[TfLookup] = field(default_factory=list)
     registrations: list[Registration] = field(default_factory=list)
     wrappers: dict[str, tuple[int, int]] = field(default_factory=dict)
+    shared_wrappers: dict[str, tuple[int, int]] = field(default_factory=dict)
+    plugin_loaders: list[str] = field(default_factory=list)
+    lambda_wrappers: set[str] = field(default_factory=set)
+    """Declare wrappers another file of the package defines, a template in a header."""
     wrapper_uses: list[WrapperUse] = field(default_factory=list)
     methods: list[str] = field(default_factory=list)
     empty_bodies: list[str] = field(default_factory=list)
@@ -503,6 +518,9 @@ class Unit:
     class_names: list[str] = field(default_factory=list)
     class_bases: dict[str, list[str]] = field(default_factory=dict)
     class_helpers: dict[str, set[str]] = field(default_factory=dict)
+    node_handoffs: dict[str, set[str]] = field(default_factory=dict)
+    """Class to the classes it constructs, and the free functions (`name()`) it calls,
+    handing them a node: its own `this` or a node handle it was given."""
     class_node_plugins: dict[str, set[str]] = field(default_factory=dict)
     helper_types: dict[tuple[str, str], set[str]] = field(default_factory=dict)
     helper_plugins: dict[tuple[str, str], set[str]] = field(default_factory=dict)
@@ -700,6 +718,9 @@ def _call_parts(node: Any, src: bytes) -> tuple[str, Any, Any]:
     if target.type == "field_expression":
         receiver = _child(target, "argument")
         target = _child(target, "field") or target
+    if target.type == "dependent_name" and target.named_children:
+        # `node->template declare_parameter<double>(...)`
+        target = target.named_children[0]
     if target.type in ("template_function", "template_method"):
         template = _child(target, "arguments")
         target = _child(target, "name") or target
@@ -850,7 +871,11 @@ class _Reader:
         if not self.functions:
             return False
         tail = self.functions[-1].rpartition("::")[2]
-        return any(symbol.rpartition("::")[2] == tail for symbol in self.unit.wrappers)
+        return any(
+            symbol.rpartition("::")[2] == tail
+            for symbol in self.unit.wrappers
+            if symbol not in self.unit.lambda_wrappers
+        )
 
     def bind(self, name: str, ref: Ref) -> None:
         if not name:
@@ -985,16 +1010,20 @@ class _Reader:
         if name in DECLARE_CALLS:
             values = (
                 list(arguments[1:])
-                if name == "declare_parameter_if_not_declared"
+                if name in NODE_FIRST_DECLARE_CALLS
                 else [item for item in arguments if not _is_node_argument(item, self.src)]
             )
             if not values:
                 return None
             return (values[0], values[1] if len(values) > 1 else None, types, "")
-        if name in PLUGIN_DECLARE_CALLS and arguments:
-            return (arguments[0], arguments[1] if len(arguments) > 1 else None, types, "")
         qualified = self._wrapper_symbol(name)
-        wrapper = self.unit.wrappers.get(qualified) if qualified else None
+        if name in PLUGIN_DECLARE_CALLS and arguments and not qualified:
+            return (arguments[0], arguments[1] if len(arguments) > 1 else None, types, "")
+        wrapper = (
+            (self.unit.wrappers.get(qualified) or self.unit.shared_wrappers.get(qualified))
+            if qualified
+            else None
+        )
         if wrapper is not None:
             name_index, default_index = wrapper
             if name_index < len(arguments):
@@ -1003,7 +1032,7 @@ class _Reader:
         return None
 
     def _wrapper_symbol(self, name: str) -> str:
-        for symbol in self.unit.wrappers:
+        for symbol in [*self.unit.wrappers, *self.unit.shared_wrappers]:
             if symbol.rpartition("::")[2] == name:
                 return symbol
         return ""
@@ -1291,6 +1320,8 @@ class _Reader:
                     if value.status == LITERAL:
                         self.bind(base, value)
                 self._member_wrapper(base, named[1])
+                # `encoding_(declare_parameter<std::string>("encoding"))`
+                self.walk(named[1])
                 continue
             values = [item for item in named[1].named_children if item.type != "comment"]
             if not values:
@@ -1378,8 +1409,22 @@ class _Reader:
         if left.type == "field_expression":
             self._frame_assignment(left, right)
         elif left.type == "identifier":
-            self.bind(text, self.resolve(right))
-            self.exprs[text] = (_flat(right, self.src), False)
+            operator = _child(node, "operator")
+            value = self.resolve(right)
+            expr = _flat(right, self.src)
+            if operator is not None and _text(operator, self.src) != "=":
+                # `ns += ".speed_calculation"` extends ns, it does not replace it
+                held = self.resolve(left)
+                expr = f"{_flat(left, self.src)} + {expr}"
+                value = (
+                    Ref(LITERAL, held.value + value.value, expr)
+                    if _text(operator, self.src) == "+="
+                    and held.status == LITERAL
+                    and value.status == LITERAL
+                    else Ref(UNRESOLVED, "", expr)
+                )
+            self.bind(text, value)
+            self.exprs[text] = (expr, False)
             self._track_number(text, right)
             self._track_wrapper(text, "", right)
         self.walk(right)
@@ -1535,7 +1580,12 @@ class _Reader:
             return
         arguments = _args(node)
         types = _template_types(template, self.src)
-        self._node_helper(name, receiver, types, arguments)
+        if receiver is None and name[:1].isupper():
+            # `VehicleInfoUtils(*this).getVehicleInfo()` constructs a temporary helper
+            scope = _scope_text(node, self.src)
+            self._node_helper("new", None, [f"{scope}::{name}" if scope else name], arguments)
+        else:
+            self._node_helper(name, receiver, types, arguments)
         if name in ("make_shared", "make_unique"):
             self._plain_node(types[0] if types else _scope_text(node, self.src), arguments)
         if name in MACROS:
@@ -1640,6 +1690,11 @@ class _Reader:
         it, which `_finish_node_helpers` decides once every assignment is read."""
         if not self.klass:
             return
+        if any(_is_node_argument(argument, self.src) for argument in arguments):
+            if name in ("make_unique", "make_shared", "new") and types:
+                self.unit.node_handoffs.setdefault(self.klass, set()).add(types[0])
+            elif receiver is None and name.isidentifier():
+                self.unit.node_handoffs.setdefault(self.klass, set()).add(name + "()")
         texts = [_flat(argument, self.src) for argument in arguments]
         handles: tuple[tuple[str, str], ...] = ()
         if not any(text in _SELF_HANDLES for text in texts):
@@ -1877,7 +1932,11 @@ class _Reader:
         return ""
 
     def _parameter(self, name: str, arguments: Sequence[Any], template: Any, node: Any) -> None:
-        if node.id in self.consumed or self._inside_wrapper():
+        if (
+            node.id in self.consumed
+            or self._inside_wrapper()
+            or _in_wrapper_lambda(node, self.src, self.unit.wrappers)
+        ):
             # The body of a declare wrapper states its own signature, not a parameter name.
             return
         if name in DECLARE_MAP_CALLS:
@@ -2480,10 +2539,10 @@ def _literal_value(node: Any, src: bytes) -> Any:
     return None
 
 
-def _wrappers(root: Any, src: bytes) -> dict[str, tuple[int, int]]:
-    """Project local declare wrappers: a function that declares a parameter and takes the
-    name as a string. Two thirds of the parameter named topics on the reference stack go
-    through one of these rather than through the rclcpp API."""
+def _wrappers(root: Any, src: bytes, *, lambdas: bool = True) -> dict[str, tuple[int, int]]:
+    """Project local declare wrappers: a function, or a lambda a variable holds, that
+    declares a parameter and takes the name as a string. Two thirds of the parameter named
+    topics on the reference stack go through one of these rather than through the rclcpp API."""
     out: dict[str, tuple[int, int]] = {}
     if not any(call.encode() in src for call in DECLARE_CALLS):
         return out
@@ -2492,30 +2551,39 @@ def _wrappers(root: Any, src: bytes) -> dict[str, tuple[int, int]]:
         node = stack.pop()
         for child in node.named_children:
             stack.append(child)
-        if node.type != "function_definition" or _child(node, "type") is None:
+        lambda_name = _lambda_name(node, src) if lambdas else ""
+        if lambda_name:
+            # `auto dp = [&](const std::string & s) { return node.declare_parameter<double>(s); };`
+            name_types: tuple[str, ...] = ("std::string", "string", "auto")
+            declarator = _child(node, "declarator")
+            inner = None
+        elif node.type == "function_definition" and _child(node, "type") is not None:
+            name_types = ("std::string", "string")
+            declarator = _child(node, "declarator")
+            while declarator is not None and declarator.type != "function_declarator":
+                declarator = _child(declarator, "declarator")
+            inner = _child(declarator, "declarator") if declarator is not None else None
+            if inner is None:
+                continue
+        else:
             continue
         body = _child(node, "body")
         if body is None or not any(call in _text(body, src) for call in DECLARE_CALLS):
             continue
-        declarator = _child(node, "declarator")
-        while declarator is not None and declarator.type != "function_declarator":
-            declarator = _child(declarator, "declarator")
-        if declarator is None:
+        parameters = _child(declarator, "parameters") if declarator is not None else None
+        if parameters is None:
             continue
-        inner = _child(declarator, "declarator")
-        parameters = _child(declarator, "parameters")
-        if inner is None or parameters is None:
-            continue
-        name = _text(inner, src)
+        name = lambda_name or _text(inner, src)
         if not name.isidentifier():
             continue
-        name = "::".join([*_namespaces_of(node, src), name])
+        if not lambda_name:
+            name = "::".join([*_namespaces_of(node, src), name])
         index = None
         for position, child in enumerate(
             [item for item in parameters.named_children if item.type == "parameter_declaration"]
         ):
             type_node = _child(child, "type")
-            if type_node is None or _flat(type_node, src) not in ("std::string", "string"):
+            if type_node is None or _flat(type_node, src) not in name_types:
                 continue
             inner_name = _child(child, "declarator")
             if inner_name is None:
@@ -2529,8 +2597,51 @@ def _wrappers(root: Any, src: bytes) -> dict[str, tuple[int, int]]:
             break
         if index is None:
             continue
-        out[name] = (index, index + 1)
+        default = index + 1
+        if lambda_name:
+            # `load(name, covariance)` hands the lambda an out variable, not a default
+            declared = [
+                _text(_child(item, "declarator"), src).strip("&* ")
+                for item in parameters.named_children
+                if item.type == "parameter_declaration" and _child(item, "declarator") is not None
+            ]
+            given = _declared_default(body, src, declared[index])
+            default = declared.index(given) if given in declared else len(declared)
+        out[name] = (index, default)
     return out
+
+
+def _declared_default(body: Any, src: bytes, parameter: str) -> str:
+    """The text a declare call taking `parameter` as its name passes as the default."""
+    stack = [body]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.named_children)
+        if node.type != "call_expression" or _call_parts(node, src)[0] not in DECLARE_CALLS:
+            continue
+        values = [item for item in _args(node) if not _is_node_argument(item, src)]
+        if values and _flat(values[0], src).strip("&* ") == parameter:
+            return _flat(values[1], src).strip("&* ") if len(values) > 1 else ""
+    return ""
+
+
+def _lambda_name(node: Any, src: bytes) -> str:
+    """The variable a lambda is assigned to where it is declared, or nothing."""
+    if node.type != "lambda_expression" or node.parent is None:
+        return ""
+    if node.parent.type != "init_declarator":
+        return ""
+    target = _child(node.parent, "declarator")
+    return _text(target, src) if target is not None and target.type == "identifier" else ""
+
+
+def _in_wrapper_lambda(node: Any, src: bytes, wrappers: dict[str, tuple[int, int]]) -> bool:
+    parent = node.parent
+    while parent is not None:
+        if parent.type == "lambda_expression" and _lambda_name(parent, src) in wrappers:
+            return True
+        parent = parent.parent
+    return False
 
 
 def _namespaces_of(node: Any, src: bytes) -> list[str]:
@@ -2705,11 +2816,17 @@ def _declares_with(body: Any, src: bytes, parameter: str) -> bool:
 
 
 def parse_text(
-    text: str, *, path: str = "", pkg: str = "", relpath: str = "", parser: Any = None
+    text: str,
+    *,
+    path: str = "",
+    pkg: str = "",
+    relpath: str = "",
+    parser: Any = None,
+    shared_wrappers: dict[str, tuple[int, int]] | None = None,
 ) -> Unit:
     """One translation unit. A file the grammar refuses is marked, never dropped."""
     engine = parser if parser is not None else load_parser()
-    unit = Unit(path=path, pkg=pkg, relpath=relpath)
+    unit = Unit(path=path, pkg=pkg, relpath=relpath, shared_wrappers=dict(shared_wrappers or {}))
     src = text.encode("utf-8", "replace")
     unit.tree = engine.parse(src)
     root = unit.tree.root_node
@@ -2737,6 +2854,8 @@ def parse_text(
         # `#if __has_include` pair. What is outside the region is still read.
         unit.reason = f"the grammar refused {len(errors)} region(s)"
     unit.wrappers = _wrappers(root, src)
+    if unit.wrappers:
+        unit.lambda_wrappers = set(unit.wrappers) - set(_wrappers(root, src, lambdas=False))
     reader = _Reader(src, unit, dict(_DEFINE.findall(text)))
     unit.signatures = _signatures(root, src)
     sites = _construction_values(root, src, reader.defines, unit.signatures)
@@ -2744,6 +2863,7 @@ def parse_text(
         reader.constructor_arguments.setdefault(name, []).append(values)
     reader.walk(root)
     unit.type_aliases = _type_aliases(root, src)
+    unit.plugin_loaders = sorted(set(_PLUGIN_LOADER.findall(text)))
     unit.auto_declare, auto_sites, unit.auto_declare_classes = _auto_declare(root, src)
     unit.local_arguments, local_sites, unit.local_arguments_classes = (
         _auto_declare(root, src, GLOBAL_ARGUMENTS_OPTIONS, "false")
@@ -3078,12 +3198,54 @@ def _type_aliases(root: Any, src: bytes) -> list[dict[str, Any]]:
     return sorted(out, key=lambda row: (row["name"], row["target"]))
 
 
+_PLUGIN_LOADER = re.compile(r"\bClassLoader\s*<\s*([A-Za-z_][\w:]*)\s*>")
+"""`pluginlib::ClassLoader<Base>`: the file loads plugins of that base class by a name only
+the run knows, so any class a manifest registers for it may run in the node."""
+
+
 def parse_file(path: str, *, pkg: str = "", relpath: str = "", parser: Any = None) -> Unit:
     try:
         text = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         raise CollectorError(f"cannot read {path}: {exc}", LAYER, NAME) from exc
     return parse_text(text, path=path, pkg=pkg, relpath=relpath, parser=parser)
+
+
+def _called(name: str) -> bytes:
+    return rf"\b{re.escape(name)}\s*[<(]".encode()
+
+
+def share_wrappers(units: list[Unit], parser: Any) -> list[Unit]:
+    """Read again each file that calls a declare wrapper another file of its package
+    defines, `utils::declareParameter<double>(parameters, "v_ratio")` against a template in
+    a header, so the call states the name it declares. A lambda stays in its own file."""
+    shared: dict[str, dict[str, tuple[int, int]]] = {}
+    for unit in sorted(units, key=lambda item: item.relpath):
+        if unit.syntax is not None and unit.wrappers:
+            for symbol, shape in _wrappers(unit.syntax, unit.source, lambdas=False).items():
+                shared.setdefault(unit.pkg, {}).setdefault(symbol, shape)
+    out: list[Unit] = []
+    for unit in units:
+        extra = {
+            symbol: shape
+            for symbol, shape in shared.get(unit.pkg, {}).items()
+            if symbol not in unit.wrappers
+            and re.search(_called(symbol.rpartition("::")[2]), unit.source)
+        }
+        if not extra:
+            out.append(unit)
+            continue
+        out.append(
+            parse_text(
+                unit.source.decode("utf-8", "replace"),
+                path=unit.path,
+                pkg=unit.pkg,
+                relpath=unit.relpath,
+                parser=parser,
+                shared_wrappers=extra,
+            )
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -3441,7 +3603,12 @@ def _helper_arguments(units: Sequence[Unit]) -> None:
                 continue
             values = sites[(unit.pkg, qualname)]
             fresh = Unit(
-                path=unit.path, pkg=unit.pkg, relpath=unit.relpath, wrappers=unit.wrappers.copy()
+                path=unit.path,
+                pkg=unit.pkg,
+                relpath=unit.relpath,
+                wrappers=unit.wrappers.copy(),
+                shared_wrappers=unit.shared_wrappers,
+                lambda_wrappers=unit.lambda_wrappers,
             )
             reader = _Reader(
                 unit.source, fresh, dict(_DEFINE.findall(unit.source.decode("utf-8", "replace")))
@@ -3531,6 +3698,26 @@ def _finish_node_helpers(units: Sequence[Unit]) -> None:
             values = plugins.get((unit.pkg, scope, member), set())
             if len(values) == 1 and next(iter(values)):
                 selectors.setdefault((unit.pkg, owner), set()).update(values)
+    handoffs: dict[tuple[str, str], set[str]] = {}
+    for unit in units:
+        for name, values in unit.node_handoffs.items():
+            handoffs.setdefault((unit.pkg, name.rpartition("::")[2]), set()).update(values)
+    defined = {(unit.pkg, name.rpartition("::")[2]) for unit in units for name in unit.class_names}
+    for unit in units:
+        # the class row sits in the file that defines the class, often a header, and in the
+        # file that uses it when no file this reader parsed defines it
+        unit.node_handoffs = {
+            name: handoffs[(unit.pkg, name.rpartition("::")[2])]
+            for name in [
+                *unit.class_names,
+                *(
+                    name
+                    for name in unit.node_handoffs
+                    if (unit.pkg, name.rpartition("::")[2]) not in defined
+                ),
+            ]
+            if (unit.pkg, name.rpartition("::")[2]) in handoffs
+        }
     for unit in units:
         unit.class_helpers.clear()
         unit.class_node_plugins.clear()
@@ -3781,6 +3968,8 @@ def _construction_instances(
             pkg=definition.pkg,
             relpath=definition.relpath,
             wrappers=definition.wrappers.copy(),
+            shared_wrappers=definition.shared_wrappers,
+            lambda_wrappers=definition.lambda_wrappers,
         )
         reader = _Reader(definition.source, unit, dict(_DEFINE.findall(definition.source.decode())))
         # A parameter the call leaves out takes the default its declaration states, the same
@@ -3813,6 +4002,8 @@ def _construction_instances(
                     relpath=source.relpath,
                     members=unit.members.copy(),
                     wrappers=source.wrappers.copy(),
+                    shared_wrappers=source.shared_wrappers,
+                    lambda_wrappers=source.lambda_wrappers,
                 )
                 _Reader(source.source, scoped, dict(_DEFINE.findall(source.source.decode()))).walk(
                     source.syntax
@@ -4973,6 +5164,7 @@ class CppCodeCollector:
                         f"{LAYER}.{NAME}: reading this file raised {type(exc).__name__}: {exc}",
                     )
                 )
+        units = share_wrappers(units, parser)
         from rosio.collect import plugins
 
         include_dirs = {}
@@ -5096,6 +5288,11 @@ class CppCodeCollector:
                 ],
                 "wrappers": report.get("wrappers", []),
                 "type_aliases": unit.type_aliases,
+                **(
+                    {"plugin_loaders": [{"base_class": base} for base in unit.plugin_loaders]}
+                    if unit.plugin_loaders
+                    else {}
+                ),
                 "classes": [
                     {
                         "name": name,
@@ -5106,12 +5303,17 @@ class CppCodeCollector:
                             else {}
                         ),
                         **(
+                            {"node_handoffs": sorted(unit.node_handoffs[name])}
+                            if name in unit.node_handoffs
+                            else {}
+                        ),
+                        **(
                             {"node_plugin_parameters": sorted(unit.class_node_plugins[name])}
                             if name in unit.class_node_plugins
                             else {}
                         ),
                     }
-                    for name in sorted(set(unit.class_names))
+                    for name in sorted(set(unit.class_names) | set(unit.node_handoffs))
                 ],
                 "class_templates": [
                     {

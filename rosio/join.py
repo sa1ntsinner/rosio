@@ -105,6 +105,7 @@ RECORD_KEYS = (
     "plugin_parameters",
     "tf_broadcasts",
     "tf_lookups",
+    "plugin_loaders",
 )
 """The record block, which is the whole of what a coded collector may hand the join. One
 key per record kind, one spelling per key, and AGENTS section 2.2 states the rows. A key
@@ -153,6 +154,7 @@ class Carrier:
     construction_sources: tuple[model.Source, ...] = ()
     classes: tuple[dict[str, Any], ...] = ()
     class_templates: tuple[dict[str, Any], ...] = ()
+    plugin_loaders: tuple[dict[str, Any], ...] = ()
 
     def declarations(self) -> tuple[dict[str, Any], ...]:
         """Every parameter this carrier declares, node scoped and plugin scoped together.
@@ -304,6 +306,7 @@ def carriers(atlas: model.Atlas) -> list[Carrier]:
                 type_aliases=tuple(merged["type_aliases"]),
                 classes=tuple(merged["classes"]),
                 class_templates=tuple(merged["class_templates"]),
+                plugin_loaders=tuple(merged["plugin_loaders"]),
             )
         )
     return found
@@ -951,6 +954,251 @@ def _spells_pieces(expr: str) -> bool:
     return True
 
 
+def _row_class(row: dict[str, Any], carrier: Carrier, classes: set[str]) -> str:
+    """The short name of the class a record row belongs to, or `name()` for a free function,
+    `classes` being the short class names its package defines."""
+    owner = str(row.get("owner_symbol") or row.get("symbol") or "")
+    if owner.startswith("sym:"):
+        owner = ids.parse_sym(owner).qualname
+    if not owner and carrier.symbol:
+        owner = ids.parse_sym(carrier.symbol).qualname
+    scope, _, function = _class_type(owner).rpartition("::")
+    return _short(scope) if _short(scope) in classes else function + "()"
+
+
+class _Reach:
+    """The classes a node's code runs, by package and short class name.
+
+    The node's own classes reach what they inherit and what they hand themselves to, in
+    their package (`bases`, `node_helpers`) and in another one when the helper is spelled
+    with a namespace that package defines (`make_shared<mpc::Controller>(*this)`). A package
+    that holds a `pluginlib::ClassLoader<Base>` reaches every class a plugin manifest
+    registers for that base, because the class it loads is a name only the run knows.
+    """
+
+    def __init__(self, atlas: model.Atlas, found: Sequence[Carrier]) -> None:
+        self.graph: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        self.loads: dict[str, set[tuple[str, str]]] = {}
+        defined: dict[str, set[tuple[str, str]]] = {}
+        for carrier in found:
+            if carrier.file:
+                pkg = ids.parse_file(carrier.file).package
+                for row in carrier.classes:
+                    name = _class_type(str(row.get("name") or ""))
+                    defined.setdefault(_short(name), set()).add((name, pkg))
+        by_base: dict[str, set[tuple[str, str]]] = {}
+        for entity in atlas.by_kind("plugin"):
+            base = ids.parse_plugin(entity.id).base_class
+            for fact in entity.facts:
+                implementation = fact.values.get("type")
+                for source in fact.evidence:
+                    if isinstance(implementation, str) and ids.kind_of(source.file) == "file":
+                        by_base.setdefault(base, set()).add(
+                            (ids.parse_file(source.file).package, _short(implementation))
+                        )
+        for carrier in found:
+            if not carrier.file:
+                continue
+            pkg = ids.parse_file(carrier.file).package
+            for row in carrier.plugin_loaders:
+                spelled = str(row.get("base_class") or "")
+                for base, classes in by_base.items():
+                    if spelled and (base == spelled or base.endswith("::" + spelled)):
+                        self.loads.setdefault(pkg, set()).update(classes)
+            for row in carrier.classes:
+                key = (pkg, _short(_class_type(str(row.get("name") or ""))))
+                for other in row.get("node_handoffs", []):
+                    if str(other).endswith("()"):
+                        self.graph.setdefault(key, set()).add((pkg, _short(str(other))))
+                for other in [
+                    *row.get("bases", []),
+                    *row.get("node_helpers", []),
+                    *(item for item in row.get("node_handoffs", []) if not item.endswith("()")),
+                ]:
+                    spelled = _class_type(str(other))
+                    matches = {
+                        (owner, _short(name))
+                        for name, owner in defined.get(_short(spelled), set())
+                        if spelled and (name == spelled or name.endswith("::" + spelled))
+                    }
+                    local = {item for item in matches if item[0] == pkg}
+                    self.graph.setdefault(key, set()).update(
+                        local or matches or {(pkg, _short(spelled))}
+                    )
+        self.cache: dict[frozenset[tuple[str, str]], frozenset[tuple[str, str]]] = {}
+
+    def of(self, start: set[tuple[str, str]]) -> frozenset[tuple[str, str]]:
+        key = frozenset(start)
+        if key not in self.cache:
+            reached: set[tuple[str, str]] = set()
+            pending = sorted(start)
+            while pending:
+                current = pending.pop()
+                if current in reached:
+                    continue
+                reached.add(current)
+                pending.extend(self.graph.get(current, ()))
+                pending.extend(self.loads.get(current[0], ()))
+            self.cache[key] = frozenset(reached)
+        return self.cache[key]
+
+
+def parameter_libraries(atlas: model.Atlas) -> dict[str, tuple[set[str], list[str]]]:
+    """Source file id to what the `generate_parameter_library` targets its build links
+    declare: the parameter names, and the expressions of the names a mapped group builds at
+    run time. A definition the reader could not load is one expression that could build
+    any name, so the node it serves is never called deaf to a key."""
+    libraries: dict[tuple[str, str], dict[str, Any]] = {}
+    for entity in atlas.by_kind("file"):
+        pkg = ids.parse_file(entity.id).package
+        for fact in entity.facts:
+            if fact.layer != DECLARED:
+                continue
+            for row in fact.values.get("library_targets", []):
+                libraries.setdefault((pkg, str(row.get("target") or "")), row)
+    if not any("definition" in row for row in libraries.values()):
+        return {}
+    targets = [
+        (ids.parse_exe(exe_id).package, row["sources"], row["linked"])
+        for exe_id, row in _build_rows(atlas).items()
+    ]
+    targets.extend(
+        (pkg, row.get("sources", []), row.get("linked_targets", []))
+        for (pkg, _), row in sorted(libraries.items())
+    )
+    out: dict[str, tuple[set[str], list[str]]] = {}
+    for pkg, sources, linked in targets:
+        names: set[str] = set()
+        patterns: set[str] = set()
+        seen: set[tuple[str, str]] = set()
+        pending = [(pkg, str(target)) for target in linked]
+        while pending:
+            key = pending.pop()
+            row = libraries.get(key)
+            if key in seen or row is None:
+                continue
+            seen.add(key)
+            names.update(ids.normalise_param_name(str(name)) for name in row.get("parameters", []))
+            patterns.update(str(item) for item in row.get("parameter_patterns", []))
+            if row.get("parameters_unread"):
+                patterns.add(str(row.get("definition") or ""))
+            pending.extend((pkg, str(target)) for target in row.get("linked_targets", []))
+        if not names and not patterns:
+            continue
+        for source in sources:
+            held = out.setdefault(str(source), (set(), []))
+            held[0].update(names)
+            held[1].extend(sorted(patterns - set(held[1])))
+    return out
+
+
+def parameter_declarations(
+    atlas: model.Atlas,
+) -> tuple[dict[str, list[str]], dict[tuple[str, str], set[str]]]:
+    """The `param_name` blind sites and the declared names `reading` takes.
+
+    A node declares what its bound code declares, what the generated parameter libraries its
+    build links declare, and what the code it reaches declares without the join binding it:
+    a class it inherits or hands itself to, a plugin class its package may load, and a helper
+    whose handle the reader could not trace (`node_handle_untraced`) in its own packages.
+    In the node's own packages only the classes it reaches count; another package it reaches
+    counts whole, less the code that states a node of its own, because a second executable
+    declaring a name says nothing about this node. A name that code builds at run time is a
+    blind spot of the node, keyed by the node id.
+    """
+    found = carriers(atlas)
+    blind = blind_names(atlas, model.Want.PARAM_NAME.value)
+    declared = declared_names(atlas)
+    generated = parameter_libraries(atlas)
+    reach = _Reach(atlas, found)
+    classes: dict[str, set[str]] = {}
+    for carrier in found:
+        if carrier.file:
+            classes.setdefault(ids.parse_file(carrier.file).package, set()).update(
+                _short(_class_type(str(row.get("name") or ""))) for row in carrier.classes
+            )
+    names: dict[tuple[str, str], set[str]] = {}
+    standalone: set[tuple[str, str]] = set()
+    for carrier in found:
+        if not carrier.file:
+            continue
+        pkg = ids.parse_file(carrier.file).package
+        for row in (*carrier.parameters, *carrier.parameter_reads):
+            try:
+                name = ids.normalise_param_name(str(row.get("name") or ""))
+            except ContractError:
+                continue
+            key = (pkg, _row_class(row, carrier, classes.get(pkg, set())))
+            names.setdefault(key, set()).add(name)
+            if carrier.nodes:
+                standalone.add(key)
+    exprs: dict[tuple[str, str], list[str]] = {}
+    untraced: dict[str, set[str]] = {}
+    for entry in atlas.unresolved:
+        if ids.kind_of(entry.owner) != "sym":
+            continue
+        parsed = ids.parse_sym(entry.owner)
+        klass = _row_class(
+            {"owner_symbol": parsed.qualname},
+            Carrier(owner="", file="", symbol=""),
+            classes.get(parsed.package, set()),
+        )
+        if entry.want == model.Want.PARAM_NAME.value:
+            exprs.setdefault((parsed.package, klass), []).append(entry.expr)
+        elif entry.reason == "node_handle_untraced":
+            untraced.setdefault(parsed.package, set()).add(klass)
+    for node in atlas.by_kind(model.NodeKind.NODE.value):
+        for fact in node.facts:
+            if fact.layer != CODED:
+                continue
+            sources = sorted(fact.values.get("coded_sources") or [])
+            start: set[tuple[str, str]] = set()
+            for carrier in found:
+                if carrier.file in sources:
+                    pkg = ids.parse_file(carrier.file).package
+                    # the node's classes, and every class whose code the bound sources hold
+                    start.update(
+                        (pkg, _short(_class_type(str(row.get("class") or ""))))
+                        for row in carrier.nodes
+                        if row.get("class")
+                    )
+                    start.update(
+                        (pkg, _short(_class_type(str(row.get("name") or ""))))
+                        for row in carrier.classes
+                    )
+                    if carrier.symbol:
+                        start.add(
+                            (
+                                pkg,
+                                _row_class(
+                                    {"owner_symbol": carrier.symbol},
+                                    carrier,
+                                    classes.get(pkg, set()),
+                                ),
+                            )
+                        )
+            packages = {ids.parse_file(source).package for source in sources}
+            reached = set(reach.of(start)) | {
+                (pkg, klass) for pkg in packages for klass in untraced.get(pkg, ())
+            }
+            held = declared.setdefault((node.id, REACHED), set())
+            pending: list[str] = []
+            # Another package is reached whole: a plugin builds its own parameter structs
+            # from the node it is handed, which no class edge of this reader states.
+            others = {pkg for pkg, _ in reached} - packages
+            for key in sorted(set(names) | set(exprs)):
+                if key in reached or (key[0] in others and key not in standalone):
+                    held.update(names.get(key, ()))
+                    pending.extend(exprs.get(key, ()))
+            for source in sources:
+                generated_names, patterns = generated.get(source, (set(), []))
+                declared.setdefault((node.id, fact.profile), set()).update(generated_names)
+                pending.extend(patterns)
+            if pending:
+                blind[node.id] = sorted(set(blind.get(node.id, [])) | set(pending))
+    return blind, declared
+
+
 def declared_names(atlas: model.Atlas) -> dict[tuple[str, str], set[str]]:
     """Owner node id and profile to the parameter names its source declares or reads back.
 
@@ -970,25 +1218,13 @@ def declared_names(atlas: model.Atlas) -> dict[tuple[str, str], set[str]]:
             parsed = ids.parse_param(edge.dst)
             for fact in edge.facts:
                 out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
-    bound = {
-        source
-        for node in atlas.by_kind(model.NodeKind.NODE.value)
-        for fact in node.facts
-        if fact.layer == CODED
-        for source in fact.values.get("coded_sources") or []
-    }
-    for carrier in carriers(atlas):
-        if not carrier.file or carrier.file in bound:
-            continue
-        package = ids.build_pkg(ids.parse_file(carrier.file).package)
-        for row in (*carrier.parameters, *carrier.parameter_reads):
-            try:
-                out.setdefault((package, model.ANY_PROFILE), set()).add(
-                    ids.normalise_param_name(str(row.get("name") or ""))
-                )
-            except ContractError:
-                continue
     return out
+
+
+REACHED = "~reached"
+"""The profile slot of `parameter_declarations` holding what a node's code declares through
+code the join did not bind to it, in any profile it runs in. It never answers whether the
+code was read at all."""
 
 
 def declared_in(declared: Mapping[tuple[str, str], set[str]], owner: str, profile: str) -> set[str]:
@@ -1018,8 +1254,9 @@ def reading(
     a class defined in another file, with no declaration bound, read none of them. A node
     built to take undeclared parameters, or one whose value it cannot tell, uses them. A
     declaration whose name is built at run time hides only the keys its literal text allows,
-    so one such line no longer exempts every key of the file. A key the package declares in
-    code the join bound to no node, a helper class handed the node, cannot be called absent.
+    so one such line no longer exempts every key of the file. What the node reaches without
+    the join binding it is in `declared` and `blind` under the node id
+    (`parameter_declarations`).
     """
     parsed = ids.parse_param(node.id)
     owner = atlas.entities.get(parsed.owner)
@@ -1040,10 +1277,13 @@ def reading(
     own = node.fact(CODED, profile)
     if parsed.name in names or (own is not None and own.values.get("declared_in_code")):
         return DECLARED_STATE
-    packages = {ids.build_pkg(ids.parse_file(item).package) for item in sources}
-    if any(parsed.name in declared_in(declared, package, profile) for package in packages):
+    if parsed.name in declared.get((parsed.owner, REACHED), set()):
         return ""
-    if any(could_name(expr, parsed.name) for item in sources for expr in blind.get(item, ())):
+    if any(
+        could_name(expr, parsed.name)
+        for item in sorted(sources | {parsed.owner})
+        for expr in blind.get(item, ())
+    ):
         return UNKNOWN_STATE
     return UNDECLARED_STATE
 
@@ -1086,8 +1326,7 @@ def _ignore_undeclared(builder: model.AtlasBuilder) -> None:
     effective claims the node reads it, and the parameter is `other` with the note saying why.
     """
     atlas = builder.atlas
-    blind = blind_names(atlas, model.Want.PARAM_NAME.value)
-    declared = declared_names(atlas)
+    blind, declared = parameter_declarations(atlas)
     for node in atlas.by_kind(model.NodeKind.PARAM.value):
         if node.state != model.ParamState.EFFECTIVE.value:
             continue

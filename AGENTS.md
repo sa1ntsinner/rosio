@@ -123,6 +123,7 @@ record and is not read.
 | `plugin_parameters` | `{base_class, lookup_name, suffix, type, default, has_default, default_state, reads, owner_symbol}` |
 | `tf_broadcasts` | `{kind, parent, child, parent_state, child_state, broadcaster, condition, guard_parameters, parent_from_parameter, child_from_parameter, owner_symbol, line_hint}` |
 | `tf_lookups` | `{api, target, source, target_state, source_state, target_from_parameter, source_from_parameter, owner_symbol, line_hint}` |
+| `plugin_loaders` | `{base_class}`, a `pluginlib::ClassLoader<Base>` the file holds, with the base class as the source spells it |
 
 * `kind` on an endpoint is one of `publisher`, `subscriber`, `service_server`,
   `service_client`, `action_server`, `action_client`, `timer`.
@@ -579,8 +580,38 @@ with per candidate provenance.
   measured on jazzy with two `/**` keys in one file. The same measurement with two shapes
   under one key reads by flat parameter name: `a: 1` then `a: {b: 2}` starts the node with
   `a.b` alone, and `c: {d: 5}` then `c: 7` starts it with both `c` and `c.d`.
-* A key the node's bound code does not declare is not called undeclared when the package
-  declares it in code the join bound to no node, such as a helper class handed the node.
+* A key the node's bound code does not declare is not called undeclared when code the node
+  reaches without the join binding it declares the key. One rule decides what a node reaches,
+  `join.parameter_declarations`, and nothing else adds names. Inside the node's own packages it
+  is class by class: the classes of the bound sources, what they inherit, what a node class
+  hands itself to (`node_helpers`), and what any reached class builds or calls with the node it
+  holds (`node_handoffs`: `Param(node)`, `declare_config(node)`), plus a helper whose handle
+  the reader could not trace (`node_handle_untraced`). Another package is reached whole, less
+  its code that states a node of its own: the package of a class a node class hands itself to
+  (`make_shared<mpc::Controller>(*this)`, `VehicleInfoUtils(*this)`), and every class a plugin
+  manifest registers for a base class the node's package loads through
+  `pluginlib::ClassLoader<Base>`, because the class it loads is a name only the run knows.
+  Reach is followed through. A second executable of the same package declaring the name says
+  nothing about this node, so `b` declaring `speed` leaves `speed` set for `a` undeclared.
+  Reached declarations count only for whether any code declares the name: they bind no
+  endpoint, no parameter and no read, and they never make a node whose own code states nothing
+  look read. A name such code builds at run time (`ns + ".stop_margin"`) is a blind spot of
+  the node, so a key it could build is `other` and any other key stays `undeclared`.
+* A line a node ignores is still not reported when it is needed: another node of the profile
+  has a candidate for the same name from the same file and locator and declares the name, the
+  `SetParameter` of one group or a `/**` key of a file several nodes are handed. A `/**` key of
+  a file only this node is handed reaches this node alone and is reported like any other line.
+* A free function, a function template or a lambda a variable holds, that declares a
+  parameter under a name it takes as a string argument, is a declare wrapper, and each call
+  declares the name the caller passes. A template in a header is a wrapper for every file of
+  its package. `get_or_declare_parameter<T>(node, name)` is a wrapper by name, because the
+  library that defines it is a dependency the workspace does not hold.
+* A node whose build links a `generate_parameter_library(<target> <definition>)` target
+  declares every parameter the definition yaml states, nested keys folded into dotted names
+  under the namespace key, which names no parameter. A `__map_<param>` group repeats its
+  parameters once per value of `<param>`, so a name under it is a blind spot of the node
+  stating its literal pieces, and a definition the reader cannot load is one that could build
+  any name.
 
 ## 8. Unresolved values
 
@@ -755,7 +786,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.23`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.24`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -896,6 +927,22 @@ What was added, in the order it arrived:
 
 * in `1.23`, `use_global_arguments` on C++ `nodes` and `constructions` record rows, `false`
   for a node built to read no global argument and `unknown` when the value is not a literal.
+
+* in `1.24`, the coded record `plugin_loaders`, and on a `library_targets` row of the CMake
+  file the keys `definition`, `parameters`, `parameter_patterns` and `parameters_unread`,
+  which state a `generate_parameter_library` target: its definition file, the dotted names it
+  declares, the expressions of the names a mapped group builds, and a definition that would
+  not load. Declarations in a member initializer list, through `node->template
+  declare_parameter`, through a declare wrapper in a header of the package or a lambda, and
+  through `get_or_declare_parameter` are read where they were missed, so the parameter
+  records, the `param_name` rate and the parameter states of such stacks moved, and
+  `param.set_undeclared` stopped firing on keys that code declares. The `classes` record row
+  gained `node_handoffs`, the classes a class builds and the free functions (`name()`) it calls
+  with the node it holds. A `+=` on a string extends it rather than replacing it. What a node
+  declares through code it reaches is decided per node and no longer per package, so a second
+  executable of the package no longer silences a key, and a shared line is silent only where
+  another node is handed the same line and declares the name. No id form moved, so no stored
+  id or waiver stopped matching.
 
 One observed key was renamed in `1.17` without a major bump. The process table wrote the
 whole command line of a node under `argv`, the key under which the declared layer states only
@@ -1100,7 +1147,7 @@ there: a load into an existing container beside a new container, under a conditi
 false, minted a second node that published what the first did. No id form moved, so no
 stored id or waiver stopped matching; the endpoints, parameters and rates of such stacks did.
 
-A reader pinned to `1.0` still loads a `1.23` file: `Atlas.from_json` compares the major
+A reader pinned to `1.0` still loads a `1.24` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

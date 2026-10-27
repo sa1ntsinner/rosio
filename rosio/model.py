@@ -35,11 +35,14 @@ from typing import Any
 from rosio import ATLAS_SCHEMA_VERSION, __version__, ids
 from rosio.errors import ContractError
 
-SCHEMA_MINOR = "23"
+SCHEMA_MINOR = "24"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: node and construction record `use_global_arguments`; the package attribute
-`share_build`; the `build.underlay` rule, the package
-attributes `share_read_from` and `install_not_sourced`, the run predicates `underlay:<package>` and
+stored id: node and construction record `use_global_arguments`; the coded record
+`plugin_loaders`, the class row `node_handoffs`, and the `generate_parameter_library`
+keys `definition`, `parameters`, `parameter_patterns` and `parameters_unread` on a
+`library_targets` row; the package attribute `share_build`;
+the `build.underlay` rule, the package attributes `share_read_from` and
+`install_not_sourced`, the run predicates `underlay:<package>` and
 `workspace:install_unnamed`, and the launch exception row `missing`;
 node and construction record `auto_declare`, also on the node's coded fact;
 the `build.unbuilt` rule, the `file_after_build` refusal reason with the file
