@@ -113,6 +113,8 @@ class Wrapper:
     implicit: bool = False
     note: str = ""
     discovered: bool = False
+    parameters: tuple[str, ...] = ()
+    """The parameters the library declares on the node that constructs it."""
     via: tuple[str, ...] = ()
     """Set by `discover` only: a first party class is not committed data, it is a workspace
     reading, and `via` names the committed rows it inherited its endpoints from."""
@@ -339,6 +341,10 @@ TABLE: tuple[Wrapper, ...] = (
         evidence="strings lib/libdiagnostic_updater.so holds the exact literal /diagnostics; "
         "the constructor taking the node interfaces is declared at "
         "include/diagnostic_updater/diagnostic_updater.hpp:385-393",
+        parameters=("diagnostic_updater.period", "diagnostic_updater.use_fqn"),
+        note="On jazzy, strings /opt/ros/jazzy/lib/libdiagnostic_updater.so holds "
+        "diagnostic_updater.period and diagnostic_updater.use_fqn beside the constructor's "
+        "messages, and diagnostic_updater.hpp:367 names the period parameter.",
     ),
     Wrapper(
         symbol="message_filters.Subscriber",
@@ -538,7 +544,9 @@ def lookup(symbol: str, language: str = "") -> Wrapper | None:
 
     A bare class name is accepted only when every row it could mean states the same
     endpoints, because the two language spellings of one wrapper are the same wrapper and
-    two different wrappers must never be guessed apart.
+    two different wrappers must never be guessed apart. A C++ name that nests a row's whole
+    symbol in a namespace of its own (`vendor::wrapper::diagnostic_updater::Updater`)
+    re-exports that row.
     """
     if not symbol:
         return None
@@ -550,7 +558,11 @@ def lookup(symbol: str, language: str = "") -> Wrapper | None:
         row
         for row in rows()
         if (not language or row.language == language)
-        and (canonical(row.symbol) == wanted or canonical(row.symbol).endswith("." + wanted))
+        and (
+            canonical(row.symbol) == wanted
+            or canonical(row.symbol).endswith("." + wanted)
+            or (row.language == "cpp" and wanted.endswith("." + canonical(row.symbol)))
+        )
     ]
     if not found:
         return None
@@ -558,6 +570,12 @@ def lookup(symbol: str, language: str = "") -> Wrapper | None:
     if len(shapes) > 1:
         return None
     return found[0]
+
+
+def parameters_for(symbol: str, language: str = "") -> tuple[str, ...]:
+    """The parameter names one construction declares on its node, empty for an unknown row."""
+    row = lookup(symbol, language)
+    return row.parameters if row is not None else ()
 
 
 def is_known(symbol: str, language: str = "") -> bool:
@@ -773,6 +791,7 @@ __all__ = [
     "libraries",
     "lookup",
     "node_wrapper",
+    "parameters_for",
     "rows",
     "symbols",
 ]

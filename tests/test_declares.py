@@ -6,6 +6,7 @@ from rosio import extract, ids, join, model, schema
 from rosio.collect import cpp_code as cpp
 from rosio.collect import plugins
 from rosio.config import Config, Entrypoint, ProfileSpec, RootSpec
+from rosio.resolve import wrappers
 from rosio.workspace import Workspace
 
 pytestmark = pytest.mark.cpp
@@ -151,6 +152,10 @@ def _undeclared(atlas: model.Atlas) -> set[str]:
         "stop.margin",  # a plugin class of a base the package loads
         "rate",  # generate_parameter_library
         "limits.upper",  # generate_parameter_library, nested
+        "fit.target",  # a member the node initializes with itself, of another package
+        "diagnostic_updater.period",  # a known wrapper re-exported in another namespace
+        "diagnostic_updater.use_fqn",
+        "speed_cap",  # a template method an .ipp file defines
     ],
 )
 def test_a_name_declared_where_the_node_runs_it_is_effective(atlas, name):
@@ -290,3 +295,82 @@ def test_a_class_records_what_it_builds_from_the_node_it_was_handed():
     )
     cpp.analyse([header, source])
     assert header.node_handoffs == {"p::Optimizer": {"Param", "declare_all()"}}
+
+
+def test_a_member_a_node_class_initializes_with_itself_is_its_helper():
+    header = cpp.parse_text(
+        "namespace p { class Host : public rclcpp::Node { fit::Fitter fitter_;"
+        " std::unique_ptr<fit::Other> other_; }; }",
+        pkg="p",
+        relpath="host.hpp",
+    )
+    source = cpp.parse_text(
+        'namespace p { Host::Host() : rclcpp::Node("host"), fitter_(this), other_(nullptr) {} }',
+        pkg="p",
+        relpath="host.cpp",
+    )
+    cpp.analyse([header, source])
+    assert header.class_helpers.get("p::Host") == {"fit::Fitter"}
+    assert header.node_handoffs.get("p::Host") == {"fit::Fitter"}
+
+
+def test_a_known_wrapper_nested_in_another_namespace_is_that_wrapper():
+    row = wrappers.lookup("vendor::wrapper::diagnostic_updater::Updater", "cpp")
+    assert row is not None and row.symbol == "diagnostic_updater::Updater"
+    assert wrappers.parameters_for(row.symbol) == (
+        "diagnostic_updater.period",
+        "diagnostic_updater.use_fqn",
+    )
+    assert wrappers.lookup("my_pkg.diagnostic_updater.Updater", "python") is None
+
+
+def test_a_wrapper_member_a_header_declares_is_constructed_where_the_source_initializes_it():
+    header = cpp.parse_text(
+        "namespace p { class Host : public rclcpp::Node {"
+        " q::diagnostic_updater::Updater diagnostics_; }; }",
+        pkg="p",
+        relpath="include/p/host.hpp",
+    )
+    source = cpp.parse_text(
+        'namespace p { Host::Host() : rclcpp::Node("host"), diagnostics_(this) {} }',
+        pkg="p",
+        relpath="src/host.cpp",
+    )
+    assert source.endpoints == []
+    shared = cpp.share_wrappers([header, source], cpp.load_parser())
+    assert [(item.name.value, item.via_known_wrapper) for item in shared[1].endpoints] == [
+        ("/diagnostics", "diagnostic_updater::Updater")
+    ]
+
+
+def test_an_ipp_file_is_a_cpp_source():
+    assert ".ipp" in cpp.SUFFIXES
+
+
+@pytest.mark.parametrize("head", ["class", "struct"])
+def test_an_export_macro_in_a_class_head_is_not_the_class_name(head):
+    unit = cpp.parse_text(
+        f"namespace a {{ {head} FOLLOWER_PUBLIC Controller : public rclcpp::Node"
+        ' { Controller() : rclcpp::Node("controller") {} }; }'
+    )
+    assert unit.parsed
+    assert unit.class_names == ["a::Controller"]
+    assert {item.qualname for item in unit.classes} == {"a::Controller"}
+
+
+def test_an_all_caps_class_name_is_kept():
+    unit = cpp.parse_text("class ABC final : public rclcpp::Node {}; struct XYZ : Base {};")
+    assert unit.class_names == ["ABC", "XYZ"]
+
+
+def test_an_unqualified_class_is_looked_up_in_the_enclosing_namespaces_first():
+    def carrier(file_id: str, *rows: dict) -> join.Carrier:
+        return join.Carrier(owner=file_id, file=file_id, symbol="", classes=rows)
+
+    found = [
+        carrier("file:a|n.hpp", {"name": "ns::Node", "node_handoffs": ["Data"]}),
+        carrier("file:b|d.hpp", {"name": "ns::Data"}),
+        carrier("file:c|d.hpp", {"name": "other::Data"}),
+    ]
+    reach = join._Reach(model.Atlas(), found)
+    assert reach.of({("a", "Node")}) == {("a", "Node"), ("b", "Data")}

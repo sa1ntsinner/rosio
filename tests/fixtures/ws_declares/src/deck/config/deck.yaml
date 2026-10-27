@@ -18,4 +18,10 @@ deck:
       upper: 2.0
     wheel:
       p: 3.0
+    fit:
+      target: pcd
+    diagnostic_updater:
+      period: 2.0
+      use_fqn: true
+    speed_cap: 3.0
     unused_key: 1

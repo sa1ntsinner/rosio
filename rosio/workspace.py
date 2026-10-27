@@ -105,6 +105,7 @@ CONTENT_SUFFIXES = frozenset(
         ".h",
         ".hpp",
         ".ini",
+        ".ipp",
         ".json",
         ".launch",
         ".md",

@@ -584,9 +584,14 @@ with per candidate provenance.
   reaches without the join binding it declares the key. One rule decides what a node reaches,
   `join.parameter_declarations`, and nothing else adds names. Inside the node's own packages it
   is class by class: the classes of the bound sources, what they inherit, what a node class
-  hands itself to (`node_helpers`), and what any reached class builds or calls with the node it
-  holds (`node_handoffs`: `Param(node)`, `declare_config(node)`), plus a helper whose handle
-  the reader could not trace (`node_handle_untraced`). Another package is reached whole, less
+  hands itself to (`node_helpers`, which include a member it initializes with itself,
+  `fitter_(this)`), and what any reached class builds or calls with the node it holds (`node_handoffs`:
+  `Param(node)`, `declare_config(node)`), plus a helper whose handle the reader could not
+  trace (`node_handle_untraced`). An unqualified class name is looked up in the enclosing
+  namespaces of the class that spells it first, as C++ does. A known wrapper a reached class
+  constructs declares what `rosio/resolve/wrappers.py` states for it:
+  `diagnostic_updater::Updater` declares `diagnostic_updater.period` and
+  `diagnostic_updater.use_fqn`. Another package is reached whole, less
   its code that states a node of its own: the package of a class a node class hands itself to
   (`make_shared<mpc::Controller>(*this)`, `VehicleInfoUtils(*this)`), and every class a plugin
   manifest registers for a base class the node's package loads through
@@ -1176,6 +1181,21 @@ to vanish. A node whose every launch site is off in a profile binds no code
 there: a load into an existing container beside a new container, under a condition read
 false, minted a second node that published what the first did. No id form moved, so no
 stored id or waiver stopped matching; the endpoints, parameters and rates of such stacks did.
+
+Inside `1.24` the C++ reader closed four gaps with no new key. A member a node class
+initializes with itself in a constructor's initializer list (`fitter_(this)`) is a class it
+hands itself to, typed from the field its header declares. A known wrapper member a header
+declares and a source initializes (`diagnostics_(this)`) is a construction, so its endpoints
+reach the node, and a C++ name that nests a wrapper's symbol in a namespace of its own
+(`vendor::wrapper::diagnostic_updater::Updater`) is that wrapper. The wrapper table states the
+parameters a library declares, which count for `param.set_undeclared` and are no atlas key. An
+`.ipp` file is read as a C++ source of its package wherever a header is, and its content enters
+the root hash, which moved the run ids of a tree that holds one. An all caps identifier between
+`class` or `struct` and the class name (`class FOO_PUBLIC Controller`) is an export macro and
+no part of the name, and a function name a formatter wraps after `::` is one name, which moved
+the `sym` ids of such functions. An unqualified class a node hands itself to is looked up in
+the enclosing namespaces first, so a name several packages define no longer reaches all of
+them. No release had shipped, so no stored id or waiver existed.
 
 Inside `1.25` several ids and texts moved besides the new keys. A launch file of a package
 the roots hold is read from the roots, its includes, parameters files and python modules with

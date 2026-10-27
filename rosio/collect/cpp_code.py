@@ -49,7 +49,7 @@ from rosio.resolve import wrappers
 LAYER = model.Layer.CODED.value
 NAME = "cpp_code"
 
-SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".hpp", ".hh", ".hxx", ".h")
+SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".hpp", ".hh", ".hxx", ".h", ".ipp")
 
 TREE_SITTER_PIN = ("tree-sitter>=0.23,<0.27", "tree-sitter-cpp>=0.23,<0.24")
 """The pair this collector is written against. The python binding changed shape more than
@@ -507,6 +507,10 @@ class Unit:
     registrations: list[Registration] = field(default_factory=list)
     wrappers: dict[str, tuple[int, int]] = field(default_factory=dict)
     shared_wrappers: dict[str, tuple[int, int]] = field(default_factory=dict)
+    member_wrappers: dict[tuple[str, str], str] = field(default_factory=dict)
+    shared_members: dict[tuple[str, str], str] = field(default_factory=dict)
+    """Known wrapper members another file of the package declares, by short class name and
+    member, so `diagnostics_(this)` in a source constructs what its header declares."""
     plugin_loaders: list[str] = field(default_factory=list)
     lambda_wrappers: set[str] = field(default_factory=set)
     """Declare wrappers another file of the package defines, a template in a header."""
@@ -521,6 +525,12 @@ class Unit:
     node_handoffs: dict[str, set[str]] = field(default_factory=dict)
     """Class to the classes it constructs, and the free functions (`name()`) it calls,
     handing them a node: its own `this` or a node handle it was given."""
+    field_types: dict[tuple[str, str], str] = field(default_factory=dict)
+    member_uses: list[tuple[str, str, bool, tuple[tuple[str, str], ...] | None]] = field(
+        default_factory=list
+    )
+    """`fitter_(this)` in a member initializer list: the class, the member, whether a node
+    was handed over and the handles, resolved once the field's declared type is known."""
     class_node_plugins: dict[str, set[str]] = field(default_factory=dict)
     helper_types: dict[tuple[str, str], set[str]] = field(default_factory=dict)
     helper_plugins: dict[tuple[str, str], set[str]] = field(default_factory=dict)
@@ -584,6 +594,9 @@ def _text(node: Any, src: bytes) -> str:
 
 def _flat(node: Any, src: bytes) -> str:
     return " ".join(_text(node, src).split())
+
+
+_SCOPE_SPACE = re.compile(r"\s*::\s*")
 
 
 def _line(node: Any) -> int:
@@ -1194,6 +1207,8 @@ class _Reader:
         # `Subscriber<CameraInfo> sub_depth_info_, sub_rgb_info_;` declares two members.
         for declarator in node.children_by_field_name("declarator") if self.klass else ():
             member = _text(declarator, self.src).strip("&* ")
+            if declarator.type == "field_identifier" and type_text and "<" not in type_text:
+                self.unit.field_types[(self.klass, member)] = type_text
             if default is not None:
                 self.unit.members[(self.klass, member)] = replace(
                     self.resolve(default), origin="constant", source_name=member
@@ -1201,6 +1216,7 @@ class _Reader:
             wrapper = _wrapper_of(type_text)
             if wrapper:
                 self.member_types[member] = wrapper
+                self.unit.member_wrappers[(self.klass, member)] = wrapper
                 head = _template_head(type_text, wrapper)
                 inner = re.search(r"<(.+)>", type_text)
                 if head or inner is not None:
@@ -1246,9 +1262,14 @@ class _Reader:
         inner = _child(target, "declarator")
         if inner is None:
             return "", ""
-        text = _text(inner, self.src)
+        # `Foo<T>::` and `Foo` on two lines are one name however a formatter wraps them
+        text = _SCOPE_SPACE.sub("::", _flat(inner, self.src))
         if inner.type == "qualified_identifier":
-            scope = _text(_child(inner, "scope"), self.src) if _child(inner, "scope") else ""
+            scope = (
+                _SCOPE_SPACE.sub("::", _flat(_child(inner, "scope"), self.src))
+                if _child(inner, "scope")
+                else ""
+            )
             owner = "::".join([*self.namespaces, scope]) if scope else ""
             return "::".join([*self.namespaces, text]), owner
         prefix = self.classes or self.namespaces
@@ -1320,6 +1341,16 @@ class _Reader:
                     if value.status == LITERAL:
                         self.bind(base, value)
                 self._member_wrapper(base, named[1])
+                if self.klass:
+                    arguments = [item for item in values if item.type != "comment"]
+                    self.unit.member_uses.append(
+                        (
+                            self.klass,
+                            base,
+                            any(_is_node_argument(item, self.src) for item in arguments),
+                            self._handles(arguments),
+                        )
+                    )
                 # `encoding_(declare_parameter<std::string>("encoding"))`
                 self.walk(named[1])
                 continue
@@ -1350,7 +1381,9 @@ class _Reader:
             )
 
     def _member_wrapper(self, member: str, arguments: Any) -> None:
-        wrapper = self.member_types.get(member)
+        wrapper = self.member_types.get(member) or self.unit.shared_members.get(
+            (self.klass.rpartition("::")[2], member)
+        )
         if not wrapper:
             return
         self._wrapper_endpoints(
@@ -1695,16 +1728,9 @@ class _Reader:
                 self.unit.node_handoffs.setdefault(self.klass, set()).add(types[0])
             elif receiver is None and name.isidentifier():
                 self.unit.node_handoffs.setdefault(self.klass, set()).add(name + "()")
-        texts = [_flat(argument, self.src) for argument in arguments]
-        handles: tuple[tuple[str, str], ...] = ()
-        if not any(text in _SELF_HANDLES for text in texts):
-            handles = tuple(
-                self._helper_key(text.removeprefix("this->"))
-                for text in texts
-                if text.removeprefix("this->").isidentifier()
-            )
-            if not handles:
-                return
+        handles = self._handles(arguments)
+        if handles is None:
+            return
         if name in ("make_unique", "make_shared", "new") and types:
             self.unit.handle_uses.append((self.klass, handles, ("type", types[0])))
         elif receiver is not None:
@@ -1713,6 +1739,14 @@ class _Reader:
                 self.unit.handle_uses.append(
                     (self.klass, handles, ("receiver", *self._helper_key(target)))
                 )
+
+    def _handles(self, arguments: Sequence[Any]) -> tuple[tuple[str, str], ...] | None:
+        """No handle for `this`, the variables that may hold the node, or None for neither."""
+        texts = [_flat(argument, self.src).removeprefix("this->") for argument in arguments]
+        if any(text in _SELF_HANDLES for text in texts):
+            return ()
+        handles = tuple(self._helper_key(text) for text in texts if text.isidentifier())
+        return handles or None
 
     def _endpoint(self, name: str, node: Any, template: Any, arguments: Sequence[Any]) -> bool:
         function = _child(node, "function")
@@ -2815,6 +2849,14 @@ def _declares_with(body: Any, src: bytes, parameter: str) -> bool:
     return False
 
 
+_EXPORT_MACRO = re.compile(
+    rb"(\b(?:class|struct)[ \t]+)([A-Z][A-Z0-9_]*)"
+    rb"(?=[ \t]+(?!final\b)[A-Za-z_]\w*\s*(?::(?!:)|\{|final\b))"
+)
+"""`class FOO_PUBLIC Controller : public rclcpp::Node`: the grammar takes the export macro for
+the class name, so it is blanked to spaces of its own length, which keeps every offset."""
+
+
 def parse_text(
     text: str,
     *,
@@ -2823,11 +2865,20 @@ def parse_text(
     relpath: str = "",
     parser: Any = None,
     shared_wrappers: dict[str, tuple[int, int]] | None = None,
+    shared_members: dict[tuple[str, str], str] | None = None,
 ) -> Unit:
     """One translation unit. A file the grammar refuses is marked, never dropped."""
     engine = parser if parser is not None else load_parser()
-    unit = Unit(path=path, pkg=pkg, relpath=relpath, shared_wrappers=dict(shared_wrappers or {}))
-    src = text.encode("utf-8", "replace")
+    unit = Unit(
+        path=path,
+        pkg=pkg,
+        relpath=relpath,
+        shared_wrappers=dict(shared_wrappers or {}),
+        shared_members=dict(shared_members or {}),
+    )
+    src = _EXPORT_MACRO.sub(
+        lambda match: match.group(1) + b" " * len(match.group(2)), text.encode("utf-8", "replace")
+    )
     unit.tree = engine.parse(src)
     root = unit.tree.root_node
     unit.source = src
@@ -3218,12 +3269,19 @@ def _called(name: str) -> bytes:
 def share_wrappers(units: list[Unit], parser: Any) -> list[Unit]:
     """Read again each file that calls a declare wrapper another file of its package
     defines, `utils::declareParameter<double>(parameters, "v_ratio")` against a template in
-    a header, so the call states the name it declares. A lambda stays in its own file."""
+    a header, so the call states the name it declares. A lambda stays in its own file. A file
+    that initializes a member another file declares as a known wrapper (`diagnostics_(this)`
+    against `diagnostic_updater::Updater diagnostics_;`) is read again the same way."""
     shared: dict[str, dict[str, tuple[int, int]]] = {}
+    held: dict[str, dict[tuple[str, str], set[str]]] = {}
     for unit in sorted(units, key=lambda item: item.relpath):
         if unit.syntax is not None and unit.wrappers:
             for symbol, shape in _wrappers(unit.syntax, unit.source, lambdas=False).items():
                 shared.setdefault(unit.pkg, {}).setdefault(symbol, shape)
+        for (klass, member), wrapper in unit.member_wrappers.items():
+            held.setdefault(unit.pkg, {}).setdefault(
+                (klass.rpartition("::")[2], member), set()
+            ).add(wrapper)
     out: list[Unit] = []
     for unit in units:
         extra = {
@@ -3232,7 +3290,15 @@ def share_wrappers(units: list[Unit], parser: Any) -> list[Unit]:
             if symbol not in unit.wrappers
             and re.search(_called(symbol.rpartition("::")[2]), unit.source)
         }
-        if not extra:
+        local = {(klass.rpartition("::")[2], member) for klass, member in unit.member_wrappers}
+        members = {
+            key: next(iter(found))
+            for key, found in held.get(unit.pkg, {}).items()
+            if len(found) == 1
+            and key not in local
+            and re.search(rf"\b{re.escape(key[1])}\s*[({{]".encode(), unit.source)
+        }
+        if not extra and not members:
             out.append(unit)
             continue
         out.append(
@@ -3243,6 +3309,7 @@ def share_wrappers(units: list[Unit], parser: Any) -> list[Unit]:
                 relpath=unit.relpath,
                 parser=parser,
                 shared_wrappers=extra,
+                shared_members=members,
             )
         )
     return out
@@ -3608,6 +3675,7 @@ def _helper_arguments(units: Sequence[Unit]) -> None:
                 relpath=unit.relpath,
                 wrappers=unit.wrappers.copy(),
                 shared_wrappers=unit.shared_wrappers,
+                shared_members=unit.shared_members,
                 lambda_wrappers=unit.lambda_wrappers,
             )
             reader = _Reader(
@@ -3634,6 +3702,20 @@ def _helper_arguments(units: Sequence[Unit]) -> None:
 
 
 def _finish_node_helpers(units: Sequence[Unit]) -> None:
+    fields: dict[tuple[str, str, str], set[str]] = {}
+    for unit in units:
+        for (klass, member), spelled in unit.field_types.items():
+            fields.setdefault((unit.pkg, klass.rpartition("::")[2], member), set()).add(spelled)
+    for unit in units:
+        for klass, member, handed, held in unit.member_uses:
+            found = fields.get((unit.pkg, klass.rpartition("::")[2], member), set())
+            if len(found) != 1:
+                continue
+            spelled = next(iter(found))
+            if handed:
+                unit.node_handoffs.setdefault(klass, set()).add(spelled)
+            if held is not None:
+                unit.handle_uses.append((klass, held, ("type", spelled)))
     types: dict[tuple[str, str, str], set[str]] = {}
     plugins: dict[tuple[str, str, str], set[str]] = {}
     helpers: dict[tuple[str, str], set[str]] = {}
@@ -3969,6 +4051,7 @@ def _construction_instances(
             relpath=definition.relpath,
             wrappers=definition.wrappers.copy(),
             shared_wrappers=definition.shared_wrappers,
+            shared_members=definition.shared_members,
             lambda_wrappers=definition.lambda_wrappers,
         )
         reader = _Reader(definition.source, unit, dict(_DEFINE.findall(definition.source.decode())))
@@ -4003,6 +4086,7 @@ def _construction_instances(
                     members=unit.members.copy(),
                     wrappers=source.wrappers.copy(),
                     shared_wrappers=source.shared_wrappers,
+                    shared_members=source.shared_members,
                     lambda_wrappers=source.lambda_wrappers,
                 )
                 _Reader(source.source, scoped, dict(_DEFINE.findall(source.source.decode()))).walk(
@@ -4122,7 +4206,7 @@ def _header_constructions(
             if (
                 header is main
                 or header.relpath not in paths
-                or not header.relpath.endswith((".h", ".hpp", ".hh", ".hxx"))
+                or not header.relpath.endswith((".h", ".hpp", ".hh", ".hxx", ".ipp"))
             ):
                 continue
             # The constructor is defined in the header or in exactly one other file.

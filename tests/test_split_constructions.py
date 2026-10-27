@@ -200,7 +200,9 @@ PUBLIC_SOURCES = {
         # /accel/filtered topic are not bound.
         # Each of the three filters declares its two covariances through that lambda.
         "entities": 1646,
-        "edges": 2296,
+        # navsat_transform builds the static broadcaster its header declares in its
+        # initializer list, so both of its launch names publish /tf_static.
+        "edges": 2298,
     },
 }
 

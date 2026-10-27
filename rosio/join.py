@@ -616,7 +616,7 @@ def _constructed_carriers(
 
 
 def _header(file_id: str) -> bool:
-    return file_id.endswith((".h", ".hpp", ".hh", ".hxx"))
+    return file_id.endswith((".h", ".hpp", ".hh", ".hxx", ".ipp"))
 
 
 def _methods_of(table: dict[str, list[Carrier]], name: str, classes: set[str]) -> list[Carrier]:
@@ -1006,7 +1006,9 @@ class _Reach:
                     if spelled and (base == spelled or base.endswith("::" + spelled)):
                         self.loads.setdefault(pkg, set()).update(classes)
             for row in carrier.classes:
-                key = (pkg, _short(_class_type(str(row.get("name") or ""))))
+                full = _class_type(str(row.get("name") or ""))
+                key = (pkg, _short(full))
+                namespace = full.rpartition("::")[0]
                 for other in row.get("node_handoffs", []):
                     if str(other).endswith("()"):
                         self.graph.setdefault(key, set()).add((pkg, _short(str(other))))
@@ -1016,11 +1018,18 @@ class _Reach:
                     *(item for item in row.get("node_handoffs", []) if not item.endswith("()")),
                 ]:
                     spelled = _class_type(str(other))
-                    matches = {
-                        (owner, _short(name))
+                    named = {
+                        (name, owner)
                         for name, owner in defined.get(_short(spelled), set())
                         if spelled and (name == spelled or name.endswith("::" + spelled))
                     }
+                    # C++ looks an unqualified name up in the enclosing namespaces first
+                    enclosing = {
+                        (name, owner)
+                        for name, owner in named
+                        if _encloses(name[: len(name) - len(spelled)].rstrip(":"), namespace)
+                    }
+                    matches = {(owner, _short(name)) for name, owner in enclosing or named}
                     local = {item for item in matches if item[0] == pkg}
                     self.graph.setdefault(key, set()).update(
                         local or matches or {(pkg, _short(spelled))}
@@ -1041,6 +1050,10 @@ class _Reach:
                 pending.extend(self.loads.get(current[0], ()))
             self.cache[key] = frozenset(reached)
         return self.cache[key]
+
+
+def _encloses(outer: str, namespace: str) -> bool:
+    return not outer or namespace == outer or namespace.startswith(outer + "::")
 
 
 def parameter_libraries(atlas: model.Atlas) -> dict[str, tuple[set[str], list[str]]]:
@@ -1098,9 +1111,11 @@ def parameter_declarations(
     """The `param_name` blind sites and the declared names `reading` takes.
 
     A node declares what its bound code declares, what the generated parameter libraries its
-    build links declare, and what the code it reaches declares without the join binding it:
-    a class it inherits or hands itself to, a plugin class its package may load, and a helper
-    whose handle the reader could not trace (`node_handle_untraced`) in its own packages.
+    build links declare, what a known wrapper its code constructs declares
+    (`wrappers.parameters_for`), and what the code it reaches declares without the join
+    binding it: a class it inherits or hands itself to, a plugin class its package may load,
+    and a helper whose handle the reader could not trace (`node_handle_untraced`) in its own
+    packages.
     In the node's own packages only the classes it reaches count; another package it reaches
     counts whole, less the code that states a node of its own, because a second executable
     declaring a name says nothing about this node. A name that code builds at run time is a
@@ -1132,6 +1147,14 @@ def parameter_declarations(
             names.setdefault(key, set()).add(name)
             if carrier.nodes:
                 standalone.add(key)
+        # a library a class constructs declares its parameters on the node it was handed
+        for row in carrier.endpoints:
+            declared_by = wrappers.parameters_for(_wrapper_of(row))
+            if declared_by:
+                key = (pkg, _row_class(row, carrier, classes.get(pkg, set())))
+                names.setdefault(key, set()).update(declared_by)
+                if carrier.nodes:
+                    standalone.add(key)
     exprs: dict[tuple[str, str], list[str]] = {}
     untraced: dict[str, set[str]] = {}
     for entry in atlas.unresolved:

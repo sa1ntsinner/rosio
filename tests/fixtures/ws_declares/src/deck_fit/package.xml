@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>deck_fit</name>
+  <version>0.0.1</version>
+  <description>A class a node of another package initializes with itself as a member.</description>
+  <maintainer email="maintainer@example.com">Maintainer</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+</package>
