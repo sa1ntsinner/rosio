@@ -1644,3 +1644,14 @@ def test_the_stdio_server_keeps_refused_calls_out_of_its_log(atlas_file, monkeyp
     logging.getLogger("mcp").setLevel(logging.NOTSET)
     server.run(server.Options(atlas=str(atlas_file)))
     assert logging.getLogger("mcp").level == logging.WARNING
+
+
+def test_a_graph_leaves_out_a_channel_nothing_touches():
+    """An atlas with no node listed /tf and /tf_static, each with no publisher and no
+    subscriber, which is no part of who talks to what."""
+    atlas = _no_endpoints()
+    for name in ("/tf", "/tf_static"):
+        atlas.entities[ids.build_topic(name)] = model.Node(id=ids.build_topic(name), kind="topic")
+    lines = tools.graph(atlas).splitlines()
+    assert not any(line.startswith("/tf") for line in lines)
+    assert "0 topic" in lines[0] or "0 topics" in lines[0]

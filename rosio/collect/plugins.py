@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -88,6 +88,13 @@ _TARGET_COMMANDS = frozenset(
     }
 )
 """Commands whose first argument is a build target name."""
+
+AMENT_AUTO = {
+    "ament_auto_add_executable": "add_executable",
+    "ament_auto_add_library": "add_library",
+}
+"""ament_cmake_auto spellings of the two target commands, which take the same leading name
+and list their sources the same way."""
 
 _COMMAND = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _VARIABLE = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
@@ -269,6 +276,7 @@ class Target:
     linked_targets: tuple[str, ...] = ()
     installed: bool = False
     include_dirs: tuple[str, ...] = ()
+    output_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -344,7 +352,13 @@ def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
         return out
 
     for command in _expand_functions(commands(text)):
+        auto = command.name in AMENT_AUTO
+        if auto:
+            command = replace(command, name=AMENT_AUTO[command.name])
         args = expand(command.args)
+        if auto and args and usable_target(args[0]):
+            # ament_auto_package installs every target the auto commands add
+            installed.add(args[0])
         if command.name in {"include_directories", "target_include_directories"}:
             stated_dirs: list[str] = []
             interface = False
@@ -473,6 +487,9 @@ def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
                     break
                 if usable_target(item):
                     installed.add(item)
+        elif command.name == "set_target_properties" and args and "OUTPUT_NAME" in args:
+            # image_rotate builds `image_rotate_bin` and installs it as `image_rotate`
+            raw_targets.setdefault(args[0], {})["output_name"] = _keyword_value(args, "OUTPUT_NAME")
     targets = {
         name: Target(
             name=name,
@@ -483,6 +500,7 @@ def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
             linked_targets=tuple(dict.fromkeys(row.get("linked_targets", ()))),
             installed=name in installed,
             include_dirs=tuple(dict.fromkeys(row.get("include_dirs", ()))),
+            output_name=str(row.get("output_name") or ""),
         )
         for name, row in sorted(raw_targets.items())
         if "kind" in row
@@ -817,7 +835,7 @@ def _executables(build: PackageBuild) -> list[Executable]:
         out.append(
             Executable(
                 pkg=build.pkg,
-                name=name,
+                name=target.output_name or name,
                 mechanism=MECHANISM_ADD_EXECUTABLE,
                 declared_in=build.cmake_path,
                 sources=tuple(sources),
@@ -839,6 +857,17 @@ def _executables(build: PackageBuild) -> list[Executable]:
             [str(Path(build.base) / item) for item in target.sources] if target is not None else []
         )
         symbol_file = next((path for path in sources if _defines_component(path, component)), "")
+        if not symbol_file:
+            # The target's sources sit behind a variable or a DIRECTORY glob this reader does
+            # not expand, so the package's own sources are asked for the registration.
+            symbol_file = next(
+                (
+                    str(path)
+                    for path in sorted(Path(build.base).rglob("*.cpp"))
+                    if _defines_component(str(path), component)
+                ),
+                "",
+            )
         out.append(
             Executable(
                 pkg=build.pkg,

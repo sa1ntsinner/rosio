@@ -33,7 +33,7 @@ import os
 import re
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -1704,7 +1704,11 @@ def _emit_refusals(ctx: CollectContext, refusals: list[_Refusal]) -> None:
                 discriminator="",
                 profiles=sorted({row.profile for row in rows}),
                 layers=[LAYER],
-                where=[row.source for row in rows],
+                # the phase is in the detail, and as a locator it read as a word after the path
+                where=sorted(
+                    {replace(row.source, locator="") for row in rows},
+                    key=model.Source.sort_key,
+                ),
             )
         )
 

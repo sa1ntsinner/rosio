@@ -1019,6 +1019,15 @@ def cmd_init(args: argparse.Namespace) -> int:
         f"{PROG} init: wrote {target} with {plural(len(cfg.roots), 'root')} and "
         f"{plural(len(cfg.profiles), 'profile')}. Edit the profiles, then run: {command}"
     )
+    if len(cfg.profiles) > scaffold.MANY_PROFILES and not packages:
+        top = scaffold.top_level(cfg)
+        print(
+            f"{PROG} init: that is a profile per launch file. Keep the ones a robot starts "
+            f"with, or write one package's with --package NAME. {plural(len(top), 'file')} "
+            "no other launch file includes: "
+            + ", ".join(top[:8])
+            + (", ..." if len(top) > 8 else "")
+        )
     return EXIT_OK
 
 
@@ -1320,6 +1329,7 @@ def _problem_lines(problems: list, atlas=None) -> list[tuple[str, int]]:
     gives an unnamed function or the token for a process output is no name to a reader."""
     import re
 
+    from rosio import here
     from rosio.query import readable
 
     counted: dict[str, int] = {}
@@ -1336,7 +1346,7 @@ def _problem_lines(problems: list, atlas=None) -> list[tuple[str, int]]:
         else:
             text = f"{where} {row.get('exc_type', '')}: {row.get('message', '')}".strip()
         text = re.sub(OPAQUE, "an OpaqueFunction", text)
-        text = readable(text.replace("@output", "<its output file>"), atlas)
+        text = here(readable(text.replace("@output", "<its output file>"), atlas))
         counted[text] = counted.get(text, 0) + 1
     return list(counted.items())
 

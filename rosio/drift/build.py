@@ -24,7 +24,7 @@ so that the collector and this rule can never word one case two ways.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from rosio import ids, model
@@ -270,7 +270,18 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
             else None
         )
         argument = _REQUIRED_ARGUMENT.search(first.message)
-        if argument and slugs:
+        tag = _UNKNOWN_TAG.search(first.message)
+        if tag and not sandboxed:
+            fix = (
+                f"install the package whose launch frontend extension defines <{tag.group(1)}> "
+                "where the walk runs, or write the tag as a node the stock frontend knows"
+            )
+            say = (
+                f"{first.label} uses the launch tag <{tag.group(1)}>, which no installed launch "
+                "frontend extension defines, so the nodes it starts are missing from this "
+                f"atlas: {fix}."
+            )
+        elif argument and slugs:
             name = argument.group(1)
             fix = (
                 f"state {name} under args of the entry point of profile {slugs} in rosio.yaml "
@@ -328,6 +339,7 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
 
 
 _REQUIRED_ARGUMENT = re.compile(r"required launch argument '([^']+)' was not provided")
+_UNKNOWN_TAG = re.compile(r"Unrecognized entity of the type: ([\w:.-]+)")
 
 
 def _package_fix(package: str, distro: str) -> str:
@@ -387,7 +399,8 @@ def _raised_say(label: str, exc_type: str, phase: str, message: str, kept: str =
 
 
 def _where(row: _Row) -> Source:
-    return Source(file=_file_for(row.subject), locator=row.phase, root=model.Root.SRC.value)
+    # The phase is in the detail. As a locator it printed as a word after the path.
+    return Source(file=_file_for(row.subject), root=model.Root.SRC.value)
 
 
 # ---------------------------------------------------------------------------
@@ -771,8 +784,9 @@ def _build_fix(atlas: Atlas, package: str = "") -> str:
         )
     target = f" --packages-up-to {package}" if package else ""
     return (
-        f"build the workspace (colcon build{target}) and add its install tree as a root in "
-        "rosio.yaml, then extract again"
+        f"build the workspace (colcon build{target}), source its install tree and extract "
+        "again: rosio reads the install tree beside src by default, and a rosio.yaml that "
+        "lists roots has to list it too"
     )
 
 
@@ -909,6 +923,16 @@ def resolution_below_budget(
     if len(counts) > 3:
         worst += f" and {len(counts) - 3} more profiles"
     held = f"; most blind spots in {worst}" if counts else ""
+    unreached = sum(
+        1
+        for entry in atlas.unresolved
+        if not set(getattr(atlas.entities.get(entry.owner), "profiles", ())) - {model.ANY_PROFILE}
+    )
+    if unreached:
+        held += (
+            f"; {unreached} of {len(atlas.unresolved)} sit in code no profile starts, "
+            "which no profile change lifts"
+        )
     return [
         Finding(
             rule="resolution.below_budget",
@@ -1153,19 +1177,31 @@ def extract_input_refused(atlas: Atlas) -> list[Finding]:
     reach it: only a collector that refused an input writes the attribute this reads.
     """
     findings: list[Finding] = []
+    expanded = {
+        str(row.get("file") or "")
+        for site in atlas.by_kind(model.NodeKind.LAUNCHENT.value)
+        for fact in site.facts
+        for row in fact.values.get("file_reads") or []
+        if row.get("role") == "robot_model" and row.get("xacro_args")
+    }
     for node in sorted(atlas.entities.values(), key=lambda item: item.id):
         because = str(node.attrs.get(REFUSED_KEY) or "")
         if not because or because in (params_collector.NOT_INSTALLED, params_collector.BUILT_ONLY):
+            continue
+        if because in XACRO_DEFAULTS and node.id in expanded:
+            # The profile runs the model with the arguments its launch line passes, and that
+            # expansion is what the atlas states. The defaults alone are nobody's model.
             continue
         label = _refused_label(node)
         detail = str(node.attrs.get("refused_detail") or "")
         cost = REFUSAL_COSTS.get(because, UNKNOWN_COST)
         where = _refused_where(atlas, node)
+        readers = _refused_readers(atlas, node)
         line = where[0].line_hint if where else None
         said = detail.partition("is not readable as yaml: ")[2]
         title = f"{label} was refused: {because}"
         say = f"{label} was refused with {because}, so this atlas does not hold {cost}."
-        fix = _refused_fix(node, because, label)
+        fix = _refused_fix(node, because, label, detail, readers)
         if said:
             title = f"{label}:{line} is not valid yaml" if line else f"{label} is not valid yaml"
             say = f"{label} is not valid yaml, {said}, so this atlas does not hold {cost}."
@@ -1178,21 +1214,48 @@ def extract_input_refused(atlas: Atlas) -> list[Finding]:
                 subject=node.id,
                 title=title,
                 detail=(
-                    f"The collector that reads {label} recorded {because}"
-                    + (f", {_clip(detail)}" if detail else "")
+                    f"The collector that reads {label} could not read it ({because})"
+                    + (f": {_clip(detail)}" if detail else "")
                     + f". {cost[0].upper()}{cost[1:]} never reached this atlas."
                 ),
                 fix=fix,
                 say=say,
                 layers=sorted(node.layers),
                 profiles=sorted(node.profiles) or _reading_profiles(atlas, node.id),
-                where=where,
+                where=[*where, *readers],
             )
         )
     return findings
 
 
-def _refused_fix(node: model.Node, because: str, label: str) -> str:
+XACRO_DEFAULTS = frozenset({"xacro_failed", "xacro_argument_missing"})
+"""Refusals of a model expanded with its own defaults, which a launch line passing arguments
+makes moot."""
+
+_MISSING_PACKAGE = re.compile(r"package '([^']+)' (?:is )?not found")
+
+
+def _refused_readers(atlas: Atlas, node: model.Node) -> list[Source]:
+    """The launch lines that named a refused file, from the blind spot the refusal left."""
+    return sorted(
+        {
+            row
+            for entry in atlas.unresolved
+            if entry.owner == node.id
+            for row in entry.evidence
+            if row.file != node.id
+        },
+        key=Source.sort_key,
+    )
+
+
+def _refused_fix(
+    node: model.Node,
+    because: str,
+    label: str,
+    detail: str = "",
+    readers: Sequence[Source] = (),
+) -> str:
     """What repairs one refusal, in the words its own cause deserves."""
     if because == "plugin_manifest_missing" and node.kind == model.NodeKind.FILE.value:
         package = ids.parse_file(node.id).package
@@ -1202,7 +1265,19 @@ def _refused_fix(node: model.Node, because: str, label: str) -> str:
             "when it is a released package, which nothing in this workspace can change"
         )
     if because == params_collector.MISSING_FILE:
-        return f"correct the path that names {label} or add the file, then extract again"
+        at = f" at {rules.where(readers[0])}" if readers else ""
+        return f"correct the path{at} that names {label} or add the file, then extract again"
+    package = _MISSING_PACKAGE.search(detail)
+    if because == "xacro_failed" and package:
+        return (
+            f"{label} includes from package {package.group(1)}, which no root and no sourced "
+            "setup file holds: install it or put its source under a root, then extract again"
+        )
+    if because in XACRO_DEFAULTS:
+        return (
+            f"fix what xacro refused in {label}, or state the arguments it needs under the "
+            "entry point that loads it, then extract again"
+        )
     return f"make {label} readable and extract again, or take it out of the roots"
 
 

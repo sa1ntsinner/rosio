@@ -197,3 +197,20 @@ def test_the_engine_hands_out_findings_in_plain_prose():
     (found,) = result.findings
     for text in (found.title, found.detail, found.fix, found.say):
         assert "@src" not in text and "file:" not in text
+
+
+def test_launch_raised_on_an_unknown_tag_names_it_and_the_missing_extension():
+    """`<autoware_node>` needs a launch frontend extension, and the fix said to supply an
+    argument or the environment."""
+    row = {
+        "path": "demo_1/bringup/launch/rrbot.launch.py",
+        "phase": "describe",
+        "exc_type": "RuntimeError",
+        "message": "Unrecognized entity of the type: autoware_node",
+        "note": "launch.raised",
+    }
+    (found,) = build_rules.launch_raised(_raised_atlas(row))
+    assert "<autoware_node>" in found.fix
+    assert "frontend extension" in found.say
+    assert "supply the argument" not in found.fix
+    assert [row.locator for row in found.where] == [""]

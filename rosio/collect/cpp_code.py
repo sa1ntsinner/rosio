@@ -883,6 +883,9 @@ class _Reader:
             member = _child(node, "field")
             if argument is not None and member is not None and argument.type == "this":
                 return self.resolve(member)
+            found = next((scope[expr] for scope in reversed(self.scopes) if expr in scope), None)
+            if found is not None:
+                return replace(found, expr=expr, binding="local")
             return Ref(UNRESOLVED, "", expr)
         if node.type == "parenthesized_expression" and node.named_child_count == 1:
             return replace(self.resolve(node.named_children[0]), expr=expr)
@@ -1147,11 +1150,11 @@ class _Reader:
         self.classes.pop()
 
     def _field_declaration(self, node: Any) -> None:
-        declarator = _child(node, "declarator")
         default = _child(node, "default_value")
         type_node = _child(node, "type")
         type_text = _flat(type_node, self.src) if type_node is not None else ""
-        if declarator is not None and self.klass:
+        # `Subscriber<CameraInfo> sub_depth_info_, sub_rgb_info_;` declares two members.
+        for declarator in node.children_by_field_name("declarator") if self.klass else ():
             member = _text(declarator, self.src).strip("&* ")
             if default is not None:
                 self.unit.members[(self.klass, member)] = replace(
@@ -1160,9 +1163,10 @@ class _Reader:
             wrapper = _wrapper_of(type_text)
             if wrapper:
                 self.member_types[member] = wrapper
+                head = _template_head(type_text, wrapper)
                 inner = re.search(r"<(.+)>", type_text)
-                if inner is not None:
-                    self.member_types[f"{member}::type"] = inner.group(1).strip()
+                if head or inner is not None:
+                    self.member_types[f"{member}::type"] = head or inner.group(1).strip()
         self._children(node)
 
     def _function(self, node: Any) -> None:
@@ -1437,6 +1441,20 @@ class _Reader:
         ]
         raw = f"{wrapper}({_flat(_construction_args(value), self.src)[1:-1]})"
         self._wrapper_endpoints(wrapper, raw, value)
+        if wrapper == "message_filters::Subscriber":
+            message = _template_head(_flat(value, self.src), wrapper) or _template_head(
+                type_text, wrapper
+            )
+            if message:
+                self.member_types[f"{name}::type"] = message
+            arguments = _construction_args(value)
+            listed = [
+                item
+                for item in (arguments.named_children if arguments is not None else [])
+                if item.type != "comment"
+            ]
+            if arguments is not None and arguments.type == "argument_list" and len(listed) > 1:
+                self._filter_endpoint(name, listed[1], value, "Subscriber")
 
     def _wrapper_endpoints(
         self, wrapper: str, raw: str, site: Any, *, conditional: bool = True
@@ -1478,6 +1496,9 @@ class _Reader:
             argument = _child(left, "argument")
             if argument is not None and argument.type == "this":
                 self.bind(name, self.resolve(right))
+            elif argument is not None and argument.type == "identifier":
+                # `desc.name = "negative"; declare_parameter(desc.name, ...)`
+                self.scopes[-1][_flat(left, self.src)] = self.resolve(right)
             return
         base = left
         while base.type == "field_expression":
@@ -1746,21 +1767,28 @@ class _Reader:
                 third.startswith('"') or "Transport" in third
             ):
                 wrapper = "image_transport::SubscriberFilter"
+            elif _is_node_argument(arguments[0], self.src) and "qos" in third.lower():
+                wrapper = "message_filters::Subscriber"
         if wrapper == "image_transport::SubscriberFilter":
             self._image_endpoints(wrapper, arguments, node)
             return
         if wrapper != "message_filters::Subscriber" or len(arguments) < 2:
             return
-        message = self.member_types.get(f"{member}::type", "")
+        self._filter_endpoint(member, arguments[1], node, "subscribe")
+
+    def _filter_endpoint(self, member: str, topic: Any, node: Any, api: str) -> None:
+        """The subscription a message_filters::Subscriber makes, by `subscribe(node, topic,
+        qos)` or by the constructor taking the same arguments."""
+        wrapper = "message_filters::Subscriber"
         self.unit.endpoints.append(
             Endpoint(
                 kind="subscriber",
-                name=self.resolve(arguments[1]),
+                name=self.resolve(topic),
                 sym=self.sym,
                 owner_class=self.klass,
                 line=_line(node),
-                api="subscribe",
-                type_text=message,
+                api=api,
+                type_text=self.member_types.get(f"{member}::type", ""),
                 qos=None,
                 qos_reason=str(KNOWN_WRAPPERS[wrapper]["reason"]),
                 via_known_wrapper=wrapper,
@@ -2055,11 +2083,16 @@ class _Reader:
     def _lookup(self, name: str, arguments: Sequence[Any], node: Any) -> None:
         if len(arguments) < 2:
             return
+        # The time travelling overloads take (target, target_time, source, source_time,
+        # fixed_frame, ...), so the second argument is a time and the source is the third.
+        travels = len(arguments) >= 5 and (
+            name == "lookupTransform" or _TIME_TEXT.search(_flat(arguments[1], self.src))
+        )
         self.unit.lookups.append(
             TfLookup(
                 api=name,
                 target=self.resolve(arguments[0]),
-                source=self.resolve(arguments[1]),
+                source=self.resolve(arguments[2] if travels else arguments[1]),
                 sym=self.sym,
                 line=_line(node),
             )
@@ -2087,12 +2120,34 @@ class _Reader:
             )
 
 
+_TIME_TEXT = re.compile(r"(?i)time|stamp|now\(\)|zero")
+
+
 def _construction_args(node: Any) -> Any:
     """The argument list of a construction, through make_unique and make_shared."""
     if node is None or node.type != "call_expression":
         return node
     arguments = _child(node, "arguments")
     return arguments if arguments is not None else node
+
+
+def _template_head(text: str, symbol: str) -> str:
+    """The first template argument after `symbol`, so `Subscriber<LaserScan, LifecycleNode>`
+    names the message and not the node type beside it."""
+    at = text.find(symbol + "<")
+    if at < 0:
+        return ""
+    depth = 0
+    start = at + len(symbol) + 1
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == "<":
+            depth += 1
+        elif char == ">" and depth:
+            depth -= 1
+        elif char in ",>" and not depth:
+            return " ".join(text[start:index].split())
+    return ""
 
 
 def _wrapper_of(text: str) -> str:
@@ -2325,15 +2380,31 @@ def _default_write(node: Any, name: str, src: bytes) -> tuple[bool, Any]:
     return False, None
 
 
+CAST_INTEGERS = frozenset(
+    {"int", "long", "int64_t", "std::int64_t", "int32_t", "std::int32_t", "size_t", "std::size_t"}
+)
+
+
 def _literal_value(node: Any, src: bytes) -> Any:
     """A C++ literal as a python value, or None when the expression is not a literal."""
     if node is None:
         return None
     if node.type == "call_expression":
         arguments = _args(node)
-        name, _receiver, _template = _call_parts(node, src)
+        name, _receiver, template = _call_parts(node, src)
         if name in ("ParameterValue", "string", "basic_string") and arguments:
             return _literal_value(arguments[0], src)
+        if name in ("string", "basic_string") and not arguments:
+            return ""
+        if name == "static_cast" and len(arguments) == 1 and template is not None:
+            inner = _literal_value(arguments[0], src)
+            target = _flat(template, src).strip("<> ")
+            if isinstance(inner, (int, float)) and not isinstance(inner, bool):
+                if target in ("double", "float"):
+                    return float(inner)
+                if target in CAST_INTEGERS:
+                    return int(inner)
+            return None
         if name == "vector" and not arguments and _flat(node, src).startswith("std::vector<"):
             return []
         return None
@@ -4295,11 +4366,14 @@ def file_report(
         else:
             parameters.append(_param_view(item, reads))
         if item.default_state == "unknown":
+            local = re.fullmatch(r"[A-Za-z_]\w*", item.default_expr or "") and not (
+                item.default_expr.endswith("_")
+            )
             unresolved.append(
                 {
                     "want": model.Want.PARAM_VALUE.value,
                     "expr": item.default_expr,
-                    "reason": "runtime_attribute_default",
+                    "reason": "local_variable" if local else "runtime_attribute_default",
                     "resolvable_by": ["observed"],
                     **({"construction": item.construction} if item.construction else {}),
                     "owner_symbol": item.sym,

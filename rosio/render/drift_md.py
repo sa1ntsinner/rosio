@@ -226,8 +226,39 @@ def _families(atlas: Atlas) -> list[str]:
         lines.append("")
         spread = plural(len({item.rule for item in here}), "rule")
         lines.append(f"{_summary(_severity_counts(here))}, over {spread}.")
+        # Info findings of one rule about one file are one section, so a launch file with
+        # forty unresolved remaps does not bury the rest of the report.
+        bundles: dict[tuple[str, str], list[Finding]] = {}
         for item in here:
-            lines.extend(_finding(item))
+            if item.severity == "info" and isinstance(item.subject, str):
+                bundles.setdefault((item.rule, item.subject), []).append(item)
+        done: set[tuple[str, str]] = set()
+        for item in here:
+            key = (item.rule, item.subject) if isinstance(item.subject, str) else None
+            bundle = bundles.get(key) if key else None
+            if bundle is None or len(bundle) == 1:
+                lines.extend(_finding(item))
+            elif key not in done:
+                done.add(key)
+                lines.extend(_bundle(bundle))
+    return lines
+
+
+def _bundle(items: Sequence[Finding]) -> list[str]:
+    first = items[0]
+    lines = ["", heading(3, f"{len(items)} {first.rule} findings about {label(first.subject)}")]
+    lines.append("")
+    scope = joined(
+        sorted({profile_name(name) for item in items for name in item.profiles}), NO_PROFILE
+    )
+    lines.append(f"`{first.severity}` `{first.rule}`, {scope}")
+    if first.fix:
+        lines.append("")
+        lines.append(f"Fix, for each: {first.fix}")
+    lines.append("")
+    for item in items:
+        where = ", ".join(site(source, locator=True) for source in item.where)
+        lines.append(f"* {item.spoken}" + (f" ({where})" if where else "") + f" `{item.id}`")
     return lines
 
 

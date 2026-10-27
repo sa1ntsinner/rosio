@@ -30,6 +30,16 @@ def extra_command(extra: str) -> str:
     return f"{tool} install '{origin()}[{extra}]'"
 
 
+def here(text: str) -> str:
+    """Text an atlas stored with the machine independent install line, as this machine runs
+    it: the atlas keeps `extra_line`, the terminal shows `extra_command`."""
+    for extra in ("cpp", "mcp", "stamps"):
+        stored = extra_line(extra)
+        if stored in text:
+            text = text.replace(stored, extra_command(extra))
+    return text
+
+
 def origin() -> str:
     """Where rosio was installed from: the checkout path, or `rosio` for a release."""
     import json
@@ -51,5 +61,6 @@ __all__ = [
     "__version__",
     "extra_command",
     "extra_line",
+    "here",
     "origin",
 ]

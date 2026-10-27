@@ -403,6 +403,18 @@ opens its own slot and is a new view of one site rather than a second site. The 
 exists for still raises: two producing sites folded into one `publishes` edge, with one QoS
 block standing for both.
 
+The join never raises that over source a user wrote, because it writes every coded keyed edge
+through `join._site_edge`. Two sites of one symbol that state the same content, two
+constructor overloads declaring one name or an `if` and an `else if` asking for one transform,
+are one edge holding both evidence rows: a key that told them apart would need a line or an
+ordinal, which section 3.1 refuses, so folding is the only form that keeps both sites
+readable. The builder takes them with `fold=True`, which skips the evidence check and keeps
+the value and confidence checks. A site whose content differs from the edge its key already
+names takes a digest of that content into its key, so one QoS block never stands for two
+sites there either. A `ContractError` that still escapes the join leaves the atlas written:
+`extract._join` records a refused `join` pass on a coded run with a problem row, and
+`extract.pass_incomplete` reports it, rather than the run ending with nothing on disk.
+
 Three reasons that rule exists, all from the reference stack: the same relative code name
 is remapped to the same topic by two different launch files, `base_link` to `os_sensor` is
 declared with three different origins in three urdf models, and `odom` to `base_footprint`
@@ -1024,6 +1036,30 @@ The declared `node` fact lost `gated` for the reason `conditions` went in `1.6`:
 composable nodes loaded into a new container or into an existing one wrote both values into
 one slot. The gates stay on each `launchent` fact, and a site whose condition is false in a
 profile no longer counts as a second instance of the node there.
+
+The fifth first run trial moved several ids and texts inside `1.22` with no new key and no new
+rule id. `param.type_changed` compares the winning value with the declared type only, so a
+shadowed candidate of another type and a value that is a whole `$(...)` substitution no longer
+fire it; its detail and say name the declaration, which moved its fingerprints and kept its
+ids. `extract.input_refused` says `could not read it (<reason>)` where it said `recorded
+<reason>`, names the launch line that built a missing path in its fix and its `where`, names a
+package a xacro include misses, and is silent on a model a live launch line expands with
+arguments. A refused file whose detail only restated the reason (`file_missing`) carries no
+`refused_detail`, and a missing file a site gated off in the profile reads is no refusal at
+all. A xacro refusal detail lost the `declared.urdf: xacro refused <file>: ` prefix and spells a
+missing package in plain words, which moved the ids of those `frame_id` blind spots, whose
+expression is the detail. `launch.raised` names an unknown launch tag, and it and
+`launch.unloadable` cite the file without the phase word as locator. `param.set_undeclared`,
+`resolution.below_budget` and the build fix of `build.unbuilt` and `build.underlay` changed
+text. A topic blind spot the collector already owns at the symbol is no longer written a
+second time under the node, so those node owned ids are gone. A time travelling
+`lookupTransform` or `canTransform` reads its source from the third argument, which moved the
+key of the `listens_tf` edges that named a time as a frame. A parameter default that is a cast
+of a number or `std::string()` folds, and one that is a local variable has the blind spot
+reason `local_variable`; the reason is not in the id. A target `ament_auto_add_executable`
+or `ament_auto_add_library` adds is read as its plain spelling, and an executable takes the
+name `OUTPUT_NAME` installs it under, so such an executable has a new `exe` id. No release
+had shipped, so no stored id or waiver existed.
 
 A reader pinned to `1.0` still loads a `1.22` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re

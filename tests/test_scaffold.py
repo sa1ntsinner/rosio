@@ -468,3 +468,68 @@ def test_the_sourced_environment_answers_for_a_frontend_rosio_cannot_import(
     workspace = _markup_workspace(tmp_path)
     slugs = [p.slug for p in scaffold.offered(default_config(str(workspace))).profiles]
     assert "robot" in slugs
+
+
+def test_init_does_not_offer_a_ros1_launch_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rosio.resolve import launch_exec
+
+    monkeypatch.setattr(launch_exec, "importable", lambda names, ros_setup=(): None)
+    workspace = _markup_workspace(tmp_path)
+    (workspace / "src" / "bot_bringup" / "launch" / "old.launch").write_text(
+        '<launch>\n  <node pkg="bot" type="cloud" name="cloud"/>\n'
+        '  <rosparam command="load" file="$(find bot)/a.yaml"/>\n</launch>\n',
+        encoding="utf-8",
+    )
+    slugs = [p.slug for p in scaffold.offered(default_config(str(workspace))).profiles]
+    assert "robot" in slugs
+    assert "old" not in slugs
+
+
+def test_init_reads_required_arguments_and_includes_of_xml_launch_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rosio.resolve import launch_exec
+
+    monkeypatch.setattr(launch_exec, "importable", lambda names, ros_setup=(): None)
+    workspace = _markup_workspace(tmp_path)
+    launch = workspace / "src" / "bot_bringup" / "launch"
+    (launch / "robot.launch.xml").write_text(
+        '<launch>\n  <arg name="map_path" description="where the map is"/>\n'
+        '  <arg name="rviz" default="true"/>\n'
+        '  <include file="$(find-pkg-share bot_bringup)/launch/part.launch.xml">\n'
+        '    <arg name="vehicle" value="$(var map_path)"/>\n  </include>\n</launch>\n',
+        encoding="utf-8",
+    )
+    (launch / "part.launch.xml").write_text(
+        '<launch>\n  <arg name="vehicle"/>\n</launch>\n', encoding="utf-8"
+    )
+    text = scaffold.render(default_config(str(workspace)), workspace)
+    assert "robot.launch.xml declares these with no default" in text
+    assert "  #     map_path: ''" in text
+    assert "rviz: ''" not in text
+    assert "part.launch.xml" not in text
+
+
+def test_init_over_many_launch_files_names_the_ones_nothing_includes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Autoware: 420 profiles and no word on where a robot starts."""
+    from rosio.resolve import launch_exec
+
+    monkeypatch.setattr(launch_exec, "importable", lambda names, ros_setup=(): None)
+    workspace = _markup_workspace(tmp_path)
+    launch = workspace / "src" / "bot_bringup" / "launch"
+    for index in range(scaffold.MANY_PROFILES):
+        (launch / f"part_{index:02d}.launch.xml").write_text("<launch/>\n", encoding="utf-8")
+    included = "".join(
+        f'  <include file="$(find-pkg-share bot_bringup)/launch/part_{index:02d}.launch.xml"/>\n'
+        for index in range(scaffold.MANY_PROFILES)
+    )
+    (launch / "robot.launch.xml").write_text(f"<launch>\n{included}</launch>\n", encoding="utf-8")
+    assert cli.main(["init", str(workspace)]) == 0
+    said = capsys.readouterr().out
+    assert "--package NAME" in said
+    assert "2 files no other launch file includes: bot_bringup/plain.launch.py, " in said
+    assert "bot_bringup/robot.launch.xml" in said

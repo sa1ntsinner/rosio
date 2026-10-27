@@ -1676,6 +1676,12 @@ def test_below_budget_fires_when_no_profile_owns_the_blind_spots():
     assert found[0].subject == owner
     assert found[0].profiles == []
     assert "0.000" in found[0].say
+    assert "1 of 1 sit in code no profile starts" in found[0].say
+
+
+def test_below_budget_does_not_say_code_no_profile_starts_when_every_spot_is_reached():
+    (found,) = build_rules.resolution_below_budget(_budget_atlas(unresolved=4).build())
+    assert "no profile starts" not in found.say
 
 
 def test_below_budget_keeps_its_id_when_a_profile_is_added():
@@ -2078,6 +2084,82 @@ def test_extract_input_refused_says_an_exported_manifest_is_not_installed():
     assert "readable" not in found.fix
 
 
+def _xacro_refused(detail: str, *, expanded: bool = False) -> model.Atlas:
+    builder = _builder()
+    vehicle = ids.build_file("nx_description", "urdf/vehicle.xacro")
+    builder.node(
+        vehicle,
+        attrs={"loadable": False, "refused_because": "xacro_failed", "refused_detail": detail},
+    )
+    builder.unresolved(
+        Unresolved(
+            want=model.Want.FRAME_ID.value,
+            owner=vehicle,
+            expr=detail,
+            reason="xacro_failed",
+            role="xacro",
+            evidence=[Source(file=vehicle)],
+        )
+    )
+    if expanded:
+        site = ids.build_launchent("nx_bringup", "launch/robot.launch.py", (("Node", "rsp"),))
+        builder.node(site)
+        builder.fact(
+            site,
+            DECLARED,
+            profile=NAV,
+            values={
+                "file_reads": [
+                    {
+                        "file": vehicle,
+                        "role": "robot_model",
+                        "xacro_args": [["vehicle_model", "nx"]],
+                    }
+                ]
+            },
+        )
+    return builder.build()
+
+
+def test_extract_input_refused_names_the_package_a_xacro_include_misses():
+    detail = (
+        "error: package 'velodyne_description' is not found when instantiating macro: "
+        "VLP-16 (vlp.urdf.xacro)"
+    )
+    (found,) = build_rules.extract_input_refused(_xacro_refused(detail))
+    assert "package velodyne_description" in found.fix
+    assert "readable" not in found.fix
+
+
+def test_extract_input_refused_is_silent_on_a_model_a_launch_line_expands_with_arguments():
+    """vehicle.xacro needs vehicle_model:=, which the launch line passes. Its expansion with
+    the defaults alone failed, and the refusal said to make the file readable."""
+    assert build_rules.extract_input_refused(_xacro_refused("undefined", expanded=True)) == []
+    assert len(build_rules.extract_input_refused(_xacro_refused("undefined"))) == 1
+
+
+def test_extract_input_refused_names_the_launch_line_that_named_a_missing_file():
+    builder = _builder()
+    config = ids.build_file("rrbot", "config/rrbot.rviz")
+    builder.node(config, attrs={"loadable": False, "refused_because": "file_missing"})
+    reader = ids.build_file("rrbot", "launch/rrbot.launch.py")
+    builder.node(reader)
+    builder.unresolved(
+        Unresolved(
+            want=model.Want.OTHER.value,
+            owner=config,
+            expr="rrbot.rviz",
+            reason="file_missing",
+            role="node_argument",
+            evidence=[Source(file=reader, locator="Node(rviz2)", line_hint=144)],
+        )
+    )
+    (found,) = build_rules.extract_input_refused(builder.build())
+    assert "rrbot/launch/rrbot.launch.py:144" in found.fix
+    assert reader in [row.file for row in found.where]
+    assert "file_missing, file_missing" not in found.detail
+
+
 def _unbuilt_atlas(because: str) -> AtlasBuilder:
     builder = _builder()
     package = ids.build_pkg("rcd_demo")
@@ -2127,7 +2209,10 @@ def test_build_unbuilt_is_silent_on_a_file_no_tree_holds():
     assert build_rules.build_unbuilt(atlas) == []
     refused = build_rules.extract_input_refused(atlas)
     assert len(refused) == 2
-    assert all(item.fix.startswith("correct the path that names") for item in refused)
+    assert all(
+        item.fix.startswith("correct the path at rcd_demo/bringup/launch/demo.launch.py:30 ")
+        for item in refused
+    )
 
 
 def test_extract_input_refused_reads_a_recording_and_an_unknown_reason():

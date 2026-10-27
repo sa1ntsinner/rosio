@@ -545,3 +545,19 @@ def test_an_installed_plugin_library_is_found_in_the_install_tree(tmp_path: Path
     assert built["library_built_here"] is True
     python = atlas.entities[ids.build_plugin("rqt_gui_py::Plugin", "zz_py/Plugin")]
     assert "library_built_here" not in python.facts[0].values
+
+
+def test_an_ament_auto_executable_with_an_output_name_is_the_installed_name() -> None:
+    """image_rotate builds image_rotate_bin with ament_auto and installs it as image_rotate,
+    and the launch file that runs image_rotate bound to no source at all."""
+    text = (
+        "project(image_rotate)\n"
+        "ament_auto_add_executable(image_rotate_bin src/image_rotate.cpp)\n"
+        "set_target_properties(image_rotate_bin PROPERTIES OUTPUT_NAME ${PROJECT_NAME})\n"
+    )
+    scan = plugins_collect.scan_cmake(text, pkg="image_rotate")
+    target = scan.targets["image_rotate_bin"]
+    assert target.kind == "executable"
+    assert target.sources == ("src/image_rotate.cpp",)
+    assert target.output_name == "image_rotate"
+    assert target.installed is True

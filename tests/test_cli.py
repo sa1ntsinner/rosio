@@ -1464,3 +1464,13 @@ def test_bagmutate_says_what_each_flag_takes(capsys):
     out = capsys.readouterr().out
     assert "the fault to put in" in out
     assert "where in the recording the fault starts" in out
+
+
+def test_a_stored_install_line_is_shown_as_this_machine_runs_it():
+    """The atlas keeps the machine independent cpp line, and the terminal said pip inside a
+    uv environment while the mcp hint beside it said uv pip with the checkout path."""
+    from rosio import extra_line, here
+
+    stored = f"Install the extra: {extra_line('cpp')}, which pins tree-sitter"
+    assert here(stored) == f"Install the extra: {extra_command('cpp')}, which pins tree-sitter"
+    assert here("nothing to replace") == "nothing to replace"

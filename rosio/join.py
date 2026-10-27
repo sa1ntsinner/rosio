@@ -218,6 +218,7 @@ class JoinReport:
     resolved_sites: set[tuple[str, str, str, str]] = field(default_factory=set)
     blocked_sites: set[tuple[str, str, str, str]] = field(default_factory=set)
     tf_cases: list[tuple[str, str, str, str]] = field(default_factory=list)
+    coded_blind: set[tuple[str, str, str, int | None]] = field(default_factory=set)
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -819,6 +820,12 @@ def join(builder: model.AtlasBuilder) -> JoinReport:
     first = MARKER not in atlas.x
     _resolve_interface_constants(builder)
     report = JoinReport()
+    report.coded_blind = {
+        (entry.want, entry.expr, source.file, source.line_hint)
+        for entry in atlas.unresolved
+        if ids.kind_of(entry.owner) in ("sym", "file")
+        for source in entry.evidence
+    }
     index = index_of(builder, report)
     _supersede(builder, index, report)
     rows: list[tuple[Instance, tuple[Carrier, ...], str]] = []
@@ -2315,11 +2322,19 @@ def _bind_endpoint(
             sites.add((WANTS[entity_kind], item.node_id, expr, str(row.get("construction") or "")))
         if bound is None:
             report.endpoints_unresolved += 1
+            expr = str(row.get("raw") or raw or row.get("expr") or kind)
+            if any(
+                (WANTS[entity_kind], expr, source.file, source.line_hint) in report.coded_blind
+                for source in evidence
+            ):
+                # The collector already owns this blind spot at the symbol that states the
+                # site, and a second entry under the node counted one line twice.
+                continue
             builder.unresolved(
                 model.Unresolved(
                     want=WANTS[entity_kind],
                     owner=item.node_id,
-                    expr=str(row.get("raw") or raw or row.get("expr") or kind),
+                    expr=expr,
                     reason=str(
                         row.get("reason")
                         or "the source does not state this name and no remap resolves it"
@@ -2354,11 +2369,12 @@ def _bind_endpoint(
             edge_values["qos"] = row.get("qos")
         if row.get("condition"):
             edge_values["condition"] = row.get("condition")
-        builder.edge(
+        _site_edge(
+            builder,
             edge_kind,
             item.node_id,
             endpoint_id,
-            key=ids.edge_key(
+            ids.edge_key(
                 profile=item.profile,
                 symbol=_symbol_of(carrier, row),
                 raw_name=raw,
@@ -2369,10 +2385,8 @@ def _bind_endpoint(
                 condition=str(row.get("condition") or ""),
                 **({"construction": row["construction"]} if row.get("construction") else {}),
             ),
-            layer=CODED,
             profile=item.profile,
             values=edge_values,
-            confidence=model.Confidence.RESOLVED.value,
             evidence=evidence,
         )
         _attach_type(builder, endpoint_id, row, type_name, item.profile)
@@ -2566,6 +2580,52 @@ def _tf_key(profile: str, symbol: str, values: dict[str, Any]) -> str:
     return ids.edge_key(profile=profile, symbol=symbol, content=content)
 
 
+def _site_edge(
+    builder: model.AtlasBuilder,
+    kind: str,
+    src: str,
+    dst: str,
+    key: str,
+    *,
+    profile: str,
+    values: dict[str, Any],
+    evidence: list[model.Source],
+    confidence: str = model.Confidence.RESOLVED.value,
+) -> None:
+    """One coded edge over a site of one symbol.
+
+    Two sites in one symbol can state the same content: two constructor overloads declaring
+    one name, an `if` and an `else if` asking for one transform. No key may carry a line, so
+    those fold into one edge holding both evidence rows. A site whose content differs from
+    the edge its key already names takes its content into the key, so it never stands for
+    the first.
+    """
+    edge = builder.atlas.edges.get(ids.build_edge(kind, src, dst, key))
+    slot = None
+    if edge is not None:
+        slot = next((row for row in edge.facts if row.slot == (CODED, profile)), None)
+    if slot is not None and (
+        slot.confidence != confidence
+        or any(
+            name not in slot.values or slot.values[name] != value for name, value in values.items()
+        )
+    ):
+        content = ids.digest_fields({name: str(value) for name, value in sorted(values.items())})
+        key = ids.edge_key(site=key, content=content)
+    builder.edge(
+        kind,
+        src,
+        dst,
+        key=key,
+        layer=CODED,
+        profile=profile,
+        values=values,
+        confidence=confidence,
+        evidence=evidence,
+        fold=True,
+    )
+
+
 def _tf_values(item: Instance, row: dict[str, Any], origins: dict[str, str]) -> dict[str, Any]:
     values: dict[str, Any] = {"namespace": item.namespace or "/"}
     if row.get("condition"):
@@ -2611,15 +2671,14 @@ def _bind_broadcast(
         }
     )
     builder.node(child_id)
-    builder.edge(
+    _site_edge(
+        builder,
         model.EdgeKind.BROADCASTS_TF.value,
         item.node_id,
         child_id,
-        key=_tf_key(item.profile, symbol, values),
-        layer=CODED,
+        _tf_key(item.profile, symbol, values),
         profile=item.profile,
         values=values,
-        confidence=model.Confidence.RESOLVED.value,
         evidence=evidence,
     )
     report.tf_edges += 1
@@ -2637,17 +2696,16 @@ def _bind_broadcast(
         }
     )
     builder.node(parent_id)
-    builder.edge(
+    _site_edge(
+        builder,
         model.EdgeKind.TF_PARENT.value,
         parent_id,
         child_id,
         # The geometry of one pair differs between profiles, so the profile and the node that
         # broadcasts it are both in the key.
-        key=_tf_key(item.profile, symbol, parent_values),
-        layer=CODED,
+        _tf_key(item.profile, symbol, parent_values),
         profile=item.profile,
         values=parent_values,
-        confidence=model.Confidence.RESOLVED.value,
         evidence=evidence,
     )
     report.tf_edges += 1
@@ -2684,15 +2742,14 @@ def _bind_lookup(
             }
         )
         builder.node(entity_id)
-        builder.edge(
+        _site_edge(
+            builder,
             model.EdgeKind.LISTENS_TF.value,
             item.node_id,
             entity_id,
-            key=_tf_key(item.profile, symbol, values),
-            layer=CODED,
+            _tf_key(item.profile, symbol, values),
             profile=item.profile,
             values=values,
-            confidence=model.Confidence.RESOLVED.value,
             evidence=evidence,
         )
         report.tf_edges += 1
@@ -2751,20 +2808,19 @@ def _bind_read(
             state=model.ParamState.OTHER.value,
             note="read in code, no declaration this reader could follow",
         )
-    builder.edge(
+    _site_edge(
+        builder,
         model.EdgeKind.READS_PARAM.value,
         symbol,
         param_id,
-        key=ids.edge_key(
+        ids.edge_key(
             profile=item.profile,
             symbol=symbol,
             name=name,
             api=str(row.get("api") or ""),
         ),
-        layer=CODED,
         profile=item.profile,
         values={"name": name, "api": str(row.get("api") or ""), "symbol": symbol},
-        confidence=model.Confidence.RESOLVED.value,
         evidence=_source(carrier, row),
     )
     report.parameter_reads_bound += 1
@@ -2855,12 +2911,12 @@ def _bind_parameter(
     )
     owner = carrier.symbol or item.node_id
     if ids.kind_of(owner) in ("sym", "node"):
-        builder.edge(
+        _site_edge(
+            builder,
             model.EdgeKind.DECLARES_PARAM.value,
             owner,
             param_id,
-            key=ids.edge_key(profile=item.profile, symbol=owner, name=name),
-            layer=CODED,
+            ids.edge_key(profile=item.profile, symbol=owner, name=name),
             profile=item.profile,
             values={"name": name},
             evidence=_source(carrier, row),
@@ -3040,12 +3096,12 @@ def _bind_plugin_parameter(
                 )
             ],
         )
-    builder.edge(
+    _site_edge(
+        builder,
         model.EdgeKind.DECLARES_PARAM.value,
         plugin_id,
         pparam_id,
-        key=ids.edge_key(profile=profile, plugin=plugin_id, name=suffix),
-        layer=CODED,
+        ids.edge_key(profile=profile, plugin=plugin_id, name=suffix),
         profile=profile,
         values={"suffix": suffix},
         evidence=_source(carrier, row),

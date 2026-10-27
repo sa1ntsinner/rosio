@@ -423,6 +423,26 @@ def test_query_says_honestly_when_nothing_matched(atlas):
     assert "this atlas holds" in texts(answer)
 
 
+def test_query_relations_are_read_over_every_match_before_the_cap():
+    """Twelve files named map sorted ahead of the topic used to fill the cap, and the answer
+    said no publishes edge existed while /slam_toolbox published /map."""
+    builder = model.AtlasBuilder()
+    for index in range(12):
+        builder.node(ids.build_file("a_maps", f"config/map_{index:02d}.yaml"))
+    node = ids.build_node("/slam_toolbox")
+    topic = ids.build_topic("/map")
+    builder.node(node, name_source="literal")
+    builder.node(topic)
+    builder.edge("publishes", node, topic, key="k", layer="coded")
+    atlas = builder.build()
+
+    answer = query.query(atlas, "which nodes publish map", limit=5)
+
+    assert "/slam_toolbox publishes /map" in texts(answer)
+    assert answer.data["matched"][0]["id"] == topic
+    assert "no publishes edge" not in texts(answer)
+
+
 def test_a_kind_and_name_selector_is_read_exactly_and_offers_near_names():
     builder = model.AtlasBuilder()
     for name in ("/scan_filtered", "/lidar/scan", "/cmd_vel"):
@@ -1345,5 +1365,45 @@ def test_param_says_which_tree_the_value_runs_from(attrs, pkg_attrs, root, tag):
     the release, with no tag, while build.underlay said the package came from ROS jazzy."""
     answer = query.param(_tree_atlas(attrs, pkg_attrs, root), "/slam_toolbox", "resolution")
     edit = next(line for line in answer.lines if line.strip().startswith("effective"))
-    assert edit.endswith(f"config/mapper.yaml:31 [{tag}]" if tag else "config/mapper.yaml:31")
+    if pkg_attrs:
+        # the src line is not what runs, so it is not offered as the edit that changes it
+        assert edit.endswith(
+            "runs from ROS jazzy, slam_toolbox/config/mapper.yaml:31 takes effect after "
+            "colcon build"
+        )
+    else:
+        assert edit.endswith(f"config/mapper.yaml:31 [{tag}]" if tag else "config/mapper.yaml:31")
     assert answer.data["profiles"]["profile:online_async"]["read_from"] == (tag or "src")
+
+
+def test_a_reason_names_a_remap_only_for_a_name_a_remap_resolves():
+    assert "remap" in query.reason_text("not_stated_in_source", "topic_name")
+    assert "remap" not in query.reason_text("not_stated_in_source", "param_name")
+
+
+def test_diff_says_an_edit_to_a_package_read_from_another_tree_shows_only_after_a_build():
+    """slam_toolbox in src is not built, an edit to its yaml moved the root hash and nothing
+    else, and the diff read as if the edit had been read and changed nothing."""
+
+    def side(digest: str) -> model.Atlas:
+        atlas = _stamped(build(), digest)
+        atlas.entities[ids.build_pkg("slam_toolbox")] = model.Node(
+            id=ids.build_pkg("slam_toolbox"), kind="pkg", attrs={"share_read_from": "ROS jazzy"}
+        )
+        return atlas
+
+    answer = query.diff(side("aaaa1111"), side("bbbb2222"))
+    assert answer.data["read_from_underlay"] == ["slam_toolbox"]
+    assert "slam_toolbox is read from another tree" in texts(answer)
+
+
+def test_explain_says_where_the_rest_of_a_cut_fact_line_is():
+    """slam_toolbox: `coded in` ended in `...` with nothing saying what was cut."""
+    builder = model.AtlasBuilder()
+    sources = [ids.build_file("slam_toolbox", f"src/part_{index:02d}.cpp") for index in range(20)]
+    for source in sources:
+        builder.node(source)
+    builder.fact("node:/slam_toolbox", "coded", values={"coded_sources": sources})
+    body = texts(query.explain(builder.build(), "/slam_toolbox"))
+    coded = next(line for line in body.splitlines() if "coded_sources=" in line)
+    assert coded.endswith("... (--json shows every value)")

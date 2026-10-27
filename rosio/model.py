@@ -1506,7 +1506,10 @@ class AtlasBuilder:
         confidence: str = Confidence.RESOLVED.value,
         evidence: Iterable[Source] = (),
         attrs: Mapping[str, Any] | None = None,
+        fold: bool = False,
     ) -> Edge:
+        """`fold` lets a repeat of one slot add evidence rows when it states the same values,
+        which is how two sites of one symbol stating the same content become one edge."""
         edge_kind = _enum_value(kind, EdgeKind, "edge.kind")
         for endpoint in (src, dst):
             if endpoint not in self.atlas.entities:
@@ -1535,7 +1538,7 @@ class AtlasBuilder:
                 profile,
                 dict(values or {}),
                 confidence,
-                list(evidence),
+                [] if fold else list(evidence),
                 canonical_value(dict(attrs)) if attrs else {},
             )
             if added:

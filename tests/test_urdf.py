@@ -1074,3 +1074,13 @@ def test_a_xacro_behind_a_shell_wrapper_runs_under_the_python_beside_it(
     _tool(tools, "xacro", "#!/usr/bin/env python3\n")
     command = urdf_collect._xacro_command("robot.xacro", (), {"bot": "/src/bot"})
     assert command[:3] == ["/usr/bin/env", "python3", "-c"]
+
+
+def test_a_xacro_message_names_a_missing_package_in_plain_words():
+    said = (
+        "error: <class 'ament_index_python.packages.PackageNotFoundError'>: \"package "
+        "'velodyne_description' not found, searching: ['/opt/ros/jazzy']\" \"package "
+        "'velodyne_description' not found, searching: ['/opt/ros/jazzy']\"\n"
+        "when processing file: /ws/src/bot/urdf/robot.xacro"
+    )
+    assert urdf_collect.tool_message(said) == "package 'velodyne_description' is not found"

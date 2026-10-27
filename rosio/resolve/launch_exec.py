@@ -955,6 +955,12 @@ def _is_ros1_xml(text: str) -> bool:
     return "<node" in text and "type=" in text and "exec=" not in text
 
 
+def is_ros1_launch(path: str) -> bool:
+    """The refusal extraction applies to a file by shape, for a caller deciding whether to
+    offer it at all."""
+    return _is_ros1_xml(_head(path))
+
+
 def _head(path: str, limit: int = 65536) -> str:
     try:
         with Path(path).open("r", encoding="utf-8", errors="replace") as handle:
@@ -1062,6 +1068,39 @@ def required_arguments(source: str) -> tuple[str, ...]:
         ):
             found.append((node.lineno, node.col_offset, name.value))
     return tuple(dict.fromkeys(text for _line, _col, text in sorted(found)))
+
+
+def required_frontend_arguments(text: str, suffix: str) -> tuple[str, ...]:
+    """The same for an XML or YAML launch file: an `arg` at the top of the file with no
+    `default`. An `arg` inside an `include` passes a value and declares nothing."""
+    rows: list[Any] = []
+    if suffix == ".xml":
+        import xml.etree.ElementTree as ElementTree
+
+        try:
+            root = ElementTree.fromstring(text)
+        except ElementTree.ParseError:
+            return ()
+        rows = [dict(child.attrib) for child in root if child.tag == "arg"]
+    elif suffix in (".yaml", ".yml"):
+        import yaml
+
+        try:
+            loaded = yaml.safe_load(text)
+        except yaml.YAMLError:
+            return ()
+        items = loaded.get("launch") if isinstance(loaded, dict) else None
+        rows = [
+            item["arg"]
+            for item in items or ()
+            if isinstance(item, dict) and isinstance(item.get("arg"), dict)
+        ]
+    names = [
+        str(row["name"])
+        for row in rows
+        if isinstance(row, dict) and row.get("name") and "default" not in row
+    ]
+    return tuple(dict.fromkeys(names))
 
 
 def _environ(node: ast.AST) -> bool:

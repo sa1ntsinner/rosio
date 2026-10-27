@@ -678,3 +678,27 @@ def test_the_gate_rows_are_read_from_the_families_and_not_restated_here(atlas, m
 
 def test_two_renders_of_a_gated_atlas_are_byte_identical():
     assert render_drift(gated()) == render_drift(gated())
+
+
+def test_info_findings_of_one_rule_about_one_file_are_one_section():
+    """Autoware: hundreds of remap.unresolved infos, one heading each, buried the rest."""
+    builder = model.AtlasBuilder()
+    launch = ids.build_file("nx_bringup", "launch/sensors.launch.py")
+    builder.node(launch)
+    for name in ("points", "imu", "scan"):
+        builder.finding(
+            Finding(
+                rule="remap.unresolved",
+                severity="info",
+                subject=launch,
+                discriminator=name,
+                title=f"remap of {name} names nothing",
+                say=f"the remap of {name} names no topic any node uses",
+                fix="correct the remap or delete it",
+                where=[Source(file=launch, line_hint=10)],
+            )
+        )
+    text = render_drift(builder.build())
+    assert text.count("### ") == 1
+    assert "### 3 remap.unresolved findings about nx_bringup/launch/sensors.launch.py" in text
+    assert text.count("* the remap of") == 3

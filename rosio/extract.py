@@ -185,6 +185,8 @@ CONTRIBUTES = {
     "proc": "the command lines of the processes that are running",
     "py_code": "the endpoints, parameter defaults and frames the python sources state",
     "urdf": "the urdf models, the frames they declare and their geometry",
+    "join": "the coded endpoints, parameters and frames bound to launched nodes after the first "
+    "site the join could not place",
 }
 """What each collector is the only source of, in the words the finding quotes. A pass that
 stopped costs exactly this, and the sentence a reader can act on has to name it."""
@@ -568,7 +570,34 @@ def _join(builder: model.AtlasBuilder) -> None:
         for name in (model.Layer.CODED.value, model.Layer.DECLARED.value)
     ):
         return
-    join(builder)
+    try:
+        join(builder)
+    except ContractError as exc:
+        # A site the join cannot place ends the join and not the extract. What it already
+        # bound stays, and the pass row is what makes the gate say the rest is missing.
+        run_id = next(
+            run_id
+            for run_id in sorted(builder.atlas.entities)
+            if builder.atlas.entities[run_id].kind == model.NodeKind.RUN.value
+            and builder.atlas.entities[run_id].attrs.get("layer") == model.Layer.CODED.value
+        )
+        problems = builder.atlas.entities[run_id].attrs["exceptions"]
+        problems.append(
+            {
+                "path": "@collector/join",
+                "phase": "join",
+                "exc_type": type(exc).__name__,
+                "message": str(exc),
+            }
+        )
+        problems.sort(key=_problem_key)
+        builder.record_pass(
+            run_id,
+            "join",
+            state=model.PassState.REFUSED.value,
+            reason=_reason(exc),
+            missing=contribution("join"),
+        )
 
 
 def drift(atlas: model.Atlas) -> Any:

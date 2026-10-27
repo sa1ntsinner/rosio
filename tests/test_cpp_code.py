@@ -1028,3 +1028,56 @@ def test_a_rclcpp_member_publisher_keeps_its_first_argument_as_the_topic():
     cpp.analyse([unit])
     (row,) = cpp.file_report(unit)["endpoints"]
     assert (row["kind"], row["name"]) == ("publisher", "chatter")
+
+
+def test_a_time_travelling_lookup_reads_the_source_from_the_third_argument():
+    """pcl_ros asks `lookupTransform(target, target_time, source, source_time, fixed)`, and
+    the time became the source frame."""
+    calls = """
+        buffer.lookupTransform("map", target_time, "laser", in.header.stamp, "odom");
+        buffer.canTransform("map", now(), "camera", stamp, "odom", timeout);
+        buffer.canTransform("map", "imu", stamp, timeout, &error);
+        buffer.lookupTransform("map", "wheel", stamp);
+        """
+    unit = cpp.parse_text("void Filter::run() {" + calls + "}", path="f.cpp")
+    cpp.analyse([unit])
+    rows = cpp.file_report(unit)["tf"]["lookups"]
+    assert sorted((row["target"], row["source"]) for row in rows) == [
+        ("map", "camera"),
+        ("map", "imu"),
+        ("map", "laser"),
+        ("map", "wheel"),
+    ]
+
+
+def test_a_descriptor_field_names_the_parameter_it_declares():
+    """pcl_ros and image_view assign `desc.name` and declare by it, and every such
+    declaration was a param_name blind spot."""
+    body = """
+        rcl_interfaces::msg::ParameterDescriptor negative_desc;
+        negative_desc.name = "negative";
+        negative_desc.type = rcl_interfaces::msg::ParameterType::PARAMETER_BOOL;
+        declare_parameter(negative_desc.name, rclcpp::ParameterValue(false), negative_desc);
+        """
+    unit = cpp.parse_text("void CropBox::setup() {" + body + "}", path="crop_box.cpp")
+    cpp.analyse([unit])
+    rows = cpp.file_report(unit)["parameters"]
+    assert [row["name"] for row in rows] == ["negative"]
+
+
+def test_cast_and_empty_string_defaults_fold_and_a_local_is_named_as_one():
+    body = """
+        declare_parameter("rate", static_cast<double>(0));
+        declare_parameter("count", static_cast<int>(3));
+        declare_parameter("frame", std::string());
+        declare_parameter("gain", tmp_val);
+        """
+    unit = cpp.parse_text("void Pub::setup() {" + body + "}", path="pub.cpp")
+    cpp.analyse([unit])
+    report = cpp.file_report(unit)
+    rows = {row["name"]: row for row in report["parameters"]}
+    assert rows["rate"]["default"] == 0.0 and isinstance(rows["rate"]["default"], float)
+    assert rows["count"]["default"] == 3
+    assert rows["frame"]["default"] == ""
+    (blind,) = [row for row in report["unresolved"] if row["want"] == "param_value"]
+    assert blind["reason"] == "local_variable"

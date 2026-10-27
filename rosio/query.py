@@ -20,7 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from rosio import ids
+from rosio import here, ids
 from rosio.errors import ContractError, UsageError
 from rosio.model import (
     ANY_PROFILE,
@@ -141,7 +141,10 @@ def tree_tag(atlas: Atlas, source: Source | None) -> str:
         return ""
     owner = atlas.entities.get(ids.build_pkg(package))
     tree = str(owner.attrs.get("share_read_from") or "") if owner is not None else ""
-    return f"value read from {tree}" if tree and root == "src" else ""
+    return f"{UNDERLAY_TAG}{tree}" if tree and root == "src" else ""
+
+
+UNDERLAY_TAG = "value read from "
 
 
 _FILE_TOKEN = re.compile(r"\bfile:[^\s|'\"]+\|[^\s'\"]+")
@@ -488,7 +491,7 @@ def _explain_finding(atlas: Atlas, handle: str) -> Answer:
             if item.detail:
                 lines.append(f"  {item.detail}")
             if item.fix:
-                lines.append(f"  fix: {item.fix}")
+                lines.append(f"  fix: {here(item.fix)}")
             if item.say:
                 lines.append(f"  say: {item.spoken}")
             for source in item.where:
@@ -556,12 +559,16 @@ def _fact_rows(node: Node, limit: int, atlas: Atlas | None = None) -> list[dict[
         shown = ", ".join(f"{key}={_stated(fact.values[key])}" for key in keys[:limit])
         if len(keys) > limit:
             shown = f"{shown}, and {len(keys) - limit} more keys"
+        text = readable(shown, atlas)
+        clipped = _clip(text)
+        if clipped != text:
+            clipped += " (--json shows every value)"
         rows.append(
             {
                 "layer": fact.layer,
                 "profile": fact.profile,
                 "confidence": fact.confidence,
-                "values": _clip(readable(shown, atlas)) or "no values",
+                "values": clipped or "no values",
                 "where": [site(source) for source in fact.evidence[:limit]],
             }
         )
@@ -645,7 +652,7 @@ def _unresolved_rows(atlas: Atlas, entity_id: str, limit: int) -> list[dict[str,
         {
             "want": entry.want,
             "expr": readable(entry.expr, atlas),
-            "reason": reason_text(entry.reason),
+            "reason": reason_text(entry.reason, entry.want),
             "where": site(entry.evidence[0]) if entry.evidence else "",
         }
         for entry in sorted(atlas.unresolved, key=lambda item: item.id)
@@ -722,7 +729,14 @@ def param(
         if effective is not None:
             data["profiles"][item]["read_from"] = tag or effective.source.root or "src"
         lines.append(f"  profile {profile_name(item)}")
-        if effective is not None:
+        if effective is not None and tag.startswith(UNDERLAY_TAG):
+            # The line in src is not what runs, so it is not offered as the edit that changes it.
+            lines.append(
+                f"    effective {_value(effective.value)} ({effective.value_type})"
+                f"   runs from {tag.removeprefix(UNDERLAY_TAG)}, "
+                f"{site(effective.source)} takes effect after colcon build"
+            )
+        elif effective is not None:
             lines.append(
                 f"    effective {_value(effective.value)} ({effective.value_type})"
                 f"   edit {site(effective.source, tag=tag)}"
@@ -1019,14 +1033,24 @@ def query(atlas: Atlas, question: str, *, limit: int = DEFAULT_LIMIT) -> Answer:
             ],
         )
 
+    # Relations come from every match before any is cut, so a cap never turns into "no
+    # such edge", and the matches that carry an asked relation are listed first.
+    if relations:
+        related = {
+            entity_id
+            for entity_id in matched
+            if any(
+                edge.kind in relations for edge in _out(atlas, entity_id) + _into(atlas, entity_id)
+            )
+        }
+        matched = [item for item in matched if item in related] + [
+            item for item in matched if item not in related
+        ]
     kept, hidden = _cap(matched, limit)
-    scope = set(kept)
     rows: list[dict[str, str]] = []
-    for entity_id in kept:
+    for entity_id in matched if relations else kept:
         for edge in _out(atlas, entity_id) + _into(atlas, entity_id):
             if relations and edge.kind not in relations:
-                continue
-            if edge.src not in scope and edge.dst not in scope:
                 continue
             rows.append(
                 {
@@ -1336,6 +1360,20 @@ def diff(
                 lines.append(f"    {key} {_clip(entry['label'], 120)}{fields}")
             _more(lines, counts[key] - len(kept), f"{key} {what}")
     lines.extend(_build_lines(build))
+    underlay = sorted(
+        {
+            label(node.id)
+            for atlas in (left, other)
+            for node in atlas.by_kind("pkg")
+            if node.attrs.get("share_read_from")
+        }
+    )
+    if underlay and any(sum(row.values()) for row in (build["entities"], build["edges"])):
+        data["read_from_underlay"] = underlay
+        lines.append(
+            f"  {', '.join(underlay)} {'is' if len(underlay) == 1 else 'are'} read from another "
+            "tree, so an edit to their files in src shows here only after colcon build"
+        )
     return Answer(verb="diff", data=data, lines=lines)
 
 
@@ -1893,7 +1931,7 @@ def unresolved(
         )
         row["count"] += 1
         row["reasons"][entry.reason] = row["reasons"].get(entry.reason, 0) + 1
-        said = reason_text(entry.reason)
+        said = reason_text(entry.reason, entry.want)
         row["sentences"][said] = row["sentences"].get(said, 0) + 1
         if len(row["examples"]) < limit:
             row["examples"].append(
@@ -1956,6 +1994,7 @@ REASONS = {
     "file_after_build": "a file only colcon build puts in place",
     "file_missing": "the file it names does not exist",
     "file_not_installed": "the install tree lacks a file the source holds",
+    "local_variable": "a local variable whose value rosio does not follow",
     "loop_variable": "an element of a loop rosio cannot unroll",
     "message_field": "a field of a message that arrives at run time",
     "not_stated_in_source": "the source does not state this name and no remap resolves it",
@@ -1977,10 +2016,16 @@ _CODE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+")
 _COLLECTOR_PREFIX = re.compile(r"^[a-z]+\.[a-z_]+: ")
 
 
-def reason_text(reason: str) -> str:
+REMAPPED_WANTS = frozenset({"topic_name", "service_name", "action_name", "node_name"})
+"""The wants a remap can resolve, so the only ones whose sentence may mention one."""
+
+
+def reason_text(reason: str, want: str = "") -> str:
     """A recorded reason as a sentence, whether it was stored as one or as a code."""
     if not _CODE.fullmatch(reason):
         return reason
+    if reason == "not_stated_in_source" and want and want not in REMAPPED_WANTS:
+        return "the source does not state this name"
     return REASONS.get(reason, reason.replace("_", " "))
 
 
@@ -2042,7 +2087,7 @@ def drift(
         for where in row["where"][:2]:
             lines.append(f"        {where}")
         if row["fix"]:
-            lines.append(f"        fix: {row['fix']}")
+            lines.append(f"        fix: {here(row['fix'])}")
         lines.append(f"        explain {row['fingerprint']}")
     _more(lines, hidden, "findings, --limit shows more")
     lines.append("  explain takes a fingerprint above, a finding id or a rule id")

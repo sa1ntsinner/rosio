@@ -2629,6 +2629,11 @@ class ParamsCollector:
                             f"{node.namespace or identity.ROOT} as {spelled}"
                         )
             for node in walk.nodes:
+                # a site whose condition read false never opens the file in this profile
+                if node.attrs.get("unreachable") or any(
+                    gate.outcome == "false" for gate in node.gates
+                ):
+                    continue
                 for read in node.file_reads:
                     if (
                         read.path in seen
@@ -2691,11 +2696,9 @@ class ParamsCollector:
         if not _readable(ws, path):
             return ""
         file_id = ws.file_id(path)
-        attrs: dict[str, Any] = {
-            "loadable": False,
-            "refused_because": because,
-            "refused_detail": reason,
-        }
+        attrs: dict[str, Any] = {"loadable": False, "refused_because": because}
+        if reason != because:
+            attrs["refused_detail"] = reason
         if because == BUILT_ONLY:
             attrs["found_elsewhere"] = same_name_in_package(ws, path)
         held = ctx.builder.atlas.entities.get(file_id)
@@ -2706,6 +2709,7 @@ class ParamsCollector:
             if stated in _REFUSAL_ORDER and _REFUSAL_ORDER.index(because) < _REFUSAL_ORDER.index(
                 stated
             ):
+                held.attrs.pop("refused_detail", None)
                 held.attrs.update(attrs)
             return file_id
         ctx.builder.node(file_id, attrs=attrs)

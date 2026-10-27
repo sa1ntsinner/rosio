@@ -187,11 +187,12 @@ PUBLIC_SOURCES = {
         "edges": 2404,
     },
     "rl_src": {
-        "unresolved": 58,
+        # The C++ reading of the fifth trial left fewer blind spots and lifted the rate over
+        # the budget.
+        "unresolved": 46,
         "findings": {
             "extract.input_refused": 1,
             "param.set_undeclared": 1,
-            "resolution.below_budget": 1,
         },
         # The yaml or the code default reads publish_acceleration and publish_filtered_gps
         # false in four node profiles, so four publishes edges, the uses_type edge and the

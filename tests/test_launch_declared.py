@@ -1707,7 +1707,7 @@ def test_an_unloadable_file_becomes_one_finding(ws: Workspace) -> None:
     assert [source.file for source in finding.where] == [
         ids.build_file("lx_bringup", "launch/legacy_ros1.launch")
     ]
-    assert [source.locator for source in finding.where] == ["import"]
+    assert [source.locator for source in finding.where] == [""]
     assert finding.profiles == [ids.build_profile("legacy")]
 
 
@@ -1716,7 +1716,7 @@ def test_a_raised_description_becomes_one_finding_with_its_phase(ws: Workspace) 
     finding = next(item for item in drift_build.launch_raised(atlas))
     assert finding.severity == "error"
     assert finding.subject == ids.build_launchfile("lx_bringup", "launch/env_required.launch.py")
-    assert [source.locator for source in finding.where] == ["describe"]
+    assert [source.locator for source in finding.where] == [""]
     assert "RuntimeError" in finding.say
     assert "describe" in finding.say
     assert "launch/env_required.launch.py" in finding.say

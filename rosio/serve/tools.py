@@ -740,7 +740,18 @@ def select_graph(
         (entity_id for entity_id in scope if atlas.entities[entity_id].kind in CHANNEL_KINDS),
         key=slices.label,
     )
-    channels = [entity_id for entity_id in channels if entity_id not in library_only]
+    linked = {edge.dst for edge in links}
+    # A channel nothing publishes, subscribes, serves or calls here is no part of the graph.
+    channels = [
+        entity_id
+        for entity_id in channels
+        if entity_id not in library_only
+        and (
+            entity_id in linked
+            or entity_id == focus_id
+            or _lifecycle_side(atlas, entity_id, [], wanted)
+        )
+    ]
     rules = {entity_id: _rules(atlas, entity_id, wanted) for entity_id in channels}
     channels.sort(key=lambda entity_id: not rules[entity_id])
 
@@ -1113,7 +1124,7 @@ def unresolved(
     for entry in kept[:rows]:
         lines.append(f"  {entry.want}: {slices.readable(entry.expr, atlas)}")
         lines.append(
-            f"      in {slices.label(entry.owner)} ({slices.reason_text(entry.reason)})"
+            f"      in {slices.label(entry.owner)} ({slices.reason_text(entry.reason, entry.want)})"
             + (f" at {slices.site(entry.evidence[0])}" if entry.evidence else "")
         )
         if entry.resolvable_by:

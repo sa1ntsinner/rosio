@@ -913,18 +913,31 @@ def expand_xacro(
     except (OSError, subprocess.SubprocessError) as exc:
         raise CollectorError(f"xacro failed on {path}: {exc}", LAYER, NAME) from exc
     if done.returncode != 0:
-        message = " ".join((done.stderr or done.stdout or "").split())
-        # The prefixes the index searched name this machine and nothing a reader can act on.
-        message = _SEARCHING.sub("", message)
-        # The tail names the file this call already names, and the errno restates the line.
-        message = _PROCESSING.sub("", _ERRNO.sub("", message)).strip()
-        if len(message) > 400:
-            message = message[:400].rsplit(" ", 1)[0] + "..."
+        message = tool_message(done.stderr or done.stdout or "")
         raise CollectorError(f"xacro refused {path}: {message}", LAYER, NAME)
     return done.stdout
 
 
+def tool_message(text: str) -> str:
+    """What the xacro tool said, without the parts that name this machine or repeat a line."""
+    message = " ".join(text.split())
+    # The prefixes the index searched name this machine and nothing a reader can act on.
+    message = _SEARCHING.sub("", message)
+    # The tail names the file this call already names, and the errno restates the line.
+    message = _PROCESSING.sub("", _ERRNO.sub("", message)).strip()
+    # `error: <class 'ament_index_python.packages.PackageNotFoundError'>: "package 'x' not
+    # found" "package ..."` says one thing, in the words a person reads it in.
+    message = _NOT_FOUND.sub(r"package '\1' is not found", _CLASS.sub(r"\1", message))
+    if len(message) > 400:
+        message = message[:400].rsplit(" ", 1)[0] + "..."
+    return message
+
+
 _SEARCHING = re.compile(r", searching: \[[^\]]*\]")
+_CLASS = re.compile(r"<class '(?:\w+\.)*(\w+)'>")
+_NOT_FOUND = re.compile(
+    r"(?:error: )?PackageNotFoundError: \"package '([^']+)' not found[^\"]*\"(?: \"[^\"]*\")*"
+)
 _PROCESSING = re.compile(r"\s*when processing file: .*$")
 _ERRNO = re.compile(r"\s*\[Errno \d+\][^\[]*?(?= when processing file:|$)")
 
@@ -1272,6 +1285,9 @@ class UrdfCollector:
         file_id = ws.file_id(path)
         # The detail is compared data and it can quote a tool message, so the machine
         # path in it becomes the file id and every other path its label or its name.
+        # `declared.urdf: xacro refused <path>: ` names the reader and the file the entity
+        # already names.
+        detail = detail.removeprefix(f"{LAYER}.{NAME}: ").removeprefix(f"xacro refused {path}: ")
         detail = ws.stated_message(detail.replace(path, file_id), ctx.cfg.ros_setup)
         attrs = {"loadable": False, "refused_because": reason, "refused_detail": detail}
         attrs.update(self._moved.get(path) or {})

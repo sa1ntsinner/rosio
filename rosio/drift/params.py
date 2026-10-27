@@ -419,11 +419,24 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             slug = rules.slug_of(profile)
             at = rules.where(winner.source)
             owner_text = rules.node_text(owner_id)
-            sources = sorted(owner.fact(CODED, profile).values.get("coded_sources") or [])
+            coded = owner.fact(CODED, profile).values
+            home = ids.parse(str(coded["exe"])).segments[0] if coded.get("exe") else ""
+            # The node's own package first, so a plugin it loads does not lead the list.
+            sources = sorted(
+                coded.get("coded_sources") or [],
+                key=lambda item: (ids.parse_file(item).package != home, item),
+            )
             shown = [rules.path_of(item) for item in sources[:3]]
             if len(sources) > 3:
                 shown.append(f"{len(sources) - 3} more files")
-            read = ", ".join(shown) or "its source"
+            read = (
+                shown[0]
+                if len(shown) == 1
+                else f"{', '.join(shown[:-1])} and {shown[-1]}"
+                if shown
+                else "its source"
+            )
+            declares = "declares" if len(sources) <= 1 else "declare"
             near = _nearest_name(name, join.declared_in(declared, owner_id, profile))
             meant = (
                 f" {owner_text} declares {near}, which is likely what was meant." if near else ""
@@ -449,7 +462,7 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
                     ),
                     say=(
                         f"In profile {slug}, {at} sets {owner_text} {name} to "
-                        f"{rules.value_text(winner.value)} and {read} declares no parameter "
+                        f"{rules.value_text(winner.value)} and {read} {declares} no parameter "
                         f"with that name, so the value is ignored.{meant}"
                         + ("" if near else f" Delete the line at {at} or declare the parameter.")
                     ),
@@ -554,11 +567,12 @@ def _type_of(spelling: str) -> str:
 
 @rules.register("param.type_changed")
 def type_changed(atlas: model.Atlas) -> list[model.Finding]:
-    """One parameter given two types inside one profile.
+    """A declaration type disagreeing with the value that wins, inside one profile.
 
     A node declared with one type refuses a value of another at start up, so this is an
-    error wherever it is true. Both directions are covered: two candidates of one chain
-    disagreeing, and a declaration type disagreeing with the value that wins.
+    error wherever it is true. A losing candidate never reaches the node, so its type is
+    not compared, and a value that is a whole launch substitution has no type until launch
+    runs it.
     """
     out: list[model.Finding] = []
     for node in _params(atlas):
@@ -567,33 +581,23 @@ def type_changed(atlas: model.Atlas) -> list[model.Finding]:
         for profile, chain in _by_profile(node).items():
             if not _live(node, profile):
                 continue
-            typed = [
-                row
-                for row in chain
-                if row.value_type
-                and row.value_type != "unknown"
-                and row.shadow_kind != model.ShadowKind.NOT_READ_IN_PROFILE.value
-            ]
-            winner = next((row for row in typed if row.wins), None)
-            if winner is None:
+            winner = next((row for row in chain if row.wins), None)
+            if (
+                winner is None
+                or not winner.value_type
+                or winner.value_type == "unknown"
+                or _substitution(winner.value)
+            ):
                 continue
-            other = next((row for row in typed if row.value_type != winner.value_type), None)
-            declared_type = ""
             coded = node.fact(CODED, profile)
-            if rules.usable(coded):
-                declared_type = _type_of(str(coded.values.get("type") or ""))
-            if other is None and (not declared_type or declared_type == winner.value_type):
+            if not rules.usable(coded):
+                continue
+            declared_type = _type_of(str(coded.values.get("type") or ""))
+            if not declared_type or declared_type == winner.value_type:
                 continue
             slug = rules.slug_of(profile)
             win_at = rules.where(winner.source)
-            if other is not None:
-                other_at = rules.where(other.source)
-                other_type = other.value_type
-                other_where = [other.source]
-            else:
-                other_at = rules.where(coded.evidence[0] if coded.evidence else None)
-                other_type = declared_type
-                other_where = list(coded.evidence)
+            declared_at = rules.where(coded.evidence[0] if coded.evidence else None)
             out.append(
                 model.Finding(
                     rule="param.type_changed",
@@ -602,22 +606,27 @@ def type_changed(atlas: model.Atlas) -> list[model.Finding]:
                     discriminator=slug,
                     title=f"{name} has two types in profile {slug}",
                     detail=(
-                        f"{owner_text} {name} is {winner.value_type} where it wins and "
-                        f"{other_type} where it is stated a second time, inside one profile."
+                        f"{owner_text} {name} is {winner.value_type} where it wins and is "
+                        f"declared {declared_type} in code, inside one profile."
                     ),
-                    fix=f"Make both sites state {winner.value_type}.",
+                    fix=f"Make the value at {win_at} a {declared_type}, or change the declaration.",
                     say=(
                         f"In profile {slug}, {owner_text} {name} is "
                         f"{rules.value_text(winner.value)} ({winner.value_type}) at {win_at} "
-                        f"while {other_at} states {other_type}. A node declared with "
-                        f"{other_type} refuses the value at start up."
+                        f"while {declared_at} declares it {declared_type}. The node refuses "
+                        "the value at start up."
                     ),
                     profiles=[profile],
-                    layers=sorted({*_layers(winner), *([CODED] if other is None else [])}),
-                    where=[winner.source, *other_where],
+                    layers=sorted({*_layers(winner), CODED}),
+                    where=[winner.source, *coded.evidence],
                 )
             )
     return out
+
+
+def _substitution(value: object) -> bool:
+    text = value.strip() if isinstance(value, str) else ""
+    return text.startswith("$(") and text.endswith(")")
 
 
 # ---------------------------------------------------------------------------

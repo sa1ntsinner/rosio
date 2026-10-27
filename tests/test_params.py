@@ -3767,6 +3767,7 @@ def test_a_missing_launch_input_without_a_source_twin_is_refused(ws, relative, r
     assert refused is not None
     assert refused.attrs["loadable"] is False
     assert refused.attrs["refused_because"] == "file_missing"
+    assert "refused_detail" not in refused.attrs, "the reason restated is not a detail"
     assert not refused.facts
     blind = [item for item in atlas.unresolved if item.owner == file_id]
     assert len(blind) == 1
@@ -3984,3 +3985,29 @@ def test_a_file_only_a_build_puts_in_place_is_refused_as_such(tmp_path: Path):
     assert [item.reason for item in atlas.unresolved if item.owner == file_id] == [
         params_collect.BUILT_ONLY
     ]
+
+
+def test_a_missing_launch_input_behind_a_false_condition_is_not_refused(ws):
+    """rrbot_base.launch.py opens its rviz config only under IfCondition(start_rviz), and a
+    profile passing false was told the file is missing."""
+    entry = str(WS / "src/lx_bringup/launch/nav_stack.launch.py")
+    missing = str(WS / "install/lx_bringup/share/lx_bringup/rviz/missing.rviz")
+    site = records.Site(path=entry, locator="Node(view)", line_hint=12)
+    gate = records.Gate(mechanism="IfCondition", expression="start_rviz", outcome="false")
+    walk = records.LaunchWalk(
+        entry_path=entry,
+        profile="navigation_zoo",
+        nodes=[
+            node(
+                pkg="rviz2",
+                executable="rviz2",
+                name="view",
+                site=site,
+                gates=(gate,),
+                file_reads=(records.FileRead(path=missing, role="rviz_configuration", site=site),),
+            )
+        ],
+    )
+    atlas = build(ws, [walk])
+    assert atlas.get(ws.file_id(missing)) is None
+    assert not [item for item in atlas.unresolved if item.reason == "file_missing"]

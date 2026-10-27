@@ -613,6 +613,7 @@ def _undeclared_atlas(
     states_node: bool = True,
     auto_declare: bool | str = False,
     read: bool = False,
+    plugins: int = 0,
 ) -> model.Atlas:
     builder = _builder()
     for other in declared:
@@ -627,6 +628,10 @@ def _undeclared_atlas(
     if states_node:
         builder.atlas.entities[source_file].attrs["nodes"] = [{"name": "demo_server"}]
     values: dict = {"coded_sources": [source_file]}
+    if plugins:
+        values["exe"] = ids.build_exe("demo_pkg", "demo_server")
+        for index in range(plugins):
+            values["coded_sources"].append(ids.build_file("aa_solver", f"src/s{index}.cpp"))
     if auto_declare:
         values["auto_declare"] = auto_declare
     builder.fact(
@@ -670,6 +675,14 @@ def test_param_set_undeclared_fires_when_no_declaration_names_the_key():
     assert found[0].severity == model.Severity.WARN.value
     assert "demo_pkg/src/demo_server.cpp" in found[0].say
     assert "config/params.yaml:12" in found[0].say
+
+
+def test_param_set_undeclared_names_the_node_source_first_and_counts_in_plain_words():
+    (found,) = _run(_undeclared_atlas(plugins=4), "param.set_undeclared")
+    assert "demo_pkg/src/demo_server.cpp, aa_solver/src/s0.cpp, aa_solver/src/s1.cpp and " in (
+        found.say
+    )
+    assert "and 2 more files declare no parameter" in found.say
 
 
 def test_param_set_undeclared_is_silent_when_the_code_builds_a_name_at_run_time():
@@ -1008,31 +1021,67 @@ def test_param_type_changed_is_silent_for_a_declaration_spelling_it_cannot_map()
     assert _run(_type_atlas("MyOwnScalar"), "param.type_changed") == []
 
 
-def test_param_type_changed_fires_inside_one_chain():
+def test_param_type_changed_ignores_a_losing_candidate_of_another_type():
+    """A shadowed candidate never reaches the node. Comparing it named a declaration type no
+    source states: a yaml string the inline bool replaced read as a str declaration."""
     builder = _builder()
-    _param(
+    source_file = ids.build_file("demo_pkg", "src/demo_server.cpp")
+    builder.node(source_file)
+    param_id = _param(
         builder,
-        "queue_depth",
+        "heartbeat",
         [
             _candidate(
-                2,
+                False,
                 model.Mechanism.LAUNCH_PARAMS_FILE.value,
-                _source(OVERLAY, "demo_server.ros__parameters.queue_depth", 3),
+                _source(OVERLAY, "demo_server.ros__parameters.heartbeat", 3),
                 rank=0,
                 wins=True,
             ),
             _candidate(
-                2.5,
+                "$(var heartbeat)",
                 model.Mechanism.YAML_BASE.value,
-                _source(BASE, "demo_server.ros__parameters.queue_depth", 14),
+                _source(BASE, "demo_server.ros__parameters.heartbeat", 14),
                 rank=1,
                 shadow_kind=model.ShadowKind.TYPE_CHANGED.value,
             ),
         ],
     )
-    found = _run(builder.recompute(), "param.type_changed")
-    assert len(found) == 1
-    assert "float" in found[0].say
+    builder.fact(
+        param_id,
+        CODED,
+        profile=PROFILE,
+        values={"declared_in_code": True, "type": "bool"},
+        evidence=[_source(source_file, "DemoServer::DemoServer", 22)],
+    )
+    assert _run(builder.recompute(), "param.type_changed") == []
+
+
+def test_param_type_changed_reads_a_whole_substitution_as_no_type():
+    builder = _builder()
+    source_file = ids.build_file("demo_pkg", "src/demo_server.cpp")
+    builder.node(source_file)
+    param_id = _param(
+        builder,
+        "heartbeat",
+        [
+            _candidate(
+                "$(var heartbeat)",
+                model.Mechanism.YAML_BASE.value,
+                _source(BASE, "demo_server.ros__parameters.heartbeat", 14),
+                rank=0,
+                wins=True,
+            )
+        ],
+    )
+    builder.fact(
+        param_id,
+        CODED,
+        profile=PROFILE,
+        values={"declared_in_code": True, "type": "bool"},
+        evidence=[_source(source_file, "DemoServer::DemoServer", 22)],
+    )
+    assert _run(builder.recompute(), "param.type_changed") == []
 
 
 def test_param_type_changed_ignores_a_file_the_profile_displaced():

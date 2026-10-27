@@ -65,6 +65,21 @@ def offered(cfg: Config) -> Config:
     return replace(cfg, profiles=tuple(_one_slug_rule(kept)))
 
 
+MANY_PROFILES = 20
+"""Past this many, init names the files a robot most likely starts from."""
+
+
+def top_level(cfg: Config) -> list[str]:
+    """The launch files of the offered profiles that no other launch file includes."""
+    included = _included(cfg.profiles)
+    return sorted(
+        f"{item.pkg}/{Path(item.target).name}"
+        for profile in cfg.profiles
+        for item in profile.entrypoints
+        if item.verb == "launch" and Path(item.target).name not in included
+    )
+
+
 def _included(profiles: Sequence[ProfileSpec]) -> set[str]:
     """The file names one launch file of the tree includes from another, read from the
     include itself: `PythonLaunchDescriptionSource([..., "rrbot_base.launch.py"])`, the
@@ -147,16 +162,21 @@ def _include_only(entry: Entrypoint, included: set[str]) -> bool:
 
 
 def _required_arguments(entry: Entrypoint) -> tuple[str, ...]:
-    from rosio.resolve.launch_exec import required_arguments
+    from rosio.resolve.launch_exec import required_arguments, required_frontend_arguments
 
-    if entry.verb != "launch" or entry.origin is None or entry.origin.path[-3:] != ".py":
+    if entry.verb != "launch" or entry.origin is None:
         return ()
+    path = Path(entry.origin.path)
     try:
-        source = Path(entry.origin.path).read_text(encoding="utf-8", errors="replace")
+        source = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ()
+    if path.suffix == ".py":
+        required = required_arguments(source)
+    else:
+        required = required_frontend_arguments(source, path.suffix)
     stated = {key for key, _value in entry.args}
-    return tuple(name for name in required_arguments(source) if name not in stated)
+    return tuple(name for name in required if name not in stated)
 
 
 def _one_slug_rule(profiles: Sequence[ProfileSpec]) -> list[ProfileSpec]:
@@ -271,11 +291,11 @@ FRONTENDS = {".xml": ("launch_xml",), ".yaml": ("launch_yaml",), ".yml": ("launc
 
 
 def _not_offered(entry: Entrypoint, ros_setup: Sequence[str] = ()) -> bool:
-    """A launch file init leaves out: a launch_testing file, or a markup file no installed
-    frontend parses, which extraction could only refuse. The frontend is looked for where
-    extraction walks, in the sourced environment, and a file is offered when that could not
-    be asked."""
-    from rosio.resolve.launch_exec import importable
+    """A launch file init leaves out: a launch_testing file, a ROS 1 launch file, or a markup
+    file no installed frontend parses, which extraction could only refuse. The frontend is
+    looked for where extraction walks, in the sourced environment, and a file is offered when
+    that could not be asked."""
+    from rosio.resolve.launch_exec import importable, is_ros1_launch
 
     if entry.verb != "launch" or entry.origin is None:
         return False
@@ -283,6 +303,8 @@ def _not_offered(entry: Entrypoint, ros_setup: Sequence[str] = ()) -> bool:
     if TEST_DIRS & {path.parent.name, path.parent.parent.name} or fnmatch(path.name, TEST_NAME):
         return True
     if path.suffix != ".py":
+        if is_ros1_launch(str(path)):
+            return True
         wanted = FRONTENDS.get(path.suffix, ("launch_xml", "launch_yaml"))
         found = importable(wanted, ros_setup)
         return found is not None and not found
