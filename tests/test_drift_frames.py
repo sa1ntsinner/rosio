@@ -542,6 +542,34 @@ def test_not_in_urdf_is_silent_when_a_transform_names_the_frame():
     assert frame_rules.frame_not_in_urdf(builder.build()) == []
 
 
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"argv": ["0", "0", "0", "0", "0", "0", "os_sensor", "os_imu"]},
+        {
+            "command_line": [
+                "@outside/static_transform_publisher",
+                *["0", "0", "0", "0", "0", "0", "1"],
+                *["os_sensor", "os_imu"],
+            ]
+        },
+        {
+            "command_line": [
+                "@outside/static_transform_publisher",
+                *["0", "0", "0", "0", "0", "0"],
+                *["os_sensor", "os_imu", "--ros-args", "-r", "__node:=st"],
+            ]
+        },
+    ],
+)
+def test_a_static_publisher_names_its_positional_pair_on_a_whole_command_line(values):
+    """The process table states the whole command line, the program first and the rules
+    launch appends after `--ros-args` last, so the positional pair is read between the two."""
+    builder = _config_frame_atlas("os_imu")
+    _node(builder, "/ouster_imu_tie", NAV, {"executable": "static_transform_publisher", **values})
+    assert frame_rules.frame_not_in_urdf(builder.build()) == []
+
+
 def test_not_in_urdf_is_silent_when_a_broadcast_edge_names_the_frame():
     builder = _config_frame_atlas("os_imu")
     source = _node(builder, "/fastlio_mapping", NAV, {"executable": "fastlio_mapping"})
@@ -1096,6 +1124,57 @@ def test_remap_unresolved_names_the_entry_file_when_a_root_holds_the_remap():
     found = frame_rules.remap_unresolved(_outside_remap_atlas("").build())
     assert found[0].say.startswith("navigation2.launch.py remaps cmd_vel to cmd_vel_nav and")
     assert "included from" not in found[0].say and "outside" not in found[0].fix
+
+
+def _inline_remap(builder: AtlasBuilder) -> AtlasBuilder:
+    """The entry point itself starts a node with the same remap, on a line it holds."""
+    entry = ids.build_file("nx_bringup", "launch/navigation2.launch.py")
+    owner = ids.build_launchent(
+        "nx_bringup", "launch/navigation2.launch.py", (("Node", "cmd_relay"),)
+    )
+    builder.node(entry)
+    builder.node(owner)
+    builder.unresolved(
+        Unresolved(
+            want=model.Want.OTHER.value,
+            owner=owner,
+            expr="cmd_vel:=cmd_vel_nav",
+            reason="nothing states the kind of the destination",
+            role="remap",
+            evidence=[Source(file=entry, locator="Node(cmd_relay)", line_hint=11)],
+        )
+    )
+    return builder
+
+
+def test_remap_unresolved_names_each_writer_of_one_remap_for_its_own_nodes():
+    stated = "@outside/share/nav2_bringup/launch/navigation_launch.py"
+    found = frame_rules.remap_unresolved(_inline_remap(_outside_remap_atlas(stated)).build())
+    assert len(found) == 1
+    finding = found[0]
+    assert finding.say == (
+        "navigation2.launch.py remaps cmd_vel to cmd_vel_nav, and so does "
+        "nav2_bringup/launch/navigation_launch.py, which it includes, and nothing in the "
+        "workspace states what kind of endpoint cmd_vel_nav is, so the connection is "
+        "unverified."
+    )
+    assert finding.detail.startswith(
+        "navigation2.launch.py remaps cmd_vel to cmd_vel_nav on Node(cmd_relay). "
+        "nav2_bringup/launch/navigation_launch.py remaps cmd_vel to cmd_vel_nav on "
+        "ComposableNode(controller_server). navigation2.launch.py includes it,"
+    )
+    assert finding.detail.endswith(
+        "so nothing states whether cmd_vel_nav is a topic, a "
+        "service or an action, and the endpoint stays unbound."
+    )
+    assert finding.fix.endswith(
+        "; navigation2.launch.py writes the rule for Node(cmd_relay) itself, and "
+        "nav2_bringup/launch/navigation_launch.py writes it for ComposableNode(controller_server) "
+        "outside every root, so change that one at the include in navigation2.launch.py"
+    )
+    alone = frame_rules.remap_unresolved(_inline_remap(_builder()).build())
+    assert _ids(found) == _ids(alone)
+    assert alone[0].say.startswith("navigation2.launch.py remaps cmd_vel to cmd_vel_nav and")
 
 
 def test_remap_unresolved_keeps_its_id_when_the_outside_file_is_named():

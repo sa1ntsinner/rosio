@@ -178,9 +178,10 @@ def _static_pairs(atlas: Atlas) -> list[_Static]:
         for fact in node.facts:
             if not rules.usable(fact) or fact.values.get("executable") != STATIC_TF_EXECUTABLE:
                 continue
-            parent, child = _static_frames(
-                fact.values.get("argv") or fact.values.get("command_line") or []
-            )
+            # The declared argv holds the arguments alone, the observed command line starts
+            # with the program.
+            argv = fact.values.get("argv") or (fact.values.get("command_line") or [])[1:]
+            parent, child = _static_frames(argv)
             if parent and child:
                 out.append(_Static(node.id, fact.profile, parent, child))
     return out
@@ -188,6 +189,8 @@ def _static_pairs(atlas: Atlas) -> list[_Static]:
 
 def _static_frames(argv: Sequence[Any]) -> tuple[str, str]:
     words = [str(item) for item in argv]
+    if "--ros-args" in words:
+        words = words[: words.index("--ros-args")]
     parent = child = ""
     for index, word in enumerate(words[:-1]):
         if word in _PARENT_FLAGS:
@@ -1082,10 +1085,24 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
         source, _sep, target = expr.partition(":=")
         first = group[0][0]
         where = _base_name(subject) or _remap_label(first)
-        launched = ", ".join(sorted({ids.label_for(entry.owner) for entry, _ in group}))
-        outside = ", ".join(sorted({_outside_file(entry.written_in) for entry, _ in group} - {""}))
+        writers: dict[str, set[str]] = {}
+        for entry, _ in group:
+            writers.setdefault(_outside_file(entry.written_in), set()).add(
+                ids.label_for(entry.owner)
+            )
+        inline = sorted(writers.pop("", ()))
+        outside = ", ".join(sorted(writers))
+        sentences = (
+            [f"{where} remaps {source} to {target} on {', '.join(inline)}."] if inline else []
+        )
+        sentences.extend(
+            f"{name} remaps {source} to {target} on {', '.join(sorted(nodes))}."
+            for name, nodes in sorted(writers.items())
+        )
         writer = outside or where
         via = f", included from {where}," if outside else ""
+        if outside and inline:
+            writer, via = where, f", and so does {outside}, which it includes,"
         included = (
             f" {where} includes it, and that include is the line the workspace holds."
             if outside
@@ -1097,6 +1114,13 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
             if outside
             else ""
         )
+        if outside and inline:
+            others = ", ".join(sorted(set().union(*writers.values())))
+            change = (
+                f"; {where} writes the rule for {', '.join(inline)} itself, and {outside} "
+                f"writes it for {others} outside every root, so change that one at the "
+                f"include in {where}"
+            )
         findings.append(
             Finding(
                 rule="remap.unresolved",
@@ -1104,10 +1128,10 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
                 subject=subject,
                 title=f"nothing states what kind of endpoint the remap {source} to {target} binds",
                 detail=(
-                    f"{writer} remaps {source} to {target} on {launched}.{included} No source in "
-                    "the read set publishes or subscribes either name and no interface "
-                    f"definition names it, so nothing states whether {target} is a topic, a "
-                    "service or an action, and the endpoint stays unbound."
+                    f"{' '.join(sentences)}{included} No source in the read set publishes or "
+                    "subscribes either name and no interface definition names it, so nothing "
+                    f"states whether {target} is a topic, a service or an action, and the "
+                    "endpoint stays unbound."
                 ),
                 fix=(
                     f"read the node source for the endpoint behind {source}, or add the package "

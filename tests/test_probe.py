@@ -1116,14 +1116,73 @@ def test_a_node_a_library_creates_is_marked_with_its_wrapper(ctx: CollectContext
     ).sort()
     atlas = _collect(ctx, system)
 
-    def wrapper(fqn: str) -> str | None:
-        fact = atlas.get(ids.build_node(fqn)).fact(model.Layer.OBSERVED.value, PROFILE_ID)
+    def wrapper(node_id: str) -> str | None:
+        fact = atlas.get(node_id).fact(model.Layer.OBSERVED.value, PROFILE_ID)
         return fact.values.get("via_known_wrapper")
 
-    assert wrapper("/bt_navigator_navigate_to_pose_rclcpp_node") == (
+    def wrapper_of(fqn: str) -> str | None:
+        return wrapper(ids.build_node(fqn))
+
+    assert wrapper_of("/bt_navigator_navigate_to_pose_rclcpp_node") == (
         "nav2_behavior_tree::BtActionServer"
     )
-    assert wrapper("/transform_listener_impl_5d3a90") == "tf2_ros::TransformListener"
+    (listener,) = [key for key in atlas.entities if key.startswith("node:~tf2_ros|")]
+    assert wrapper(listener) == "tf2_ros::TransformListener"
     # a name that only ends the same way, with no parent beside it, is not a child node
-    assert wrapper("/planner_rclcpp_node") is None
-    assert wrapper("/bt_navigator") is None
+    assert wrapper_of("/planner_rclcpp_node") is None
+    assert wrapper_of("/bt_navigator") is None
+
+
+def _restarted(listener: str, launcher: str, cli: str) -> probe_collect.ObservedSystem:
+    """One system as one start of it names the nodes a library and the tooling create."""
+    nodes = [
+        probe_collect.ObservedNode(name="talker", namespace="/", fqn="/talker"),
+        probe_collect.ObservedNode(
+            name=listener,
+            namespace="/",
+            fqn="/" + listener,
+            parameters=(probe_collect.Parameter(name="use_sim_time", value=False, type="bool"),),
+        ),
+        probe_collect.ObservedNode(
+            name=launcher, namespace="/", fqn="/" + launcher, parameters_read=False, internal=True
+        ),
+        probe_collect.ObservedNode(
+            name=cli, namespace="/", fqn="/" + cli, parameters_read=False, internal=True
+        ),
+    ]
+    endpoints = [
+        probe_collect.Endpoint(
+            kind="subscriber", node="/" + listener, name="/tf", type="tf2_msgs/msg/TFMessage"
+        ),
+        probe_collect.Endpoint(
+            kind="publisher", node="/" + launcher, name="/rosout", type="rcl_interfaces/msg/Log"
+        ),
+    ]
+    return probe_collect.ObservedSystem(nodes=nodes, endpoints=endpoints, domain_id="77").sort()
+
+
+def test_a_name_one_process_start_decides_is_never_identity(ws, cfg) -> None:
+    """A transform listener names its node after a pointer, `ros2 launch` after its process
+    id and ros2cli after its own. Two starts of one system are one atlas."""
+
+    def atlas(system: probe_collect.ObservedSystem) -> model.Atlas:
+        ctx = CollectContext(ws=ws, cfg=cfg, builder=model.AtlasBuilder(), profile=PROFILE)
+        ctx.builder.add_profile(PROFILE)
+        return _collect(ctx, system)
+
+    first = atlas(_restarted("transform_listener_impl_5d3a90", "launch_ros_291016", "_ros2cli_77"))
+    second = atlas(_restarted("transform_listener_impl_7f12c0", "launch_ros_301122", "_ros2cli_81"))
+    assert first.canonical_bytes() == second.canonical_bytes()
+    text = model.dumps(first.to_json())
+    for name in ("5d3a90", "291016", "_ros2cli_77"):
+        assert name not in text
+    synthetic = sorted(key for key in first.entities if key.startswith("node:~"))
+    assert [ids.label_for(key) for key in synthetic] == [
+        "launch_ros/launch_ros@/",
+        "ros2cli/ros2cli@/",
+        "tf2_ros/transform_listener_impl@/",
+    ]
+    for key in synthetic:
+        assert first.entities[key].name_source == model.NameSource.RUNTIME_RANDOMISED.value
+    assert "node:/talker" in first.entities
+    assert schema.validate(first.to_json()) == []

@@ -593,6 +593,14 @@ the expression and what was wanted, so two blind spots can neither merge nor mul
    measurement, and `ids.NAME_SOURCE_ORDER` ranks how well rosio knows a name rather than
    claiming to be the runtime rule.
 
+   Two more hold a whole argument list as it was written, because every rule above is read
+   off its order: the observed node `command_line`, which `rosio/collect/proc.py` writes from
+   the process with the program first, and the declared node `argv`, which
+   `rosio/collect/launch_declared.py` writes from the arguments a launch file passes (the
+   `argv` of an entry point row in `rosio/collect/entrypoints.py` is the same kind of list).
+   A positional argument means what its place says, the frame pair of a
+   `static_transform_publisher` among them, so none of them is ever sorted.
+
    Anything not named here is sorted. A sequence added to this
    exception is named here in the same commit, and its order is a fact of the source, never
    an iteration order.
@@ -785,6 +793,21 @@ whole command line of a node under `argv`, the key under which the declared laye
 the arguments a launch file passes, so every launched node with arguments disagreed with
 itself. The process table now writes `command_line`. No release had shipped, so no reader of
 the observed key existed.
+
+Two kinds of id moved under `1.17` and `1.18` without a bump, for the same reason. The blind
+spot of an include outside every root stated the machine path of the included file in its
+expression until `07c05d6`, so its id differed between two boxes, and every such id moved
+when the expression became the stated path. A file outside the checkout and every setup
+directory is stated by its name alone there, and two includes of `robot.launch.py` from two
+directories were one blind spot, so that form now carries the hash of the file's content as
+`Workspace.stated_by_content` states it, and those ids moved again. An observed node whose
+name one process start decides (`launch_ros_<pid>`, `_ros2cli_<pid>`,
+`transform_listener_impl_<address>`) was `node:/<that name>`, a new id on every restart; it
+is now synthetic over its package, its name stem and its namespace, with name source
+`runtime_randomised` and no `name` value, so its parameter ids moved with it and the observed
+run digest names it by that id. A `remap.unresolved` finding over one remap written both in a
+root file and in an outside file it includes names each writer with the nodes it starts, which
+changed its detail and its fingerprint and kept its id.
 
 One key went in `1.6` without a major bump, and it is named here rather than left for a reader
 to find. The declared `node` fact carried `conditions`, the conditions of the launch site that

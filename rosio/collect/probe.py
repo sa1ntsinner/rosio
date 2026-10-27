@@ -678,6 +678,10 @@ class ProbeCollector:
                     seen.setdefault(node.fqn, []).append(rmw)
             system = merge_observations(observations)
         system.sort()
+        owners = node_ids(system)
+        stable = {
+            fqn: node_id if ids.is_synthetic(node_id) else fqn for fqn, node_id in owners.items()
+        }
         builder = ctx.builder
         profile = ids.build_profile(ctx.profile) if ctx.profile else model.ANY_PROFILE
         run = builder.add_run(
@@ -687,8 +691,11 @@ class ProbeCollector:
                 NAME,
                 *[ids.digest_fields(row) for row in passes],
                 system.domain_id,
-                *system.node_names(),
-                *sorted(f"{item.node}|{item.kind}|{item.name}" for item in system.endpoints),
+                *sorted(set(stable.values())),
+                *sorted(
+                    f"{stable.get(item.node, item.node)}|{item.kind}|{item.name}"
+                    for item in system.endpoints
+                ),
             ),
             roots=ctx.ws.root_hashes(),
             env={
@@ -740,16 +747,18 @@ class ProbeCollector:
             )
             return
         builder.declare_layer(LAYER, present=True, run=run, root=model.Root.RUNTIME.value)
-        owners = self._nodes(ctx, run, profile, system, seen)
-        for fqn, middlewares in sorted(seen.items()):
-            node_id = owners[fqn]
+        through = _seen_through(owners, seen)
+        self._nodes(ctx, run, profile, system, owners, through)
+        for node_id, middlewares in sorted(through.items()):
+            if not middlewares:
+                continue
             fact = builder.atlas.entities[node_id].fact(LAYER, profile)
-            values: dict[str, Any] = {"seen_through": sorted(middlewares)}
+            values: dict[str, Any] = {"seen_through": middlewares}
             if "rmw" not in fact.values:
                 values["rmw"] = middlewares[0] if len(middlewares) == 1 else "unknown"
             builder.fact(node_id, LAYER, profile=profile, values=values)
         self._endpoints(ctx, run, profile, system, owners)
-        self._parameters(ctx, run, profile, system)
+        self._parameters(ctx, run, profile, system, owners)
         self._frames(ctx, run, profile, system, owners)
 
     # nodes ---------------------------------------------------------------
@@ -759,15 +768,14 @@ class ProbeCollector:
         run: str,
         profile: str,
         system: ObservedSystem,
-        seen: Mapping[str, list[str]],
-    ) -> dict[str, str]:
+        owners: Mapping[str, str],
+        through: Mapping[str, list[str]],
+    ) -> None:
         builder = ctx.builder
-        owners: dict[str, str] = {}
-        siblings: dict[str, list[str]] = {}
+        siblings = _siblings(system)
         for item in system.nodes:
-            siblings.setdefault(item.namespace, []).append(item.name)
-        for item in system.nodes:
-            node_id = ids.build_node(item.fqn)
+            node_id = owners[item.fqn]
+            randomised = ids.is_synthetic(node_id)
             existing = builder.atlas.entities.get(node_id)
             held = existing is not None and existing.fact(LAYER, profile) is not None
             stated = existing is not None and existing.name_source not in (
@@ -777,15 +785,19 @@ class ProbeCollector:
             # The probe observed the name, it did not decide it. A layer that can say where
             # the name comes from keeps that answer, and the process table is the other half
             # of this layer, so the slot belongs to whichever half reached it first.
-            builder.node(
-                node_id,
-                name_source=None if stated else model.NameSource.OBSERVED.value,
-            )
+            # A name one process start decided is not stated at all, or two starts of one
+            # system would be two atlases.
+            if randomised:
+                source = model.NameSource.RUNTIME_RANDOMISED.value
+            else:
+                source = None if stated else model.NameSource.OBSERVED.value
+            builder.node(node_id, name_source=source)
             values: dict[str, Any] = {
-                "name": item.name,
                 "namespace": ids.normalise_namespace(item.namespace),
-                "seen_through": sorted(seen.get(item.fqn, [])),
+                "seen_through": through[node_id],
             }
+            if not randomised:
+                values["name"] = item.name
             if item.internal:
                 values["internal"] = True
             wrapper = wrappers.node_wrapper(item.name, siblings[item.namespace])
@@ -802,8 +814,6 @@ class ProbeCollector:
                 confidence=model.Confidence.CERTAIN.value,
             )
             builder.count_resolved(model.Want.NODE_NAME.value)
-            owners[item.fqn] = node_id
-        return owners
 
     # endpoints -----------------------------------------------------------
     def _endpoints(
@@ -928,11 +938,16 @@ class ProbeCollector:
 
     # parameters ----------------------------------------------------------
     def _parameters(
-        self, ctx: CollectContext, run: str, profile: str, system: ObservedSystem
+        self,
+        ctx: CollectContext,
+        run: str,
+        profile: str,
+        system: ObservedSystem,
+        owners: Mapping[str, str],
     ) -> None:
         builder = ctx.builder
         for item in system.nodes:
-            node_id = ids.build_node(item.fqn)
+            node_id = owners[item.fqn]
             if item.internal:
                 # Tooling that attached itself to the graph is not read on purpose, and a
                 # decision is not a blind spot.
@@ -1097,6 +1112,55 @@ def internal_name(name: str) -> bool:
     return any(name.startswith(prefix) for prefix in INTERNAL_PREFIXES)
 
 
+def randomised_family(name: str, siblings: Sequence[str] = ()) -> tuple[str, str]:
+    """The package and name stem of a node whose name one process start decides, or two
+    empty strings.
+
+    `ros2 launch` names its node after its process id, ros2cli after its own, and a transform
+    listener with its own spin thread after a pointer. Such a name is never identity (AGENTS
+    3.4 rule 2): the node is synthetic over the stem and its namespace, so a restart of the
+    system writes the same atlas, and two of one family in one namespace are one node.
+    """
+    if internal_name(name):
+        prefix = next(
+            item for item in (LAUNCH_NODE_PREFIX, *INTERNAL_PREFIXES) if name.startswith(item)
+        )
+        stem = prefix.strip("_")
+        return stem, stem
+    row = next((row for row in wrappers.NODES if row.stem and row.matches(name, siblings)), None)
+    return (row.symbol.split("::")[0], row.stem) if row is not None else ("", "")
+
+
+def node_ids(system: ObservedSystem) -> dict[str, str]:
+    """The node id of every observed name."""
+    siblings = _siblings(system)
+    out: dict[str, str] = {}
+    for item in system.nodes:
+        package, stem = randomised_family(item.name, siblings[item.namespace])
+        out[item.fqn] = (
+            ids.build_node_synthetic(package, stem, item.namespace, ids.role_digest(stem=stem))
+            if stem
+            else ids.build_node(item.fqn)
+        )
+    return out
+
+
+def _siblings(system: ObservedSystem) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for item in system.nodes:
+        out.setdefault(item.namespace, []).append(item.name)
+    return out
+
+
+def _seen_through(owners: Mapping[str, str], seen: Mapping[str, list[str]]) -> dict[str, list[str]]:
+    """The middlewares each node was seen through, one row per node id, since the names of
+    one randomised family share one."""
+    out: dict[str, set[str]] = {}
+    for fqn, node_id in owners.items():
+        out.setdefault(node_id, set()).update(seen.get(fqn, []))
+    return {node_id: sorted(items) for node_id, items in out.items()}
+
+
 def summary(system: ObservedSystem) -> dict[str, Any]:
     """Counts for a human reading a probe. Every number here is volatile."""
     kinds: dict[str, int] = {}
@@ -1142,6 +1206,8 @@ __all__ = [
     "decode_system",
     "encode_system",
     "internal_name",
+    "node_ids",
     "probe",
+    "randomised_family",
     "summary",
 ]

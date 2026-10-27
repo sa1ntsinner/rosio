@@ -41,7 +41,7 @@ from rosio.collect import CollectContext, register, urdf
 from rosio.config import Entrypoint, ProfileSpec
 from rosio.errors import CollectorError, ContractError
 from rosio.resolve import identity, records, ros_args, substitutions
-from rosio.workspace import Workspace
+from rosio.workspace import OUTSIDE, Workspace
 
 NAME = "launch_declared"
 LAYER = model.Layer.DECLARED.value
@@ -745,7 +745,7 @@ class LaunchDeclaredCollector:
                     model.Unresolved(
                         want=model.Want.OTHER.value,
                         owner=launchfile_id,
-                        expr=ctx.ws.stated_path(include.path, ctx.cfg.ros_setup),
+                        expr=_outside_include(ctx, include.path),
                         reason="the included launch file is outside every configured root",
                         role="include",
                         resolvable_by=["add the package to the roots"],
@@ -2022,9 +2022,37 @@ def _held_source(
     A node or an include stated in a file outside every root, nav2_bringup from the ROS
     installation under turtlebot3, is cited at the deepest include on its trail whose line a
     root holds, which is the line an engineer edits. The locator is the action trail, so it
-    still names every outside file between that line and the site."""
+    still names every outside file between that line and the site.
+
+    The include steps of a trail name a file by its basename, so two includes of
+    `robot.launch.py` from one file share one step. The include that reached the site is
+    therefore followed by path, file to the include that read it, up to a line a root holds;
+    the deepest include on the trail answers only when that chain breaks."""
     if site is not None and _in_workspace(ws, site.path):
         return _source(ws, site.path, locator, site.line_hint)
+    on_trail = [
+        include
+        for include in walk.includes
+        if include.site is not None
+        and include.entity_path
+        and trail[: len(include.entity_path)] == include.entity_path
+    ]
+    path, depth = (site.path if site is not None else ""), len(trail)
+    while path:
+        reached = [
+            include
+            for include in on_trail
+            if include.path == path and len(include.entity_path) <= depth
+        ]
+        if not reached:
+            break
+        include = max(reached, key=lambda item: len(item.entity_path))
+        cite = include.site
+        if cite is None:
+            break
+        if _in_workspace(ws, cite.path):
+            return _source(ws, cite.path, locator, cite.line_hint)
+        path, depth = cite.path, len(include.entity_path) - 1
     held = [
         (len(include.entity_path), include.site)
         for include in walk.includes
@@ -2052,6 +2080,19 @@ def _written_outside(ctx: CollectContext, site: records.Site | None) -> str:
     if site is None or not site.path or _in_workspace(ctx.ws, site.path):
         return ""
     return ctx.ws.stated_path(site.path, ctx.cfg.ros_setup)
+
+
+def _outside_include(ctx: CollectContext, path: str) -> str:
+    """An included file no root holds, as its blind spot states it.
+
+    `stated_path` names a file outside the checkout and every setup directory by its name
+    alone, and the blind spot id is a digest over that expression, so two includes of
+    `robot.launch.py` from two directories were one blind spot. That form is stated by its
+    content as well, the way `Workspace.stated_by_content` states a setup file."""
+    stated = ctx.ws.stated_path(path, ctx.cfg.ros_setup)
+    if stated.startswith(f"{OUTSIDE}/") and stated.count("/") == 1:
+        return ctx.ws.stated_by_content([path])[0]
+    return stated
 
 
 def _problem_path(file_id: str) -> str:

@@ -621,6 +621,9 @@ class WrapperNode:
     symbol: str
     pattern: str
     evidence: str = ""
+    stem: str = ""
+    """The name before the value one process start appends, set only on a row whose names
+    are therefore never identity."""
 
     def matches(self, name: str, siblings: Iterable[str]) -> bool:
         if "{parent}" not in self.pattern:
@@ -639,6 +642,7 @@ NODES: tuple[WrapperNode, ...] = (
         evidence="/opt/ros/jazzy/lib/libtf2_ros.so holds the format transform_listener_impl_%zx, "
         "the node a listener with its own spin thread creates; lib/python3.12/site-packages/"
         "tf2_ros/transform_listener.py:87 formats the python one the same way",
+        stem="transform_listener_impl",
     ),
     WrapperNode(
         symbol="nav2_behavior_tree::BtActionServer",

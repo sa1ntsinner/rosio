@@ -385,16 +385,15 @@ class Workspace:
     def stated_message(self, text: str, ros_setup: Sequence[str] = ()) -> str:
         """Text a tool said, with every absolute path in it stated by `stated_path`.
 
-        A ROS name starts with a slash too, so a token is taken for a path only when its last
-        segment carries a suffix, which no ROS name can, or when it sits under a directory
-        every Linux box has at the top. `/cmd_vel` stays, `/somewhere/else/x.yaml` becomes
-        `@outside/x.yaml`.
+        A ROS name starts with a slash too, so `_names_a_file` decides which tokens are paths.
+        `/cmd_vel` stays, `/somewhere/else/x.yaml` becomes `@outside/x.yaml`.
         """
         text = self.stated_value(text, ros_setup)
 
         def stated(match: re.Match[str]) -> str:
             token = match.group(0).rstrip(".")
-            if not _names_a_file(token):
+            quoted = _PYTHON_QUOTED.search(text[max(0, match.start() - 3) : match.start()])
+            if not _names_a_file(token, quoted is not None):
                 return match.group(0)
             return self.stated_path(token, ros_setup) + match.group(0)[len(token) :]
 
@@ -1133,14 +1132,18 @@ def _prefix_marks(prefix: str) -> list[tuple[bytes, bytes]]:
     )
 
 
-# A root ends where a name ends, so `/ws/src` never rewrites `/ws/src_backup`.
+# A root ends where a name ends, so `/ws/src` never rewrites `/ws/src_backup`, and starts where
+# a path starts, so `/opt/ros/jazzy` never rewrites the middle of `/data/opt/ros/jazzy`.
 _NAME_ENDS = r"(?![\w.+~@-])"
+_PATH_STARTS = r"(?<![\w.+~@%-])"
 
 
 def _replaced(value: Any, rows: Sequence[tuple[str, str]]) -> Any:
     if isinstance(value, str):
         for path, mark in rows:
-            value = re.sub(re.escape(path) + _NAME_ENDS, lambda _, mark=mark: mark, value)
+            value = re.sub(
+                _PATH_STARTS + re.escape(path) + _NAME_ENDS, lambda _, mark=mark: mark, value
+            )
         return value
     if isinstance(value, list):
         return [_replaced(item, rows) for item in value]
@@ -1193,11 +1196,27 @@ def _nameable(path: str) -> bool:
 # (`a/b`, `@src/x`, `package://x`), except the third slash of `file:///`.
 _ABSOLUTE = re.compile(r"(?:(?<=file://)|(?<![\w@.~%:/-]))/[^\s'\"`,;:()\[\]{}<>|=]+")
 _SYSTEM_TOPS = frozenset({"etc", "home", "media", "mnt", "opt", "root", "srv", "tmp", "usr", "var"})
+# Python quotes a path it raises on after a colon, and every item of a list it prints.
+_PYTHON_QUOTED = re.compile(r"(?:\[|: |, )['\"]$")
+_NOT_IN_A_ROS_NAME = re.compile(r"[^A-Za-z0-9_]")
 
 
-def _names_a_file(token: str) -> bool:
+def _names_a_file(token: str, quoted: bool = False) -> bool:
+    """Whether an absolute token in a message is a path rather than a ROS name.
+
+    Nothing on disk decides it, so two machines state one message one way. A token is a path
+    when a segment holds a character no ROS name can (`x.yaml`, `my-ws`), when it sits under a
+    top every Linux box has, or when it has two segments or more and Python quoted it the way
+    it quotes a path (`No such file or directory: '/data/maps/office'`, the search list of a
+    missing package naming an overlay at `/overlay_ws`). A ROS name keeps its spelling outside
+    those quotes, `/robot/cmd_vel` in prose or `topic '/robot/odom'`, and a quoted name of one
+    segment is never taken for a path. What stays is a directory of ROS legal names under any
+    other top, written bare in prose.
+    """
     parts = token.strip("/").split("/")
-    return "." in parts[-1] or (len(parts) > 1 and parts[0] in _SYSTEM_TOPS)
+    if any(_NOT_IN_A_ROS_NAME.search(part) for part in parts):
+        return True
+    return len(parts) > 1 and (quoted or parts[0] in _SYSTEM_TOPS)
 
 
 def _outside(path: str) -> str:

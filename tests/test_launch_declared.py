@@ -2638,6 +2638,60 @@ def test_a_remap_an_outside_file_writes_names_that_file_beside_the_include_it_ci
     assert schema.validate(atlas.to_json()) == []
 
 
+def test_two_outside_includes_of_one_name_keep_their_own_lines_and_blind_spots(
+    tmp_path: Path,
+) -> None:
+    """A root file includes `a/robot.launch.py` and `b/robot.launch.py`, neither under a root.
+    Both include steps read `Include(robot.launch.py)`, so the node under the second was cited
+    at the line of the first, and the two blind spots stated one name and merged into one."""
+    ctx, walk = _outside_include(tmp_path)
+    entry = walk.entry_path
+    included = []
+    for side, line in (("a", 9), ("b", 10)):
+        path = tmp_path / "outside" / side / "robot.launch.py"
+        path.parent.mkdir(parents=True)
+        path.write_text(f"# robot {side}\n", encoding="utf-8")
+        included.append((side, str(path), line))
+    walk.includes = [
+        records.LaunchInclude(
+            path=path,
+            entity_path=("Include(robot.launch.py)",),
+            site=records.Site(entry, "Include(robot.launch.py)", line),
+        )
+        for _side, path, line in included
+    ]
+    walk.nodes = [
+        records.ResolvedNode(
+            pkg="demo",
+            executable=f"talker_{side}",
+            namespace="",
+            name=f"talker_{side}",
+            name_source="literal",
+            entity_path=("Include(robot.launch.py)", f"Node(talker_{side})"),
+            site=records.Site(path, f"Node(talker_{side})", 5),
+        )
+        for side, path, _line in included
+    ]
+    get(launch_declared.NAME).collect(ctx)
+    atlas = ctx.builder.build()
+
+    def cited(node_id: str) -> int | None:
+        edge = next(
+            edge for edge in atlas.edges.values() if edge.kind == "launches" and edge.dst == node_id
+        )
+        (row,) = [row for fact in edge.facts for row in fact.evidence]
+        return row.line_hint
+
+    assert cited("node:/talker_a") == 9
+    assert cited("node:/talker_b") == 10
+    blind = [entry for entry in atlas.unresolved if entry.role == "include"]
+    assert len(blind) == 2
+    assert len({entry.expr for entry in blind}) == 2
+    assert all(entry.expr.startswith("@outside/robot.launch.py#") for entry in blind)
+    assert sorted(row.line_hint for entry in blind for row in entry.evidence) == [9, 10]
+    assert str(tmp_path) not in model.dumps(atlas.to_json())
+
+
 def test_one_node_that_fails_to_place_drops_none_of_its_siblings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

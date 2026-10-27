@@ -695,6 +695,41 @@ def test_a_message_states_every_path_it_names_and_no_ros_name(bench: Path, tmp_p
     )
 
 
+def test_a_message_states_a_directory_python_quotes_under_any_top(bench: Path, tmp_path: Path):
+    """An overlay that is not a root, `/overlay_ws` in a container image, is named in the
+    search list of every missing package. Python quotes a path it raises on and every item
+    of a list, so a quoted token of two segments is a path whatever its top, while a ROS
+    name outside quotes, or quoted alone in prose, keeps its spelling."""
+    ws = Workspace.discover([RootSpec("src", str(bench / "src"))])
+    setup = (str(tmp_path / "opt" / "ros" / "jazzy" / "setup.bash"),)
+    ros = str(tmp_path / "opt" / "ros" / "jazzy")
+    cases = {
+        f"package 'nav2_bringup' not found, searching: ['/overlay_ws/install/nav2_bringup', "
+        f"'{ros}']": "package 'nav2_bringup' not found, searching: ['@outside/nav2_bringup', "
+        "'@outside']",
+        "[Errno 2] No such file or directory: '/data/maps/office'": (
+            "[Errno 2] No such file or directory: '@outside/office'"
+        ),
+        "cannot read /my-ws/install/maps": "cannot read @outside/maps",
+        "remap /robot/cmd_vel to '/cmd_vel' for topic '/robot/odom'": (
+            "remap /robot/cmd_vel to '/cmd_vel' for topic '/robot/odom'"
+        ),
+        "names: ['/cmd_vel']": "names: ['/cmd_vel']",
+    }
+    for text, stated in cases.items():
+        assert ws.stated_message(text, setup) == stated
+
+
+def test_a_setup_prefix_is_replaced_only_where_a_path_starts(bench: Path, tmp_path: Path):
+    ws = Workspace.discover([RootSpec("src", str(bench / "src"))])
+    ros = str(tmp_path / "opt" / "ros" / "jazzy")
+    setup = (f"{ros}/setup.bash",)
+    assert ws.stated_value(f"/data{ros}/share/x/y.yaml", setup) == f"/data{ros}/share/x/y.yaml"
+    assert ws.stated_path(f"/data{ros}/share/x/y.yaml", setup) == "@outside/y.yaml"
+    assert ws.stated_value(f"file://{ros}/share/x/y.dae", setup) == "file://@outside/share/x/y.dae"
+    assert ws.stated_value(f"['{ros}/share', {ros}]", setup) == "['@outside/share', @outside]"
+
+
 def test_the_content_of_a_file_outside_the_checkout_still_moves_its_mark(
     bench: Path, tmp_path: Path
 ):
