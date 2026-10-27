@@ -470,6 +470,10 @@ def run(options: Options) -> None:
     server = build(
         tools.AtlasSource(options.atlas, confined=options.http, workspace=options.workspace)
     )
+    # mcp logs every session and every refused call at INFO through a column wrapped
+    # handler, which buries a real warning on a team server and fills an assistant's log
+    # with a message the caller already received.
+    logging.getLogger("mcp").setLevel(logging.WARNING)
     if not options.http:
         _run_async(server.run_stdio_async)
         return
@@ -478,9 +482,6 @@ def run(options: Options) -> None:
     except ImportError as exc:
         raise UsageError(UVICORN_MISSING) from exc
 
-    # mcp logs every session at INFO through a column wrapped handler, which buries a real
-    # warning on a team server.
-    logging.getLogger("mcp").setLevel(logging.WARNING)
     config = uvicorn.Config(
         http_app(server, options), host=options.host, port=options.port, log_level="warning"
     )

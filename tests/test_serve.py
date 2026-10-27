@@ -1632,4 +1632,15 @@ def test_the_http_server_keeps_session_chatter_out_of_its_log(atlas_file, monkey
     logging.getLogger("mcp").setLevel(logging.NOTSET)
     server.run(server.Options(atlas=str(atlas_file), http=True))
     assert ran and ran[0]["log_level"] == "warning"
-    assert logging.getLogger("mcp").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("mcp").level == logging.WARNING
+
+
+def test_the_stdio_server_keeps_refused_calls_out_of_its_log(atlas_file, monkeypatch):
+    """A refused call came out as a wrapped INFO block in the assistant's log."""
+    import logging
+
+    pytest.importorskip("mcp")
+    monkeypatch.setattr(server, "_run_async", lambda entry: None)
+    logging.getLogger("mcp").setLevel(logging.NOTSET)
+    server.run(server.Options(atlas=str(atlas_file)))
+    assert logging.getLogger("mcp").level == logging.WARNING
