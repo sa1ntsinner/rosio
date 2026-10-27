@@ -506,3 +506,63 @@ def test_a_component_also_constructed_in_main_binds_in_both_loads(tmp_path: Path
     }
     assert not [row for row in atlas.unresolved if row.reason == "construction_context_unavailable"]
     assert schema.validate(atlas.to_json()) == []
+
+
+@pytest.mark.ros
+def test_a_load_whose_condition_is_off_binds_no_code(tmp_path: Path):
+    """One list of components goes into a new container or, under a condition the profile
+    reads false, into an existing one. The second site starts nothing, so nothing publishes
+    through it."""
+    package = tmp_path / "src" / "demo"
+    (package / "include" / "demo").mkdir(parents=True)
+    (package / "src").mkdir()
+    (package / "launch").mkdir()
+    (package / "package.xml").write_text(
+        "<package><name>demo</name><version>0.0.0</version></package>"
+    )
+    (package / "CMakeLists.txt").write_text(
+        "project(demo)\n"
+        "add_library(talker_component SHARED src/component.cpp)\n"
+        "target_include_directories(talker_component PUBLIC include)\n"
+        'rclcpp_components_register_nodes(talker_component "demo::Talker")\n'
+    )
+    (package / "include" / "demo" / "talker.hpp").write_text(TALKER)
+    (package / "src" / "component.cpp").write_text(TALKER_COMPONENT)
+    (package / "launch" / "either.launch.py").write_text(
+        "from launch import LaunchDescription\n"
+        "from launch.actions import DeclareLaunchArgument\n"
+        "from launch.conditions import LaunchConfigurationEquals, LaunchConfigurationNotEquals\n"
+        "from launch.substitutions import LaunchConfiguration\n"
+        "from launch_ros.actions import ComposableNodeContainer, LoadComposableNodes\n"
+        "from launch_ros.descriptions import ComposableNode\n"
+        "def generate_launch_description():\n"
+        "    nodes = [ComposableNode(package='demo', plugin='demo::Talker')]\n"
+        "    return LaunchDescription([\n"
+        "        DeclareLaunchArgument('container', default_value=''),\n"
+        "        ComposableNodeContainer(\n"
+        "            condition=LaunchConfigurationEquals('container', ''),\n"
+        "            package='rclcpp_components', executable='component_container',\n"
+        "            name='container', namespace='', composable_node_descriptions=nodes),\n"
+        "        LoadComposableNodes(\n"
+        "            condition=LaunchConfigurationNotEquals('container', ''),\n"
+        "            composable_node_descriptions=nodes,\n"
+        "            target_container=LaunchConfiguration('container')),\n"
+        "    ])\n"
+    )
+    roots = (RootSpec("src", str(tmp_path / "src")),)
+    config = Config(
+        roots=roots,
+        profiles=(
+            ProfileSpec("either", entrypoints=(Entrypoint("launch", "demo", "either.launch.py"),)),
+        ),
+        out_dir=str(tmp_path / "out"),
+        deterministic=True,
+    )
+    atlas = extract.run(config, Workspace.discover(roots))
+    publishers = {
+        edge.src
+        for edge in atlas.in_edges("topic:/chatter")
+        if edge.kind == model.EdgeKind.PUBLISHES.value
+    }
+    assert publishers == {"node:/talker"}
+    assert schema.validate(atlas.to_json()) == []

@@ -582,12 +582,18 @@ def _constructed_carriers(
                         )
                         if resolved:
                             pending.append(resolved)
-                for carrier in [
-                    item
+                for selected_by, carrier in [
+                    (selected_name, item)
                     for selected_name in sorted(selected)
                     for item in _methods_of(table, selected_name, classes.get(pkg, set()))
                 ]:
-                    if carrier.file not in sources and carrier.file != row.get("definition_file"):
+                    if (
+                        carrier.file not in sources
+                        and carrier.file != row.get("definition_file")
+                        # a class the constructed one inherits or hands itself to, defined
+                        # in a header of its package, is compiled wherever it is included
+                        and (selected_by == name or not _header(carrier.file))
+                    ):
                         continue
                     rows = by_exe.setdefault(exe, [])
                     existing = next((item for item in rows if item.owner == carrier.owner), None)
@@ -604,6 +610,10 @@ def _constructed_carriers(
                         )
                     rows.append(replace(carrier, construction_sources=evidence))
                     bound.add(carrier.owner)
+
+
+def _header(file_id: str) -> bool:
+    return file_id.endswith((".h", ".hpp", ".hh", ".hxx"))
 
 
 def _methods_of(table: dict[str, list[Carrier]], name: str, classes: set[str]) -> list[Carrier]:
@@ -666,7 +676,11 @@ def _rule_rows(raw: Any) -> list[tuple[str, str]]:
 
 
 def instances(atlas: model.Atlas) -> list[Instance]:
-    """Every node instance the declared layer placed, one row per profile."""
+    """Every node instance the declared layer placed, one row per profile.
+
+    A node whose every launch site is off in a profile, a condition read false, is not an
+    instance there: no code runs under it, so no record binds to it.
+    """
     found: list[Instance] = []
     for entity_id in sorted(atlas.entities):
         entity = atlas.entities[entity_id]
@@ -702,7 +716,7 @@ def instances(atlas: model.Atlas) -> list[Instance]:
                     argv=tuple(_string_list(values.get("argv"))),
                 )
             )
-    return found
+    return [item for item in found if _launched(atlas, item)]
 
 
 # ---------------------------------------------------------------------------
@@ -1234,6 +1248,7 @@ def index_of(builder: model.AtlasBuilder, report: JoinReport) -> Index:
             if selected:
                 by_exe[entity.id] = selected
     _constructed_carriers(builder, found, by_exe, bound)
+    _untraced_helpers(builder, found, bound, (by_plugin, by_component))
     report.unbound_carriers = len(
         [
             carrier
@@ -1250,6 +1265,60 @@ def index_of(builder: model.AtlasBuilder, report: JoinReport) -> Index:
         by_symbol=_frozen(by_symbol),
         by_script=_frozen(_script_table(by_file)),
     )
+
+
+def _untraced_helpers(
+    builder: model.AtlasBuilder,
+    found: list[Carrier],
+    bound: set[str],
+    tables: tuple[dict[str, list[Carrier]], ...],
+) -> None:
+    """Records of a C++ class that no node class inherits or hands itself to, in a source a
+    target of the package builds, once the join followed the package's executable code. The
+    class reaches a node through a handle this reader could not trace to one, so each such
+    method is a blind spot rather than nothing."""
+    followed = {ids.parse_file(item.file).package for item in found if item.owner in bound}
+    built = {path for paths in _library_sources(builder.atlas).values() for path in paths}
+    built.update(path for row in _build_rows(builder.atlas).values() for path in row["sources"])
+    reached: dict[str, set[str]] = {}
+    for carrier in found:
+        if (
+            carrier.owner in bound
+            or not carrier.symbol
+            or carrier.language != "cpp"
+            or not (carrier.endpoints or carrier.parameters or carrier.tf_broadcasts)
+            or any(_in_table(carrier, table) for table in tables)
+        ):
+            continue
+        pkg = ids.parse_file(carrier.file).package
+        klass = _class_type(ids.parse_sym(carrier.symbol).qualname).rpartition("::")[0]
+        if pkg not in followed or not klass or carrier.file not in built:
+            continue
+        if pkg not in reached:
+            graph = _class_graph(builder.atlas, pkg)
+            nodes = {
+                _short(str(row.get("class") or ""))
+                for item in found
+                if item.file and ids.parse_file(item.file).package == pkg
+                for row in item.nodes
+            } | {_short(_class_type(name)) for table in tables for name in table}
+            reached[pkg] = {name for node in nodes for name in _reach(graph, node)}
+        if _short(klass) in reached[pkg]:
+            continue
+        row = next(iter(carrier.endpoints or carrier.parameters or carrier.tf_broadcasts))
+        builder.unresolved(
+            model.Unresolved(
+                want=model.Want.OTHER.value,
+                owner=carrier.symbol,
+                expr=klass,
+                reason="node_handle_untraced",
+                role="helper",
+                resolvable_by=[
+                    "construct the class from the node class, handing it this or shared_from_this()"
+                ],
+                evidence=_source(carrier, row),
+            )
+        )
 
 
 def _script_table(by_file: dict[str, list[Carrier]]) -> dict[str, list[Carrier]]:
@@ -1463,9 +1532,6 @@ def _supersede(
         _split(builder, item, nodes, report)
     # One profile launching this executable twice states two runtime nodes for one code name,
     # so neither of them may take it.
-    # A site whose condition is false in the profile starts nothing there, and the load
-    # into an existing container beside a new container is one such pair.
-    rows = [row for row in rows if _launched(atlas, row[0])]
     crowded = {
         key
         for key, count in Counter((item.profile, new_id) for item, _, new_id in rows).items()
@@ -2027,8 +2093,9 @@ SCOPED_FIELDS = (
 def _own(atlas: model.Atlas, item: Instance, found: tuple[Carrier, ...]) -> tuple[Carrier, ...]:
     """The records of the one node a split gave this id, out of a process that runs several.
 
-    A record of another node's class or of another construction is that node's. A record of
-    a class no node is built from, a base or a free function, stays with every node.
+    A record of another node's class or of another construction is that node's, and so is a
+    record of a class only another node inherits or hands itself to. A record of a class no
+    node reaches that way, or that several reach, or of a free function, stays with every node.
     """
     entity = atlas.entities.get(item.node_id)
     name = str(entity.attrs.get("name_from_code") or "") if entity is not None else ""
@@ -2037,10 +2104,14 @@ def _own(atlas: model.Atlas, item: Instance, found: tuple[Carrier, ...]) -> tupl
         return found
     mine = nodes[name]
     construction = str(mine.get("construction") or "")
-    others = {_short(str(row.get("class") or "")) for row in nodes.values()} - {
-        _short(str(mine.get("class") or "")),
-        "",
-    }
+    graph = _class_graph(atlas, item.pkg)
+    own = _reach(graph, _short(str(mine.get("class") or "")))
+    others = {
+        reached
+        for row in nodes.values()
+        if row is not mine
+        for reached in _reach(graph, _short(str(row.get("class") or "")))
+    } - own
 
     def kept(row: dict[str, Any]) -> bool:
         if construction and row.get("construction") and row["construction"] != construction:
@@ -2058,6 +2129,33 @@ def _own(atlas: model.Atlas, item: Instance, found: tuple[Carrier, ...]) -> tupl
         )
         for carrier in found
     )
+
+
+def _class_graph(atlas: model.Atlas, pkg: str) -> dict[str, set[str]]:
+    """Each class of a package, by short name, to the classes it inherits or hands itself to."""
+    graph: dict[str, set[str]] = {}
+    for entity in atlas.by_kind("file"):
+        if ids.parse_file(entity.id).package != pkg:
+            continue
+        sources = [entity.attrs, *(fact.values for fact in entity.facts if fact.layer == CODED)]
+        for values in sources:
+            for row in _records(values).get("classes", ()):
+                graph.setdefault(_short(_class_type(str(row.get("name") or ""))), set()).update(
+                    _short(_class_type(str(other)))
+                    for other in [*row.get("bases", []), *row.get("node_helpers", [])]
+                )
+    return graph
+
+
+def _reach(graph: dict[str, set[str]], name: str) -> set[str]:
+    reached: set[str] = set()
+    pending = [name] if name else []
+    while pending:
+        current = pending.pop()
+        if current and current not in reached:
+            reached.add(current)
+            pending.extend(graph.get(current, ()))
+    return reached
 
 
 def _row_of_class(row: dict[str, Any], implementation: str) -> bool:

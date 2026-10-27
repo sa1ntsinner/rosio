@@ -1061,6 +1061,22 @@ or `ament_auto_add_library` adds is read as its plain spelling, and an executabl
 name `OUTPUT_NAME` installs it under, so such an executable has a new `exe` id. No release
 had shipped, so no stored id or waiver existed.
 
+Inside `1.22` the coded records of a C++ class that is not a node moved, with no new key.
+A class a node class hands itself to (`this`, `shared_from_this()`, or a member or local that
+only ever holds a shared pointer built over `this`), by `std::make_unique`, `std::make_shared`
+or `new`, binds its records to that node, and so do the methods it and its bases define in a
+header of the package. In a process that runs several nodes, a record of a class only one
+node inherits or hands itself to is that node's alone, where it stayed with every node. A
+class the package constructs at one site takes the literal arguments of that site into its
+constructor, so the topic and service names it was handed stop being blind spots. A record of
+a class no node, component or plugin class reaches that way, in a source a build target
+compiles, of a package whose executable the join followed, is the blind spot
+`node_handle_untraced`, role `helper`, under the want `other`, one per method, where it used
+to vanish. A node whose every launch site is off in a profile binds no code
+there: a load into an existing container beside a new container, under a condition read
+false, minted a second node that published what the first did. No id form moved, so no
+stored id or waiver stopped matching; the endpoints, parameters and rates of such stacks did.
+
 A reader pinned to `1.0` still loads a `1.22` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

@@ -506,7 +506,10 @@ class Unit:
     class_node_plugins: dict[str, set[str]] = field(default_factory=dict)
     helper_types: dict[tuple[str, str], set[str]] = field(default_factory=dict)
     helper_plugins: dict[tuple[str, str], set[str]] = field(default_factory=dict)
-    helper_receivers: list[tuple[str, str, str]] = field(default_factory=list)
+    node_handles: dict[tuple[str, str], set[bool]] = field(default_factory=dict)
+    handle_uses: list[tuple[str, tuple[tuple[str, str], ...], tuple[str, ...]]] = field(
+        default_factory=list
+    )
     template_definitions: dict[str, int] = field(default_factory=dict)
     template_specializations: set[str] = field(default_factory=set)
     construction_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -1042,6 +1045,10 @@ class _Reader:
             self._call(node)
             self._children(node)
             return
+        if kind == "new_expression":
+            type_node = _child(node, "type")
+            if type_node is not None:
+                self._node_helper("new", None, [_text(type_node, self.src)], _args(node))
         self._children(node)
 
     def _children(self, node: Any) -> None:
@@ -1230,6 +1237,13 @@ class _Reader:
         self.parameter_positions = {}
         self.parameter_defaults = {}
         arguments = [child for child in parameters.named_children if child.type != "comment"]
+        # an overload that cannot take the call's arguments is not the one the call runs
+        required = sum(child.type == "parameter_declaration" for child in arguments)
+        accepted = (
+            len(arguments)
+            if not any(child.type.startswith("variadic") for child in arguments)
+            else None
+        )
         for position, child in enumerate(arguments):
             if child.type not in ("parameter_declaration", "optional_parameter_declaration"):
                 continue
@@ -1250,6 +1264,7 @@ class _Reader:
                     and len(sites) == 1
                     and position < len(sites[0])
                     and sites[0][position] is not None
+                    and required <= len(sites[0]) <= (accepted or len(sites[0]))
                 ):
                     self.scopes[-1][text] = Ref(
                         LITERAL, sites[0][position], text, origin="constructor_argument"
@@ -1517,9 +1532,9 @@ class _Reader:
         if not name:
             return
         arguments = _args(node)
-        self._node_helper(name, receiver, template, arguments)
+        types = _template_types(template, self.src)
+        self._node_helper(name, receiver, types, arguments)
         if name in ("make_shared", "make_unique"):
-            types = _template_types(template, self.src)
             self._plain_node(types[0] if types else _scope_text(node, self.src), arguments)
         if name in MACROS:
             self._macro(name, arguments, node)
@@ -1572,6 +1587,7 @@ class _Reader:
         selector = self._selector(node)
         self.node_selectors[(self.sym, name)] = selector
         key = self._helper_key(name)
+        self.unit.node_handles.setdefault(key, set()).add(_self_handle(node, self.src))
         if node.type != "call_expression":
             if key in self.unit.helper_types:
                 self.unit.helper_types[key].add("")
@@ -1616,22 +1632,30 @@ class _Reader:
         )
 
     def _node_helper(
-        self, name: str, receiver: Any, template: Any, arguments: Sequence[Any]
+        self, name: str, receiver: Any, types: Sequence[str], arguments: Sequence[Any]
     ) -> None:
-        if not self.klass or not any(
-            _flat(argument, self.src)
-            in ("this", "*this", "shared_from_this()", "this->shared_from_this()")
-            for argument in arguments
-        ):
+        """A class this node class hands itself to, directly or through a variable that holds
+        it, which `_finish_node_helpers` decides once every assignment is read."""
+        if not self.klass:
             return
-        types = _template_types(template, self.src)
-        if name in ("make_unique", "make_shared") and types:
-            self.unit.class_helpers.setdefault(self.klass, set()).add(types[0])
+        texts = [_flat(argument, self.src) for argument in arguments]
+        handles: tuple[tuple[str, str], ...] = ()
+        if not any(text in _SELF_HANDLES for text in texts):
+            handles = tuple(
+                self._helper_key(text.removeprefix("this->"))
+                for text in texts
+                if text.removeprefix("this->").isidentifier()
+            )
+            if not handles:
+                return
+        if name in ("make_unique", "make_shared", "new") and types:
+            self.unit.handle_uses.append((self.klass, handles, ("type", types[0])))
         elif receiver is not None:
             target = _flat(receiver, self.src).removeprefix("this->")
             if target.isidentifier():
-                scope, member = self._helper_key(target)
-                self.unit.helper_receivers.append((self.klass, scope, member))
+                self.unit.handle_uses.append(
+                    (self.klass, handles, ("receiver", *self._helper_key(target)))
+                )
 
     def _endpoint(self, name: str, node: Any, template: Any, arguments: Sequence[Any]) -> bool:
         function = _child(node, "function")
@@ -2199,6 +2223,17 @@ def _pairs(node: Any, src: bytes) -> list[tuple[str, Any]]:
                     continue
             stack.append(child)
     return sorted(out)
+
+
+_SELF_HANDLES = frozenset({"this", "*this", "shared_from_this()", "this->shared_from_this()"})
+_SHARED_THIS = re.compile(r"(?:::)?[\w:]*(?:shared_ptr\s*<[^;]*>|SharedPtr)\s*\(\s*this\s*[,)]")
+
+
+def _self_handle(node: Any, src: bytes) -> bool:
+    """`this`, `shared_from_this()`, or a shared pointer built over `this` with a no op
+    deleter, which is how a node class hands itself to a helper as a `Node::SharedPtr`."""
+    text = _flat(node, src)
+    return text in _SELF_HANDLES or bool(_SHARED_THIS.match(text))
 
 
 def _is_node_argument(node: Any, src: bytes) -> bool:
@@ -3043,6 +3078,7 @@ def analyse(
     """
     _resolve_construction_calls(units)
     _package_construction_values(units, include_dirs or {})
+    _helper_arguments(units)
     definitions = {id(unit): list(unit.classes) for unit in units}
     index = CodeIndex(units=list(units))
     for unit in units:
@@ -3308,6 +3344,105 @@ def _package_construction_values(units: Sequence[Unit], include_dirs: dict[str, 
         ]
 
 
+def _helper_constructions(root: Any, src: bytes) -> list[tuple[str, list[Any]]]:
+    out: list[tuple[str, list[Any]]] = []
+    pending = [root] if b"make_" in src or b"new" in src else []
+    while pending:
+        node = pending.pop()
+        pending.extend(node.named_children)
+        if node.type == "new_expression":
+            type_node = _child(node, "type")
+            if type_node is not None:
+                out.append((_text(type_node, src), _args(node)))
+        elif node.type == "call_expression":
+            name, _receiver, template = _call_parts(node, src)
+            types = _template_types(template, src)
+            if name in ("make_unique", "make_shared") and types:
+                out.append((types[0], _args(node)))
+    return out
+
+
+def _helper_arguments(units: Sequence[Unit]) -> None:
+    """A class that is not a node and that its package constructs at one site takes the
+    literal arguments of that site into its constructor, as a node class main constructs once
+    already does. `new sensors::Imu(node_handle_, "imu")` states the topic the constructor
+    publishes on. Two sites in the package, or two classes it names alike, state nothing, and
+    the constructor keeps its blind spots."""
+    names: dict[str, set[str]] = {}
+    nodes: set[tuple[str, str]] = set()
+    for unit in units:
+        names.setdefault(unit.pkg, set()).update(unit.class_names)
+        nodes.update((unit.pkg, item.qualname) for item in unit.classes)
+
+    def match(pkg: str, spelling: str) -> str:
+        spelling = re.sub(r"<.*", "", spelling).strip().removeprefix("::")
+        found = {
+            name
+            for name in names.get(pkg, set())
+            if spelling and (name == spelling or name.endswith("::" + spelling))
+        }
+        return next(iter(found)) if len(found) == 1 else ""
+
+    sites: dict[tuple[str, str], list[tuple[str | None, ...]]] = {}
+    for unit in units:
+        if unit.syntax is None:
+            continue
+        defines = dict(_DEFINE.findall(unit.source.decode("utf-8", "replace")))
+        for spelling, arguments in _helper_constructions(unit.syntax, unit.source):
+            values = [_string_of(argument, unit.source) for argument in arguments]
+            sites.setdefault((unit.pkg, match(unit.pkg, spelling)), []).append(
+                tuple(
+                    defines.get(_flat(argument, unit.source)) if value is None else value
+                    for argument, value in zip(arguments, values, strict=True)
+                )
+            )
+    for unit in units:
+        if unit.syntax is None or unit.construction_sites:
+            continue
+        for klass in sorted(
+            {
+                method.rpartition("::")[0]
+                for method in unit.methods
+                if method.rpartition("::")[2] == method.rpartition("::")[0].rpartition("::")[2]
+            }
+        ):
+            qualname = match(unit.pkg, klass)
+            if (
+                not qualname
+                or len(sites.get((unit.pkg, qualname), [])) != 1
+                or any(
+                    (unit.pkg, name) in nodes
+                    for name in (qualname, klass, qualname.rpartition("::")[2])
+                )
+            ):
+                continue
+            values = sites[(unit.pkg, qualname)]
+            fresh = Unit(
+                path=unit.path, pkg=unit.pkg, relpath=unit.relpath, wrappers=unit.wrappers.copy()
+            )
+            reader = _Reader(
+                unit.source, fresh, dict(_DEFINE.findall(unit.source.decode("utf-8", "replace")))
+            )
+            reader.constructor_arguments[klass] = values
+            reader.walk(unit.syntax)
+            constructor = f"{klass}::{klass.rpartition('::')[2]}"
+            for record_key in ("endpoints", "params", "reads", "broadcasts", "lookups"):
+                setattr(
+                    unit,
+                    record_key,
+                    [item for item in getattr(unit, record_key) if item.sym != constructor]
+                    + [item for item in getattr(fresh, record_key) if item.sym == constructor],
+                )
+            for member, value in fresh.members.items():
+                held = unit.members.get(member)
+                if (
+                    member[0] == klass
+                    and value.status == LITERAL
+                    and (held is None or held.status != LITERAL)
+                ):
+                    unit.members[member] = value
+
+
 def _finish_node_helpers(units: Sequence[Unit]) -> None:
     types: dict[tuple[str, str, str], set[str]] = {}
     plugins: dict[tuple[str, str, str], set[str]] = {}
@@ -3336,18 +3471,37 @@ def _finish_node_helpers(units: Sequence[Unit]) -> None:
                     nodes.add(key)
                     changed = True
                     break
+    handles: dict[tuple[str, str, str], set[bool]] = {}
     for unit in units:
         for (scope, name), values in unit.helper_types.items():
             types.setdefault((unit.pkg, scope, name), set()).update(values)
         for (scope, name), values in unit.helper_plugins.items():
             plugins.setdefault((unit.pkg, scope, name), set()).update(values)
-        for name, values in unit.class_helpers.items():
-            if (unit.pkg, name) in nodes:
-                helpers.setdefault((unit.pkg, name), set()).update(values)
+        for (scope, name), held in unit.node_handles.items():
+            handles.setdefault((unit.pkg, scope, name), set()).update(held)
+
+    def node_class(pkg: str, name: str) -> str:
+        # `using ns::Host;` then `Host::start()` spells the class without its namespace
+        found = {
+            qualname
+            for package, qualname in nodes
+            if package == pkg
+            and (qualname == name or ("::" not in name and qualname.rpartition("::")[2] == name))
+        }
+        found = {qualname for qualname in found if "::" in qualname} or found
+        return next(iter(found)) if len(found) == 1 else ""
+
     for unit in units:
-        for owner, scope, member in unit.helper_receivers:
-            if (unit.pkg, owner) not in nodes:
+        for klass, keys, use in unit.handle_uses:
+            owner = node_class(unit.pkg, klass)
+            if not owner or (
+                keys and not any(handles.get((unit.pkg, *key)) == {True} for key in keys)
+            ):
                 continue
+            if use[0] == "type":
+                helpers.setdefault((unit.pkg, owner), set()).add(use[1])
+                continue
+            scope, member = use[1], use[2]
             values = types.get((unit.pkg, scope, member), set())
             if len(values) == 1 and next(iter(values)):
                 helpers.setdefault((unit.pkg, owner), set()).update(values)
