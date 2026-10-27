@@ -373,7 +373,12 @@ def install(
         f"  rebuild: {' '.join(argv)}",
         f"  interpreter {interpreter} (embedded, no PATH lookup)",
         f"  merge driver {DRIVER_NAME}: {driver}",
-        f"  {ATTRIBUTES}: {attributes}" + ("" if added else " (already there)"),
+        f"  {ATTRIBUTES}: {attributes}"
+        + (
+            f" (added; commit {ATTRIBUTES} so every clone merges {ATLAS_NAME} this way)"
+            if added
+            else " (already there)"
+        ),
         "  a failed rebuild prints one line and exits zero, it never blocks a commit",
     ]
     if foreign:

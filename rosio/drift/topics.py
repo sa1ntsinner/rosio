@@ -170,6 +170,38 @@ def is_quiet(name: str) -> bool:
     return name in quiet_names() or any(name.endswith(tail) for tail in quiet_suffixes())
 
 
+LIFECYCLE_TAILS = frozenset(
+    {
+        "change_state",
+        "get_state",
+        "get_available_states",
+        "get_available_transitions",
+        "get_transition_graph",
+        "transition_event",
+    }
+)
+"""What rcl_lifecycle creates under every lifecycle node, with no call in its source."""
+
+
+def lifecycle_node(entity: model.Node | None) -> bool:
+    return entity is not None and any(
+        fact.values.get("form") == "lifecycle_node" or fact.values.get("lifecycle_state")
+        for fact in entity.facts
+    )
+
+
+def library_channel(name: str, owner: model.Node | None) -> bool:
+    """A name the client library makes for a node: the parameter services, the services and
+    topics behind an action (`/dock/_action/send_goal`), whose action is the endpoint the
+    source states, and the lifecycle services of a lifecycle node."""
+    if is_quiet(name) or "/_action/" in name:
+        return True
+    parent, _, tail = name.rpartition("/")
+    if tail not in LIFECYCLE_TAILS or owner is None or ids.is_synthetic(owner.id):
+        return False
+    return parent == ids.parse_node(owner.id).fqn and lifecycle_node(owner)
+
+
 def endpoint_edges(atlas: model.Atlas, kinds: tuple[str, ...] = ENDPOINT_KINDS) -> list[model.Edge]:
     return [
         atlas.edges[handle] for handle in sorted(atlas.edges) if atlas.edges[handle].kind in kinds
@@ -534,6 +566,7 @@ def qos_incompatible(atlas: model.Atlas) -> list[model.Finding]:
             for layer, fact in _layer_facts(edge, profile).items():
                 sides = by_topic.setdefault((edge.dst, profile, layer), {})
                 sides.setdefault(edge.kind, []).append((edge, fact))
+    found: dict[tuple[str, str], dict[str, tuple]] = {}
     for (topic, profile, layer), sides in sorted(by_topic.items()):
         if profile != model.ANY_PROFILE:
             # A `*` fact holds in this profile too; a pair of two `*` facts is reported once,
@@ -545,7 +578,14 @@ def qos_incompatible(atlas: model.Atlas) -> list[model.Finding]:
             }
         pair = _worst_pair(sides, concrete=profile != model.ANY_PROFILE)
         if pair is not None:
-            out.append(_incompatible(topic, profile, layer, *pair))
+            found.setdefault((topic, profile), {})[layer] = pair
+    # One topic in one profile is one finding, told from the layer that cites a line: the
+    # probe confirming what the source states adds no line to edit.
+    for (topic, profile), by_layer in sorted(found.items()):
+        layer = next(item for item in TYPE_LAYERS if item in by_layer)
+        finding = _incompatible(topic, profile, layer, *by_layer[layer])
+        finding.layers = sorted(by_layer)
+        out.append(finding)
     return out
 
 
@@ -624,7 +664,7 @@ def _incompatible(
             f"{subscriber} subscribes to {name} requesting {asked} while {publisher} "
             f"publishes it {given}, {outcome}"
         ),
-        discriminator=disc_for(profile, layer),
+        discriminator=disc_for(profile),
         profiles=[profile] if profile != model.ANY_PROFILE else [],
         layers=[layer],
         where=evidence_of(sub_fact, pub_fact),
@@ -674,6 +714,258 @@ def type_differ(atlas: model.Atlas) -> list[model.Finding]:
             )
         )
     return out
+
+
+PRODUCERS = frozenset({PUBLISHES, model.EdgeKind.SERVES.value})
+TYPE_LAYERS = (CODED, DECLARED, OBSERVED)
+"""The layer a type mismatch is reported from, the one that cites a line first."""
+
+Typed = tuple[model.Edge, model.LayerFact, tuple[str, str], str]
+
+
+@rules.register("type.incompatible")
+def type_incompatible(atlas: model.Atlas) -> list[model.Finding]:
+    """Two ends of one topic, service or action state two types in one layer and profile.
+
+    The ends never connect: a subscription of one type takes nothing a publisher of another
+    type sends, and a client of one service or action type never reaches a server of another.
+    Only a type each side states in a form that names a package is compared, so a template
+    parameter or an alias nobody resolved decides nothing.
+    """
+    grouped: dict[tuple[str, str], dict[str, list[Typed]]] = {}
+    for edge in endpoint_edges(atlas):
+        for profile in sorted(set(edge.profiles) or {model.ANY_PROFILE}):
+            if _via_wrapper(edge, profile):
+                continue
+            for layer, fact in _layer_facts(edge, profile).items():
+                text = str(fact.values.get("type") or "")
+                key = type_key(text) if text else None
+                if key is not None:
+                    row = (edge, fact, key, text)
+                    grouped.setdefault((edge.dst, profile), {}).setdefault(layer, []).append(row)
+    sites: dict[tuple, list[tuple[str, list[str], list[Typed], list[Typed]]]] = {}
+    concrete = {channel for channel, profile in grouped if profile != model.ANY_PROFILE}
+    for (channel, profile), by_layer in sorted(grouped.items()):
+        if profile != model.ANY_PROFILE:
+            everywhere = grouped.get((channel, model.ANY_PROFILE), {})
+            by_layer = {
+                layer: by_layer.get(layer, []) + everywhere.get(layer, [])
+                for layer in by_layer.keys() | everywhere.keys()
+            }
+        elif channel in concrete:
+            continue
+        by_layer = {layer: _comparable(rows) for layer, rows in by_layer.items()}
+        split = [layer for layer in TYPE_LAYERS if _crossed(by_layer.get(layer, []))]
+        if not split:
+            continue
+        right, wrong = _sides_of_type(by_layer[split[0]])
+        lines = tuple(sorted({src.sort_key() for row in wrong for src in row[1].evidence}))
+        # One line stated under several namespaces is one finding, so one edit is one report.
+        key = (profile, split[0], right[0][3], tuple(sorted({row[3] for row in wrong})), lines)
+        sites.setdefault(key if lines else (*key, channel), []).append(
+            (channel, split, right, wrong)
+        )
+    return [_type_mismatch(key[0], rows) for key, rows in sorted(sites.items())]
+
+
+def _comparable(rows: list[Typed]) -> list[Typed]:
+    """The ends that state one type unconditionally. A node stating two types on one name
+    (`TwistStamped` or `Twist` by a parameter) holds alternatives, and either may run."""
+    types: dict[str, set[tuple[str, str]]] = {}
+    for row in rows:
+        types.setdefault(row[0].src, set()).add(row[2])
+    return [
+        row for row in rows if len(types[row[0].src]) == 1 and not row[1].values.get("condition")
+    ]
+
+
+def _crossed(rows: list[Typed]) -> bool:
+    """Whether a producing end and a consuming end of two nodes state two types."""
+    made = {(row[0].src, row[2]) for row in rows if row[0].kind in PRODUCERS}
+    taken = {(row[0].src, row[2]) for row in rows if row[0].kind not in PRODUCERS}
+    return any(a != b and key != other for a, key in made for b, other in taken)
+
+
+def _sides_of_type(rows: list[Typed]) -> tuple[list[Typed], list[Typed]]:
+    """The ends that state the type the producing side states most, and the others."""
+    producers = [row for row in rows if row[0].kind in PRODUCERS]
+    counts: dict[tuple[str, str], int] = {}
+    for row in producers:
+        counts[row[2]] = counts.get(row[2], 0) + 1
+    wanted = min(counts, key=lambda key: (-counts[key], key))
+    right = sorted((row for row in rows if row[2] == wanted), key=lambda row: (row[3], row[0].src))
+    wrong = sorted(
+        (row for row in rows if row[2] != wanted), key=lambda row: (row[0].src, row[0].kind, row[3])
+    )
+    return right, wrong
+
+
+def _type_mismatch(
+    profile: str, channels: list[tuple[str, list[str], list[Typed], list[Typed]]]
+) -> model.Finding:
+    channel, layers, right, wrong = channels[0]
+    spelling = right[0][3]
+    name = ids.label_for(channel)
+    odd = wrong[0]
+    who = sorted({human(row[0].src) for row in right})
+    others = sorted({f"{human(row[0].src)} {row[0].kind} it as {row[3]}" for row in wrong})
+    line = rules.where(odd[1].evidence[0] if odd[1].evidence else None)
+    also = sorted(ids.label_for(item[0]) for item in channels[1:])
+    more = f", and the same holds on {', '.join(also)}" if also else ""
+    rows = [row for item in channels for row in item[3] + item[2]]
+    return model.Finding(
+        rule="type.incompatible",
+        severity=rules.severity_of("type.incompatible"),
+        subject=channel,
+        title=f"{name} has two message types in {slug(profile)}",
+        detail=(
+            f"in {slug(profile)} the {layers[0]} layer has {', '.join(who)} on {name} as "
+            f"{spelling}, while {'; '.join(others)}{more}. Two ends of one name that state two "
+            "types are never matched, so nothing passes between them"
+        ),
+        fix=(
+            f"use {spelling} for {human(odd[0].src)} on {name} at {line}, or change the other "
+            "ends to the type it states"
+        ),
+        say=(
+            f"{human(odd[0].src)} {odd[0].kind} {name} as {odd[3]} at {line}, while "
+            f"{', '.join(who)} uses {spelling}, so the two ends never connect; change it to "
+            f"{spelling}"
+        ),
+        discriminator=disc_for(profile),
+        profiles=[profile] if profile != model.ANY_PROFILE else [],
+        layers=sorted({layer for item in channels for layer in item[1]}),
+        where=evidence_of(*(row[1] for row in rows)),
+    )
+
+
+SERVES = model.EdgeKind.SERVES.value
+CALLS = model.EdgeKind.CALLS.value
+
+
+@rules.register("service.no_server")
+def service_no_server(atlas: model.Atlas) -> list[model.Finding]:
+    """A client calls a service or action name nothing in the profile serves, while a node
+    whose whole source was read serves another name of the same type.
+
+    Said only when the client's source and the source of every server of that type were read
+    whole, and no node of the profile holds a service or action name the reader could not
+    follow, so the server could not hide under a name rosio did not see. The closest served
+    name of the type is the likely target, and the finding names it.
+    """
+    from rosio.drift import frames
+
+    whole = frames.read_whole(atlas)
+    clients: dict[tuple[str, str], list[tuple[model.Edge, model.LayerFact]]] = {}
+    servers: dict[tuple[str, tuple[str, str]], dict[str, set[str]]] = {}
+    served: set[tuple[str, str]] = set()
+    for edge in endpoint_edges(atlas, (SERVES, CALLS)):
+        for profile in sorted(edge.profiles):
+            if profile == model.ANY_PROFILE or not _states_endpoint(edge, profile):
+                continue
+            if edge.kind == SERVES:
+                served.add((edge.dst, profile))
+            fact = stated(edge, CODED, profile)
+            key = type_key(str(fact.values.get("type") or "")) if fact else None
+            if fact is None or key is None or _via_wrapper(edge, profile):
+                continue
+            if edge.kind == SERVES:
+                servers.setdefault((profile, key), {}).setdefault(edge.dst, set()).add(edge.src)
+            else:
+                clients.setdefault((edge.dst, profile), []).append((edge, fact))
+    blind: dict[str, bool] = {}
+    # A remap whose target ends like the name may hand it to a node rosio did not read.
+    remapped = {
+        name
+        for name in (ids.label_for(channel) for channel, _profile in clients)
+        for entry in atlas.unresolved
+        if entry.role == "remap"
+        and entry.expr.partition(":=")[2].rstrip("/").endswith(name.rpartition("/")[2])
+    }
+    groups: dict[tuple, list[tuple[str, list[tuple[model.Edge, model.LayerFact]], str]]] = {}
+    for (channel, profile), calls in sorted(clients.items()):
+        name = ids.label_for(channel)
+        if (channel, profile) in served or _library_service(name) or name in remapped:
+            continue
+        if profile not in blind:
+            blind[profile] = bool(_blind_owners(atlas, profile))
+        if blind[profile]:
+            continue
+        calls = [row for row in calls if whole(row[0].src, profile)]
+        if not calls:
+            continue
+        key = type_key(str(calls[0][1].values.get("type")))
+        options = {
+            other: owners
+            for other, owners in servers.get((profile, key), {}).items()
+            if ids.kind_of(other) == ids.kind_of(channel)
+            and all(whole(owner, profile) for owner in owners)
+        }
+        if not options:
+            continue
+        near = _closest_name(name, sorted(ids.label_for(other) for other in options))
+        lines = tuple(sorted({src.sort_key() for _edge, fact in calls for src in fact.evidence}))
+        groups.setdefault((profile, lines) if lines else (profile, channel), []).append(
+            (channel, calls, near)
+        )
+    return [_no_server(key[0], rows) for key, rows in sorted(groups.items())]
+
+
+def _blind_owners(atlas: model.Atlas, profile: str) -> set[str]:
+    from rosio import join
+
+    wants = (model.Want.SERVICE_NAME.value, model.Want.ACTION_NAME.value)
+    return join.blind_nodes(atlas, wants, profile)
+
+
+def _library_service(name: str) -> bool:
+    """A service the client library serves for a node, which no source states."""
+    return is_quiet(name) or "/_action/" in name or name.rpartition("/")[2] in LIFECYCLE_TAILS
+
+
+def _closest_name(name: str, options: list[str]) -> str:
+    """The served name most like the one called: in the caller's namespace first, then by
+    spelling, and the first of the options when none is close."""
+    import difflib
+
+    head = name.rpartition("/")[0]
+    local = [item for item in options if item.rpartition("/")[0] == head] or options
+    near = difflib.get_close_matches(name, local, n=1, cutoff=0.0)
+    return near[0] if near else local[0]
+
+
+def _no_server(
+    profile: str, rows: list[tuple[str, list[tuple[model.Edge, model.LayerFact]], str]]
+) -> model.Finding:
+    channel, calls, near = rows[0]
+    name = ids.label_for(channel)
+    kind = ids.kind_of(channel)
+    who = sorted({human(edge.src) for edge, _fact in calls})
+    type_text = str(calls[0][1].values.get("type"))
+    line = rules.where(calls[0][1].evidence[0] if calls[0][1].evidence else None)
+    also = sorted(ids.label_for(item[0]) for item in rows[1:])
+    more = f", and the same holds for {', '.join(also)}" if also else ""
+    return model.Finding(
+        rule="service.no_server",
+        severity=rules.severity_of("service.no_server"),
+        subject=channel,
+        title=f"{', '.join(who)} calls {name} and nothing serves it in {slug(profile)}",
+        detail=(
+            f"in {slug(profile)} {', '.join(who)} calls the {kind} {name} ({type_text}) at "
+            f"{line}, and no node of the profile serves it, while {near} of the same type is "
+            f"served by a node whose source was read{more}. A client of a name nobody serves "
+            "waits for ever"
+        ),
+        fix=f"call {near} at {line}, or start the node that serves {name}",
+        say=(
+            f"{', '.join(who)} calls {name} at {line}, which nothing in {slug(profile)} serves; "
+            f"the served {kind} of type {type_text} closest to it is {near}"
+        ),
+        discriminator=disc_for(profile),
+        profiles=[profile],
+        layers=[CODED],
+        where=evidence_of(*(fact for item in rows for _edge, fact in item[1])),
+    )
 
 
 def _expected_rate(fact: model.LayerFact) -> float | None:
@@ -793,7 +1085,7 @@ def endpoint_observed_only(atlas: model.Atlas) -> list[model.Finding]:
                 # The source of this node was never read, so the endpoint is coverage.
                 continue
             name = ids.label_for(edge.dst)
-            if is_quiet(name):
+            if library_channel(name, owner):
                 continue
             label = human(edge.src)
             where = slug(profile)
@@ -831,9 +1123,11 @@ RULES: tuple[tuple[str, Callable[[model.Atlas], list[model.Finding]]], ...] = (
     ("qos.differ", qos_differ),
     ("qos.incompatible", qos_incompatible),
     ("rate.below_declared", rate_below_declared),
+    ("service.no_server", service_no_server),
     ("topic.no_publisher", topic_no_publisher),
     ("topic.no_subscriber", topic_no_subscriber),
     ("type.differ", type_differ),
+    ("type.incompatible", type_incompatible),
 )
 """Rule id to implementation, in rule id order, for a loader that reads a module list."""
 
@@ -859,8 +1153,10 @@ __all__ = [
     "quiet_names",
     "quiet_suffixes",
     "rate_below_declared",
+    "service_no_server",
     "topic_no_publisher",
     "topic_no_subscriber",
     "type_differ",
+    "type_incompatible",
     "type_key",
 ]

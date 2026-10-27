@@ -619,13 +619,22 @@ def _wrapper(edge: Edge, wanted: str) -> bool:
     )
 
 
-def _library_end(edge: Edge, wanted: str) -> bool:
+def _library_end(atlas: Atlas, edge: Edge, wanted: str) -> bool:
     """A wrapper endpoint on a name the library owns, `/tf` or `/diagnostics`. A wrapper
     handed its name by the node, a `message_filters` subscription to `/scan`, is the node's
-    own endpoint and stays in the graph."""
-    from rosio.drift.topics import is_quiet
+    own endpoint and stays in the graph. The probe states the rest of what a library makes:
+    the services and topics behind an action, whose action is shown, and the parameter and
+    lifecycle services a node serves, which stay out unless a node calls them."""
+    from rosio.drift.topics import is_quiet, library_channel
 
-    return _wrapper(edge, wanted) and is_quiet(slices.label(edge.dst))
+    name = slices.label(edge.dst)
+    if _wrapper(edge, wanted) and is_quiet(name):
+        return True
+    if "/_action/" in name:
+        return True
+    return edge.kind in ("serves", "publishes") and library_channel(
+        name, atlas.entities.get(edge.src)
+    )
 
 
 def _blind_text(atlas: Atlas, kind: str, wanted: str, cache: dict[str, int]) -> str:
@@ -636,12 +645,28 @@ def _blind_text(atlas: Atlas, kind: str, wanted: str, cache: dict[str, int]) -> 
 
         want = {"topic": "topic_name", "service": "service_name", "action": "action_name"}[kind]
         cache[kind] = len(join.blind_nodes(atlas, [want], wanted))
-    count = cache[kind]
-    if not count:
-        return ""
-    return (
-        f" found, {plural(count, 'node')} {'has' if count == 1 else 'have'} unresolved {kind} names"
-    )
+        if "unbound" not in cache:
+            cache["unbound"] = len(
+                {
+                    entry.owner
+                    for entry in atlas.unresolved
+                    if entry.reason == "component_class_unregistered"
+                    and entry.owner in atlas.entities
+                    and _in_profile(atlas.entities[entry.owner], wanted)
+                }
+            )
+    count, unbound = cache[kind], cache["unbound"]
+    parts = []
+    if count:
+        parts.append(
+            f"{plural(count, 'node')} {'has' if count == 1 else 'have'} unresolved {kind} names"
+        )
+    if unbound:
+        parts.append(
+            f"{plural(unbound, 'node')} {'loads' if unbound == 1 else 'load'} a class no "
+            "package registers"
+        )
+    return f" found, {' and '.join(parts)}" if parts else ""
 
 
 def _merged_ends(edges: Sequence[Edge], wanted: str) -> set[tuple[str, str]]:
@@ -680,7 +705,9 @@ def _channel_type(atlas: Atlas, channel: str, wanted: str) -> str:
         for edge in _out(atlas, channel)
         if edge.kind == "uses_type" and _in_profile(edge, wanted)
     }
-    return next(iter(names)) if len(names) == 1 else ""
+    if len(names) > 1:
+        return "types differ: " + ", ".join(sorted(names))
+    return next(iter(names)) if names else ""
 
 
 def _rules(atlas: Atlas, channel: str, wanted: str) -> list[str]:
@@ -785,7 +812,7 @@ def select_graph(
         scope = reached
         links = [edge for edge in links if edge.src in scope and edge.dst in scope]
 
-    shown = links if wrappers else [edge for edge in links if not _library_end(edge, wanted)]
+    shown = links if wrappers else [edge for edge in links if not _library_end(atlas, edge, wanted)]
     hidden = len(links) - len(shown)
     by_channel: dict[str, list[Edge]] = {}
     for edge in shown:

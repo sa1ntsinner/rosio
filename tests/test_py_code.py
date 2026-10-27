@@ -263,24 +263,21 @@ def test_a_node_class_defined_inside_main_is_read() -> None:
     assert node["symbol"] == "p.inmain.main.Worker.__init__"
     assert [item["name"] for item in record["parameters"]] == ["out_topic"]
     assert record["counts"]["publishers"] == 1
-    assert record["counts"]["service_clients"] == 3
+    assert record["counts"]["service_clients"] == 0
+    assert [item["kind"] for item in record["endpoints"] if "navigate_to_pose" in item["raw"]] == [
+        "action_client"
+    ]
 
 
-def test_an_expanded_action_endpoint_states_no_message_type() -> None:
-    """`/x/_action/send_goal` is not of the action type, and this reader does not name it."""
+def test_an_rclpy_action_client_is_one_endpoint_of_the_action_type() -> None:
+    """Read as the C++ reader reads `rclcpp_action`, not as the five `_action/` endpoints
+    rcl_action derives from the name."""
     record = py_code.analyse_source(
         IN_MAIN, path="src/p/p/inmain.py", package="p", package_relative_path="p/inmain.py"
     )
-    derived = [
-        item
-        for item in record["endpoints"]
-        if item.get("via_known_wrapper") and item["name"] != "/navigate_to_pose/_action/status"
-    ]
-    assert derived
-    for item in derived:
-        assert item["type"] is None
-        assert item["type_id"] is None
-        assert item["action_type"] == "nav2_msgs/action/NavigateToPose"
+    assert not [item for item in record["endpoints"] if "_action/" in str(item["name"])]
+    (action,) = [item for item in record["endpoints"] if item["kind"] == "action_client"]
+    assert action["type"] == "nav2_msgs/action/NavigateToPose"
 
 
 def test_a_table_row_keeps_the_message_class_of_the_row() -> None:
@@ -1060,29 +1057,15 @@ def test_an_action_built_with_keyword_arguments_states_its_name() -> None:
     humble. Read positionally, the construction stated no name at all and one action became
     five endpoints with none."""
     record = _keyword_record()
-    served = sorted(
-        item["name"] for item in record["endpoints"] if item["kind"].startswith("service_server")
-    )
-    assert served == [
-        "/do_thing/_action/cancel_goal",
-        "/do_thing/_action/get_result",
-        "/do_thing/_action/send_goal",
-    ]
-    published = sorted(item["name"] for item in record["endpoints"] if item["kind"] == "publisher")
-    assert published == ["/do_thing/_action/feedback", "/do_thing/_action/status"]
+    served = [item["name"] for item in record["endpoints"] if item["kind"] == "action_server"]
+    assert served == ["/do_thing"]
     assert not [item for item in record["endpoints"] if item["name"] is None]
 
 
 def test_the_action_client_reads_its_keywords_too() -> None:
     record = _keyword_record()
-    called = sorted(
-        item["name"] for item in record["endpoints"] if item["kind"] == "service_client"
-    )
-    assert called == [
-        "/other/_action/cancel_goal",
-        "/other/_action/get_result",
-        "/other/_action/send_goal",
-    ]
+    called = [item["name"] for item in record["endpoints"] if item["kind"] == "action_client"]
+    assert called == ["/other"]
 
 
 MESSAGE_FILTER_KEYWORDS = """

@@ -40,6 +40,7 @@ nothing. A finding that does fire states the guard of a tie it relies on, with i
 from __future__ import annotations
 
 import difflib
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -1006,6 +1007,7 @@ def frame_no_publisher(atlas: Atlas) -> list[Finding]:
     broadcast: dict[str, set[str]] = {}
     broadcasters: dict[str, set[str]] = {}
     read: set[str] = set()
+    tied: set[str] = set()
     for handle in sorted(atlas.edges):
         edge = atlas.edges[handle]
         if edge.kind != model.EdgeKind.BROADCASTS_TF.value:
@@ -1017,7 +1019,13 @@ def frame_no_publisher(atlas: Atlas) -> list[Finding]:
                 # A launch argument list is not a broadcast read from code.
                 if fact.values.get("source") != "static_transform_publisher":
                     read.add(fact.profile)
-    if not read:
+                elif fact.values.get("static"):
+                    tied.add(fact.profile)
+    # Where every broadcast is a static publisher whose arguments name its frames, a frame
+    # the code looks up by a literal name is still decided: the tree is the one those
+    # arguments spell. A frame a configuration names stays with the profiles that read code.
+    looked_up = _looked_up_literals(atlas)
+    if not read and not tied:
         return []
     published = _published_frames(atlas, broadcast)
     wanted = _wanted_frames(atlas)
@@ -1031,7 +1039,9 @@ def frame_no_publisher(atlas: Atlas) -> list[Finding]:
     findings: list[Finding] = []
     for key in sorted(wanted):
         profile, frame = key
-        if profile not in read or profile in unseen:
+        if profile in unseen or (profile not in read and (profile, frame) not in looked_up):
+            continue
+        if profile not in read and profile not in tied:
             continue
         if ids.parse_frame(frame) in WORLD_FRAMES:
             continue
@@ -1098,6 +1108,91 @@ def _published_frames(atlas: Atlas, broadcast: dict[str, set[str]]) -> dict[str,
             out.setdefault(profile, set()).add(row.child)
     for pair in _static_pairs(atlas):
         out.setdefault(pair.profile, set()).add(ids.build_frame(pair.child))
+    return out
+
+
+@rules.register("frame.broadcast_twice")
+def frame_broadcast_twice(atlas: Atlas) -> list[Finding]:
+    """One child frame two nodes broadcast in one profile.
+
+    tf2 keeps one parent per child and the latest transform wins, so two broadcasters make
+    the frame jump between them, or between two parents. Only broadcasts that state both
+    frames, outside any condition in the source and from a live launch site, are counted, and
+    two sites of one node are one broadcaster (section 5 cites one node broadcasting a pair
+    from two methods).
+    """
+    sites: dict[tuple[str, str], dict[str, list[tuple[str, LayerFact]]]] = {}
+    for handle in sorted(atlas.edges):
+        edge = atlas.edges[handle]
+        if edge.kind != model.EdgeKind.BROADCASTS_TF.value:
+            continue
+        for fact in edge.facts:
+            if fact.layer not in (model.Layer.DECLARED.value, model.Layer.CODED.value):
+                continue
+            if not rules.usable(fact) or fact.values.get("condition") or fact.profile == "*":
+                continue
+            parent = _frame_name(fact.values.get("parent"))
+            if not parent or any(key.endswith("_from_parameter") for key in fact.values):
+                continue
+            by_node = sites.setdefault((fact.profile, edge.dst), {})
+            by_node.setdefault(edge.src, []).append((parent, fact))
+    findings = []
+    for (profile, frame), by_node in sorted(sites.items()):
+        if len(by_node) < 2:
+            continue
+        child = _frame_text(frame)
+        rows = sorted(
+            (rules.node_text(node), parent, fact)
+            for node, facts in by_node.items()
+            for parent, fact in facts
+        )
+        told = sorted({f"{node} from {parent}" for node, parent, _fact in rows})
+        parents = sorted({parent for _node, parent, _fact in rows})
+        where = rules.sources([row for *_head, fact in rows for row in fact.evidence])
+        lines = ", ".join(dict.fromkeys(rules.where(row) for row in where))
+        two = "two parents" if len(parents) > 1 else "one parent, twice"
+        findings.append(
+            Finding(
+                rule="frame.broadcast_twice",
+                severity=rules.severity_of("frame.broadcast_twice"),
+                subject=frame,
+                title=f"{child} is broadcast by {len(by_node)} nodes in {rules.slug_of(profile)}",
+                detail=(
+                    f"in {rules.slug_of(profile)} {', '.join(told)} broadcast {child} "
+                    f"({two}), at {lines}. tf2 holds one transform per child, so the frame "
+                    "takes whichever arrived last."
+                ),
+                fix=(
+                    f"keep one broadcaster of {child}, or give each its own frame name, for "
+                    "example by prefixing the frames of each robot with its namespace"
+                ),
+                say=(
+                    f"{child} is broadcast by {', '.join(told)} in {rules.slug_of(profile)}, so "
+                    f"its transform flips between them; keep one, see {lines}."
+                ),
+                discriminator=_disc(profile),
+                profiles=[profile],
+                layers=sorted({fact.layer for *_head, fact in rows}),
+                where=where,
+            )
+        )
+    return findings
+
+
+def _looked_up_literals(atlas: Atlas) -> set[tuple[str, str]]:
+    """(profile, frame) of every frame the code of a node looks up by a literal name."""
+    out = set()
+    for handle in sorted(atlas.edges):
+        edge = atlas.edges[handle]
+        if edge.kind != model.EdgeKind.LISTENS_TF.value:
+            continue
+        for fact in edge.facts:
+            role = str(fact.values.get("role") or "")
+            spelled = fact.values.get(role) if role in ("source", "target") else None
+            if f"{role}_from_parameter" in fact.values:
+                continue
+            if fact.layer == model.Layer.CODED.value and rules.usable(fact) and spelled:
+                out.add((fact.profile, edge.dst))
     return out
 
 
@@ -1429,20 +1524,10 @@ def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
     reader could not follow, hands itself to code nobody read, or shares a package with a
     source the reader refused, could carry the name, and then the remap is not decided.
     """
-    from rosio import join
-
-    blind: dict[str, set[str]] = {}
     out: dict[str, _Dead] = {}
     spelled = _spelled_names(atlas)
-    classes = _class_rows(atlas)
-    defined = {
-        _short_class(str(row.get("name") or "")) for rows in classes.values() for row in rows
-    }
-    functions: set[tuple[str, str]] = set()
-    for entity in atlas.by_kind(model.NodeKind.SYM.value):
-        parsed = ids.parse_sym(entity.id)
-        functions.add((parsed.package, parsed.qualname.rpartition("::")[2]))
-    refused = _refused_packages(atlas)
+    whole = read_whole(atlas)
+    built = _built_names(atlas)
     for entry in atlas.unresolved:
         if entry.role != "remap" or entry.owner not in atlas.entities:
             continue
@@ -1458,8 +1543,6 @@ def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
         found = _Dead()
         decided = True
         for profile in live:
-            if profile not in blind:
-                blind[profile] = join.blind_nodes(atlas, _NAME_WANTS, profile)
             for node_id in launched:
                 node = atlas.entities.get(node_id)
                 if node is None or profile not in node.profiles:
@@ -1475,13 +1558,10 @@ def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
                     _remap_source(raw, node_id) for raw in {raw for _kind, raw in ends} | _BUILT_IN
                 }
                 if (
-                    not read
-                    or not ends
-                    or _hands_off_unread(read, classes, defined, functions)
-                    or _python_handoffs(atlas, read)
+                    not ends
+                    or not whole(node_id, profile)
                     or _literal(atlas, read, name)
-                    or any(ids.parse_file(file).package in refused for file in read)
-                    or node_id in blind[profile]
+                    or _could_build(built, read, name)
                     or renamed in own
                     # image_transport and cuda_blackboard add sub topics under a base name
                     or any(renamed.startswith(name.rstrip("/") + "/") for name in own)
@@ -1496,6 +1576,39 @@ def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
         if decided and found.nodes:
             out[entry.id] = found
     return out
+
+
+def read_whole(atlas: Atlas) -> Callable[[str, str], bool]:
+    """Whether the join read the whole source of a node in a profile, the one definition the
+    rules that claim an absence use: the node is bound to code, no topic, service or action
+    name in it is a blind spot, it hands itself to no class or function outside the read set,
+    and no source of its packages was refused."""
+    from rosio import join
+
+    blind: dict[str, set[str]] = {}
+    classes = _class_rows(atlas)
+    defined = {
+        _short_class(str(row.get("name") or "")) for rows in classes.values() for row in rows
+    }
+    functions: set[tuple[str, str]] = set()
+    for entity in atlas.by_kind(model.NodeKind.SYM.value):
+        parsed = ids.parse_sym(entity.id)
+        functions.add((parsed.package, parsed.qualname.rpartition("::")[2]))
+    refused = _refused_packages(atlas)
+
+    def whole(node_id: str, profile: str) -> bool:
+        if profile not in blind:
+            blind[profile] = join.blind_nodes(atlas, _NAME_WANTS, profile)
+        read = rules.coded_sources(atlas, node_id, profile)
+        return not (
+            not read
+            or _hands_off_unread(read, classes, defined, functions)
+            or _python_handoffs(atlas, read)
+            or any(ids.parse_file(file).package in refused for file in read)
+            or node_id in blind[profile]
+        )
+
+    return whole
 
 
 def _short_class(name: str) -> str:
@@ -1573,6 +1686,42 @@ def _literal(atlas: Atlas, files: set[str], name: str) -> bool:
         for spelled in map(_bare, _coded_values(atlas, files, "name_literals"))
         if spelled
     )
+
+
+_STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def _built_names(atlas: Atlas) -> dict[str, list[list[str]]]:
+    """The literal pieces of every endpoint name a source builds at run time, by package:
+    `"~/inputs/" + name + "/trajectory"` is `["inputs/", "/trajectory"]`."""
+    out: dict[str, list[list[str]]] = {}
+    for entry in atlas.unresolved:
+        if entry.want not in _NAME_WANTS or not entry.evidence:
+            continue
+        pieces = [_bare(piece) for piece in _STRING.findall(entry.expr)]
+        if any(pieces):
+            package = ids.parse_file(entry.evidence[0].file).package
+            out.setdefault(package, []).append([piece for piece in pieces if piece])
+    return out
+
+
+def _could_build(built: dict[str, list[list[str]]], files: set[str], name: str) -> bool:
+    """Whether a name one of the node's packages builds at run time could be the remapped
+    name: its literal pieces appear in it, in order. A helper class handed the node, in a
+    file the join did not bind to it, creates such a name."""
+    bare = _bare(name)
+    packages = {ids.parse_file(file).package for file in files if ids.kind_of(file) == "file"}
+    for package in sorted(packages):
+        for pieces in built.get(package, []):
+            at = 0
+            for piece in pieces:
+                at = bare.find(piece, at)
+                if at < 0:
+                    break
+                at += len(piece)
+            else:
+                return True
+    return False
 
 
 def _refused_packages(atlas: Atlas) -> set[str]:
@@ -1838,7 +1987,10 @@ def _unmanaged_nodes(
                     rule="lifecycle.unmanaged",
                     severity=rules.severity_of("lifecycle.unmanaged"),
                     subject=node.id,
-                    title=f"{node.label} is a lifecycle node with no manager in this profile",
+                    title=(
+                        f"{node.label} is a lifecycle node with no manager in "
+                        f"{_profile_phrase(profile)}"
+                    ),
                     detail=(
                         f"{node.label} is declared as a lifecycle node, and this profile holds "
                         "no lifecycle manager that lists it and no launch event that emits its "
@@ -1871,14 +2023,21 @@ def _driven_by_a_peer(atlas: Atlas, node: model.Node, profile: str) -> bool:
     fqn = ids.parse_node(node.id).fqn
     if not fqn:
         return False
+    running = node.fact(model.Layer.OBSERVED.value, profile)
+    state = running.values.get("lifecycle_state") if rules.usable(running) else None
+    if state:
+        # The probe read the state: a node no one drove is still unconfigured.
+        return state != "unconfigured"
     service = ids.build_service(f"{fqn}/change_state")
     for edge in atlas.in_edges(service):
         if edge.kind != model.EdgeKind.CALLS.value or edge.src == node.id:
             continue
         caller = atlas.entities.get(edge.src)
-        if caller is not None and any(
-            rules.usable(fact) and fact.profile == profile for fact in caller.facts
-        ):
+        # The `ros2 launch` process calls change_state for a LifecycleNode it starts and
+        # drives it only when its own events say so, which the launch layer states.
+        if caller is None or any(fact.values.get("internal") for fact in caller.facts):
+            continue
+        if any(rules.usable(fact) and fact.profile == profile for fact in caller.facts):
             return True
     return False
 
@@ -1914,7 +2073,9 @@ def _possibly_driven(node: model.Node, fact: LayerFact, unread: list[str]) -> Fi
         rule="lifecycle.unmanaged",
         severity=rules.severity_of("lifecycle.unmanaged", "unproven"),
         subject=node.id,
-        title=f"{node.label} is a lifecycle node no manager lists",
+        title=(
+            f"{node.label} is a lifecycle node no manager lists in {_profile_phrase(fact.profile)}"
+        ),
         detail=(
             f"{node.label} is declared as a lifecycle node, and this profile holds no lifecycle "
             "manager and no launch event that emits its transitions. Processes of this profile "
@@ -2034,6 +2195,7 @@ def _launched(atlas: Atlas, fqn: str, profile: str) -> bool:
 
 
 RULES: dict[str, Callable[[Atlas], list[Finding]]] = {
+    "frame.broadcast_twice": frame_broadcast_twice,
     "frame.no_publisher": frame_no_publisher,
     "frame.not_in_urdf": frame_not_in_urdf,
     "frame.orphan_root": frame_orphan_root,
@@ -2059,6 +2221,7 @@ __all__ = [
     "RULE_IDS",
     "WORLD_FRAMES",
     "collect",
+    "frame_broadcast_twice",
     "frame_no_publisher",
     "frame_not_in_urdf",
     "frame_orphan_root",

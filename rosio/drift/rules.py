@@ -74,6 +74,10 @@ COMMITTED = (
     "build.unbuilt",
     "build.underlay",
     "remap.matches_nothing",
+    "type.incompatible",
+    "service.no_server",
+    "launch.argument_undeclared",
+    "frame.broadcast_twice",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -135,6 +139,10 @@ SEVERITY: dict[str, str] = {
     "build.unbuilt": WARN,
     "build.underlay": WARN,
     "remap.matches_nothing": WARN,
+    "type.incompatible": ERROR,
+    "service.no_server": WARN,
+    "launch.argument_undeclared": WARN,
+    "frame.broadcast_twice": WARN,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {

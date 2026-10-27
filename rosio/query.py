@@ -92,6 +92,8 @@ def label(entity_id: str) -> str:
     if parsed.kind == "pparam":
         parts = ids.parse_pparam(entity_id)
         return f"{parts.lookup} {parts.suffix}"
+    if parsed.kind == "type":
+        return "/".join(parsed.segments)
     return parsed.segments[-1]
 
 
@@ -749,6 +751,10 @@ def param(
                 f"    effective {_value(effective.value)} ({effective.value_type})"
                 f"   edit {site(effective.source, tag=tag)}"
             )
+        running = entity.fact("observed", item)
+        if running is not None and "value" in running.values:
+            data["profiles"][item]["observed"] = running.values["value"]
+            lines.append(f"    observed {_value(running.values['value'])} on the running system")
         for row in rows:
             mark = "wins " if row["wins"] else "     "
             shadow = (
@@ -2049,6 +2055,7 @@ REASONS = {
     "branch_dependent": "the branches of an if give it different values",
     "call_result": "the result of a call rosio does not evaluate",
     "command_substitution": "the output of a command the launch file runs",
+    "component_class_unregistered": "a component class its package registers nowhere",
     "environment_variable": "an environment variable at run time",
     "executable_entry_unresolved": "no source file defines this executable's entry point",
     "external_descriptor_file": "a file the node reads at run time",

@@ -24,6 +24,7 @@ WORD_NUMBERS = {
     "twenty": 20,
     "forty eight": 48,
     "forty nine": 49,
+    "fifty three": 53,
 }
 
 SERVED_TOOLS = (
@@ -154,8 +155,8 @@ def test_the_contract_rule_block_is_the_committed_vocabulary():
 
 
 def test_the_published_rule_counts_match_the_registry():
-    assert WORD_NUMBERS["forty nine"] == len(rules.COMMITTED)
-    assert "Forty nine rules with a committed vocabulary" in doc("README.md")
+    assert WORD_NUMBERS["fifty three"] == len(rules.COMMITTED)
+    assert "Fifty three rules with a committed vocabulary" in doc("README.md")
 
 
 # ---------------------------------------------------------------------------

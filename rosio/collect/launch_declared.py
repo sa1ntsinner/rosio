@@ -802,6 +802,12 @@ class LaunchDeclaredCollector:
                 steps = tuple(_step(text) for text in include.entity_path)
                 args = _include_args(ctx.ws, include)
                 values = {"included_file": child_id, "args": args}
+                unread = _unread_arguments(walk, include)
+                if unread:
+                    values["args_unread"] = _name_lines(include, cited, unread)
+                written = _argument_lines(include, cited)
+                if written:
+                    values["arg_lines"] = written
                 if len(arg_sets[(include.entity_path, include.path)]) > 1:
                     leaf = steps[-1]
                     tag = ids.digest(
@@ -1072,6 +1078,25 @@ class LaunchDeclaredCollector:
             confidence=row.confidence,
             evidence=[row.source],
         )
+        # The broadcast goes out on /tf_static, so the graph has its publisher.
+        topic = ids.build_topic("/tf_static")
+        builder.node(topic)
+        builder.edge(
+            model.EdgeKind.PUBLISHES.value,
+            row.identity.node_id,
+            topic,
+            key=ids.edge_key(launchent=row.launchent_id, profile=spec.slug, topic="/tf_static"),
+            layer=LAYER,
+            profile=profile_id,
+            run=run,
+            values={
+                "raw_name": "/tf_static",
+                "type": "tf2_msgs/msg/TFMessage",
+                "via_known_wrapper": True,
+            },
+            confidence=row.confidence,
+            evidence=[row.source],
+        )
 
     def _emit_site(
         self, builder: model.AtlasBuilder, spec: ProfileSpec, run: str, row: _Placed
@@ -1219,7 +1244,7 @@ class LaunchDeclaredCollector:
         profile_id = ids.build_profile(spec.slug)
         node = row.node
         for remap in node.remaps:
-            source = _remap_source(ctx.ws, remap) or row.source
+            source = _remap_source(ctx.ws, remap) or _remap_line(remap, row.source)
             written_in = _written_outside(ctx, remap.site)
             resolved = _resolve_endpoint(remap.to, row.identity)
             if resolved is None:
@@ -2129,6 +2154,103 @@ def _gate_values(gate: records.Gate) -> dict[str, Any]:
     }
 
 
+_DYNAMIC_CONFIG = re.compile(r"LaunchConfiguration\(\s*[^'\"\s)]|launch_configurations")
+_DECLARED_ARG = re.compile(
+    r"DeclareLaunchArgument\(\s*(?:name\s*=\s*)?['\"]([^'\"]+)['\"]|<arg\s[^>]*\bname=\"([^\"]+)\""
+)
+
+
+def _unread_arguments(walk: records.LaunchWalk, include: records.LaunchInclude) -> list[list[str]]:
+    """[name, closest declared name] for every argument an include passes that no file of the
+    included tree spells anywhere, so nothing below the include can read it. Undecided, and
+    empty, when a file of that tree raised, did not resolve, reads a configuration by a name
+    it builds, or cannot be opened."""
+    import difflib
+
+    below = [
+        item
+        for item in walk.includes
+        if item.entity_path[: len(include.entity_path)] == include.entity_path
+    ]
+    paths = {item.path for item in below if item.path}
+    if any(not item.resolved for item in below) or any(
+        item.path in paths for item in walk.exceptions
+    ):
+        return []
+    texts = []
+    for path in sorted(paths):
+        try:
+            texts.append(Path(path).read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            return []
+    if not texts or any(_DYNAMIC_CONFIG.search(text) for text in texts):
+        return []
+    declared = sorted(
+        {name for text in texts for pair in _DECLARED_ARG.findall(text) for name in pair if name}
+    )
+    # A name the include already passes is not the one another argument meant.
+    passed = {name for name, _value in include.args}
+    declared = [name for name in declared if name not in passed]
+    out = []
+    for name, _value in include.args:
+        spelled = re.compile(rf"(?<![\w]){re.escape(name)}(?![\w])")
+        if not any(spelled.search(text) for text in texts):
+            close = difflib.get_close_matches(name, declared, n=1, cutoff=0.6)
+            out.append([name, close[0] if close else ""])
+    return sorted(out)
+
+
+def _name_lines(
+    include: records.LaunchInclude, cited: model.Source, unread: list[list[str]]
+) -> list[dict[str, Any]]:
+    """`{name, closest, line_hint}` per unread argument, the line the first line at or below
+    the include that quotes the name, which is where the name is edited."""
+    lines: list[str] = []
+    site = include.site
+    if (
+        site is not None
+        and cited.line_hint is not None
+        and site.path.endswith("/" + ids.parse_file(cited.file).relpath)
+    ):
+        try:
+            lines = Path(site.path).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            lines = []
+    out = []
+    for name, closest in unread:
+        row: dict[str, Any] = {"name": name, "closest": closest}
+        quoted = (f"'{name}'", f'"{name}"')
+        for number in range(cited.line_hint or 1, len(lines) + 1):
+            if any(item in lines[number - 1] for item in quoted):
+                row["line_hint"] = number
+                break
+        out.append(row)
+    return out
+
+
+def _argument_lines(include: records.LaunchInclude, cited: model.Source) -> list[dict[str, Any]]:
+    """The line of the including file that spells an argument's value as a literal beside its
+    name, when exactly one line does: a value an OpaqueFunction reads from a table
+    (`'robot1': {'use_sim_time': 'true'}`) is written there and not at the include."""
+    if include.site is None or cited.line_hint is None:
+        return []
+    if not include.site.path.endswith("/" + ids.parse_file(cited.file).relpath):
+        return []
+    try:
+        lines = Path(include.site.path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    out = []
+    for name, value in include.args:
+        if not value or not re.fullmatch(r"[\w.+-]+", value):
+            continue
+        pattern = re.compile(rf"""['"]{re.escape(name)}['"]\s*[:=,]\s*['"]{re.escape(value)}['"]""")
+        found = [number for number, text in enumerate(lines, 1) if pattern.search(text)]
+        if len(found) == 1 and found[0] != cited.line_hint:
+            out.append({"name": name, "line_hint": found[0]})
+    return out
+
+
 def _include_args(ws: Workspace, include: records.LaunchInclude) -> list[list[Any]]:
     """The arguments an include was given, with a temp path folded like a parameter input.
 
@@ -2446,6 +2568,25 @@ def _remap_source(ws: Workspace, remap: records.Remap) -> model.Source | None:
     if remap.scope != "global" or site is None or not _in_workspace(ws, site.path):
         return None
     return _source(ws, site.path, site.locator, site.line_hint)
+
+
+def _remap_line(remap: records.Remap, cited: model.Source) -> model.Source:
+    """The node's site moved to the first line at or below it that quotes the remapped name,
+    which is the line an engineer edits, when the node's own file holds one."""
+    site = remap.site
+    if site is None or cited.line_hint is None:
+        return cited
+    if not site.path.endswith("/" + ids.parse_file(cited.file).relpath):
+        return cited
+    try:
+        lines = Path(site.path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return cited
+    quoted = (f"'{remap.frm}'", f'"{remap.frm}"')
+    for number in range(cited.line_hint, len(lines) + 1):
+        if any(text in lines[number - 1] for text in quoted):
+            return dataclasses.replace(cited, line_hint=number)
+    return cited
 
 
 def _written_outside(ctx: CollectContext, site: records.Site | None) -> str:

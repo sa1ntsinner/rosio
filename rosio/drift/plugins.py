@@ -43,6 +43,7 @@ profile, so a reader of a drift report is never left thinking a silent rule foun
 
 from __future__ import annotations
 
+import difflib
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -519,6 +520,68 @@ def unresolved(atlas: model.Atlas) -> list[model.Finding]:
                         where=list(fact.evidence),
                     )
                 )
+    out.extend(_unregistered_components(atlas))
+    return out
+
+
+def _unregistered_components(atlas: model.Atlas) -> list[model.Finding]:
+    """A composable node whose class its package registers nowhere, which the join left as
+    the `component_class_unregistered` blind spot of the node. The container refuses the
+    load, so the node never runs. One finding per launch line and class."""
+    from rosio import join
+
+    components = join.registered_components(atlas)
+    groups: dict[tuple[str, str, str], dict[str, set]] = {}
+    for entry in atlas.unresolved:
+        node = atlas.entities.get(entry.owner)
+        if entry.reason != "component_class_unregistered" or node is None:
+            continue
+        for fact in node.facts:
+            if fact.layer != DECLARED or not rules.usable(fact) or not fact.evidence:
+                continue
+            package = str(fact.values.get("pkg") or "")
+            if fact.values.get("plugin_class") != entry.expr or package not in components:
+                continue
+            row = groups.setdefault(
+                (fact.evidence[0].file, package, entry.expr),
+                {"nodes": set(), "profiles": set(), "where": set(), "owner": node.id},
+            )
+            row["nodes"].add(rules.node_text(node.id))
+            row["profiles"].add(fact.profile)
+            row["where"].update(fact.evidence)
+    out = []
+    for (file_id, package, name), row in sorted(groups.items()):
+        known = sorted(components[package])
+        close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+        nodes = ", ".join(sorted(row["nodes"]))
+        where = sorted(row["where"], key=lambda item: item.sort_key())
+        at = rules.where(where[0])
+        instead = f"{close[0]}" if close else f"one of {', '.join(known[:5])}"
+        slugs = ", ".join(rules.slug_of(item) for item in sorted(row["profiles"]))
+        never = "the node never runs" if len(row["nodes"]) == 1 else "those nodes never run"
+        out.append(
+            model.Finding(
+                rule="plugin.unresolved",
+                severity=rules.severity_of("plugin.unresolved"),
+                subject=file_id if file_id in atlas.entities else row["owner"],
+                discriminator=ids.digest("component", package, name),
+                title=f"{name} is loaded as a component and {package} registers no such class",
+                detail=(
+                    f"{at} loads {name} from {package} as {nodes} in {slugs}, and {package} "
+                    f"registers {', '.join(known)}, so the container refuses the load and "
+                    f"{never}."
+                ),
+                fix=f"Load {instead} at {at}, or register {name} in {package}.",
+                say=(
+                    f"{at} loads the component {name}, which {package} does not register, so "
+                    f"{nodes} never {'starts' if len(row['nodes']) == 1 else 'start'}; the "
+                    f"registered class is {instead}."
+                ),
+                profiles=sorted(row["profiles"]),
+                layers=[DECLARED],
+                where=where,
+            )
+        )
     return out
 
 

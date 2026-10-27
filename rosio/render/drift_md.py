@@ -341,7 +341,14 @@ def _severity(atlas: Atlas, rule: str) -> str:
         and (atlas.x.get("drift") or {}).get("resolution_budget") is None
     ):
         return rules.severity_of(rule, "unbudgeted")
-    return rules.SEVERITY.get(rule, "")
+    base = rules.SEVERITY.get(rule, "")
+    # A rule that fires at another severity in some cases says both.
+    other = {table[rule] for table in rules.VARIANT_SEVERITY.values() if rule in table}
+    return (
+        " or ".join(sorted({base} | other, key=SEVERITY_ORDER.__getitem__))
+        if other - {base}
+        else base
+    )
 
 
 def _silences(atlas: Atlas, gates: Sequence[dict[str, str]]) -> list[str]:

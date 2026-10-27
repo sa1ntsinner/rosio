@@ -1467,7 +1467,7 @@ def _minor_note() -> str:
 def test_the_minor_is_bumped_and_says_what_each_addition_was():
     """Three additions stood under an unchanged 1.0: a rule id, the pass record, and the
     rename of a `refused_because` value. All three are additive, so the minor moves."""
-    assert model.SCHEMA_VERSION == "1.29"
+    assert model.SCHEMA_VERSION == "1.30"
     assert model.SCHEMA_VERSION.endswith("." + model.SCHEMA_MINOR)
     note = _minor_note()
     for addition in (
@@ -1533,7 +1533,7 @@ def test_a_reader_pinned_to_the_old_minor_still_loads_a_file_written_at_the_new_
     """The check the bump is worth. The loader compares the major alone, and the keys and
     the enum members that build never heard of are kept and re emitted rather than dropped."""
     payload = tiny_atlas().to_json()
-    assert payload["schema_version"] == "1.29"
+    assert payload["schema_version"] == "1.30"
     run_id = ids.build_run("declared", "nx_navigation", "9f2c1a4b")
     payload["entities"][run_id] = {
         "id": run_id,
@@ -1593,7 +1593,7 @@ def test_a_reader_pinned_to_the_old_minor_still_loads_a_file_written_at_the_new_
     payload["entities"].update(stamps.build().to_json()["entities"])
     monkeypatch.setattr(model, "SCHEMA_VERSION", "1.0")
     old = Atlas.from_json(payload)
-    assert old.schema_version == "1.29"
+    assert old.schema_version == "1.30"
     assert old.entities[source].fact("coded").values["class_templates"] == [
         {"name": "Filter", "definitions": 1, "specialized": False}
     ]

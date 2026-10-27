@@ -5,7 +5,9 @@
 it, `rosio.yaml` in the working directory or the directory above it when one of its roots is the
 workspace or lies inside it. A file in the working directory written for another tree is
 ignored, and extract says so. Without one it extracts one profile per launch file it finds. The run summary names the file it read. `rosio init` writes the
-fallback out as a file to edit.
+fallback out as a file to edit. A launch file that another launch file of its package includes
+and starts with no argument is written commented out, because read on its own it repeats every
+finding of the file that starts it.
 
 Relative paths in the file are read from the directory that holds it. A key this page does not
 list is refused, so a typing error never passes unnoticed.

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 from rosio import ids, model
@@ -270,6 +271,8 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
             else None
         )
         argument = _REQUIRED_ARGUMENT.search(first.message)
+        configuration = _MISSING_CONFIGURATION.search(first.message)
+        absent = _MISSING_FILE.search(first.message)
         tag = _UNKNOWN_TAG.search(first.message)
         imported = (
             launch_declared.cannot_import(first.message)
@@ -298,6 +301,26 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
             say = (
                 f"{first.label} needs the launch argument {name}, which profile {slugs} does "
                 f"not state, so the nodes it starts are missing from this atlas: {fix}."
+            )
+        elif configuration and slugs and not sandboxed:
+            name = configuration.group(1)
+            fix = (
+                f"declare {name} with a default in {first.label}, or state {name} under args "
+                f"of the entry point of profile {slugs} in rosio.yaml (args: {{{name}: <value>}})"
+            )
+            say = (
+                f"{first.label} reads the launch configuration {name}, which nothing declares "
+                f"or passes in profile {slugs}, so {_lost(first.kept)}: {fix}."
+            )
+        elif absent and not sandboxed:
+            name = absent.group(1)
+            fix = (
+                f"{first.label} names {name}, which is not where the walk looked; a relative "
+                "name resolves against the directory ros2 launch runs in, so name it from a "
+                "package share or an argument, or create it when a setup step writes it"
+            )
+            say = (
+                f"{first.label} reads {name}, which does not exist, so {_lost(first.kept)}: {fix}."
             )
         elif first.env and not first.kept and slugs:
             names = _and(first.env.split())
@@ -353,6 +376,15 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
 
 _REQUIRED_ARGUMENT = re.compile(r"required launch argument '([^']+)' was not provided")
 _UNKNOWN_TAG = re.compile(r"Unrecognized entity of the type: ([\w:.-]+)")
+_MISSING_CONFIGURATION = re.compile(r"launch configuration '([^']+)' does not exist")
+_MISSING_FILE = re.compile(r"No such file or directory: '([^'/]+)'")
+
+
+def _lost(kept: str) -> str:
+    """What a raise cost the atlas: the values of one node the walk kept, or its nodes."""
+    if kept:
+        return f"this atlas holds {kept} without the values that failed to expand"
+    return "the nodes it starts are missing from this atlas"
 
 
 def _package_fix(package: str, distro: str) -> str:
@@ -1473,6 +1505,85 @@ def _refused_where(atlas: Atlas, node: model.Node) -> list[Source]:
 
 
 # ---------------------------------------------------------------------------
+# launch.argument_undeclared
+
+
+@rules.register("launch.argument_undeclared")
+def launch_argument_undeclared(atlas: Atlas) -> list[Finding]:
+    """An include hands an argument that no file of the included tree spells.
+
+    The launch walk records it as `args_unread` on the include only when every file below
+    the include resolved, raised nothing and reads its configurations by literal names, so
+    nothing below can read the argument and the value it carries goes nowhere. The included
+    file then runs on the default of the argument it meant, which is the closest name it
+    declares.
+    """
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    for entity in atlas.by_kind(model.NodeKind.LAUNCHENT.value):
+        for fact in entity.facts:
+            if not rules.usable(fact) or not fact.evidence:
+                continue
+            for item in fact.values.get("args_unread") or []:
+                name = str(item.get("name") or "")
+                written = fact.evidence[0]
+                if item.get("line_hint"):
+                    written = replace(written, line_hint=item["line_hint"])
+                row = groups.setdefault(
+                    (fact.evidence[0].file, name),
+                    {
+                        "closest": str(item.get("closest") or ""),
+                        "profiles": set(),
+                        "where": set(),
+                        "into": set(),
+                        "site": entity.id,
+                    },
+                )
+                row["profiles"].add(fact.profile)
+                row["where"].add(written)
+                row["into"].add(str(fact.values.get("included_file") or ""))
+    findings = []
+    for (file_id, name), row in sorted(groups.items()):
+        where = sorted(row["where"], key=Source.sort_key)
+        at = rules.where(where[0])
+        into = ", ".join(
+            rules.path_of(ids.build_file(*ids.parse_launchfile(item)))
+            for item in sorted(row["into"])
+            if item
+        )
+        closest = row["closest"]
+        meant = f", and {closest} is the argument it declares closest to it" if closest else ""
+        findings.append(
+            Finding(
+                rule="launch.argument_undeclared",
+                severity=rules.severity_of("launch.argument_undeclared"),
+                # A file a root holds is the subject; an include read through an outside
+                # file is cited at that site.
+                subject=file_id if file_id in atlas.entities else row["site"],
+                title=f"{at} passes {name} to {into}, which never reads it",
+                detail=(
+                    f"{at} includes {into} with the argument {name}, and no file of the "
+                    f"included tree declares or reads {name}{meant}. The value goes nowhere "
+                    "and the included files run on their own defaults."
+                ),
+                fix=(
+                    f"Rename {name} to {closest} at {at}."
+                    if closest
+                    else f"Pass an argument {into} declares at {at}, or drop {name}."
+                ),
+                say=(
+                    f"{at} passes {name} to {into}, which has no such argument, so the value "
+                    "is dropped" + (f"; the argument it declares is {closest}." if closest else ".")
+                ),
+                discriminator=_disc(name),
+                profiles=sorted(row["profiles"]),
+                layers=[model.Layer.DECLARED.value],
+                where=where,
+            )
+        )
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # registry
 
 
@@ -1482,6 +1593,7 @@ RULES: dict[str, Callable[[Atlas], list[Finding]]] = {
     "build.underlay": build_underlay,
     "extract.input_refused": extract_input_refused,
     "extract.pass_incomplete": extract_pass_incomplete,
+    "launch.argument_undeclared": launch_argument_undeclared,
     "launch.file_not_installed": launch_file_not_installed,
     "launch.raised": launch_raised,
     "launch.unloadable": launch_unloadable,

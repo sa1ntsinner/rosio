@@ -867,10 +867,13 @@ def join(builder: model.AtlasBuilder) -> JoinReport:
     index = index_of(builder, report)
     _supersede(builder, index, report)
     rows: list[tuple[Instance, tuple[Carrier, ...], str]] = []
+    components = registered_components(atlas)
     for item in instances(atlas):
         found, via = index.of(item)
         if found:
             rows.append((_own_arguments(atlas, item, found), found, via))
+        elif _unregistered(item, components):
+            _unregistered_blind(builder, item)
     report.instances = len(rows)
     report.executables_bound = len({_exe_id(item) for item, _, via in rows if via == "executable"})
     report.components_joined = len(
@@ -1740,6 +1743,51 @@ def _component_files(atlas: model.Atlas) -> dict[str, set[str]]:
                 if name:
                     out.setdefault(name, set()).add(entity_id)
     return out
+
+
+def registered_components(atlas: model.Atlas) -> dict[str, set[str]]:
+    """Package to the component classes it registers, from the registration macro of a
+    source it read or a `rclcpp_components_register_nodes` line of its build. A package with
+    a C++ source the reader refused is left out, since that source may register more."""
+    out: dict[str, set[str]] = {}
+    for name, files in _component_files(atlas).items():
+        for file_id in files:
+            out.setdefault(ids.parse_file(file_id).package, set()).add(name.lstrip(":"))
+    for entity in atlas.by_kind("exe"):
+        for fact in entity.facts:
+            if fact.layer == DECLARED and fact.values.get("component_class"):
+                package = ids.parse_exe(entity.id).package
+                out.setdefault(package, set()).add(str(fact.values["component_class"]).lstrip(":"))
+    for entity in atlas.by_kind("file"):
+        if entity.attrs.get("loadable") is False and entity.attrs.get("language") == "cpp":
+            out.pop(ids.parse_file(entity.id).package, None)
+    for entry in atlas.unresolved:
+        if entry.reason == "cpp_parse_error" and ids.kind_of(entry.owner) == "file":
+            out.pop(ids.parse_file(entry.owner).package, None)
+    return out
+
+
+def _unregistered_blind(builder: model.AtlasBuilder, item: Instance) -> None:
+    node = builder.atlas.entities[item.node_id]
+    fact = node.fact(DECLARED, item.profile)
+    builder.unresolved(
+        model.Unresolved(
+            want=model.Want.OTHER.value,
+            owner=item.node_id,
+            expr=item.plugin_class,
+            reason="component_class_unregistered",
+            role="component",
+            resolvable_by=[f"register {item.plugin_class} as a component of {item.pkg}"],
+            evidence=list(fact.evidence) if fact else [],
+        )
+    )
+
+
+def _unregistered(item: Instance, components: dict[str, set[str]]) -> bool:
+    known = components.get(item.pkg)
+    return bool(item.plugin_class and not item.executable and known) and (
+        item.plugin_class.lstrip(":") not in known
+    )
 
 
 # ---------------------------------------------------------------------------

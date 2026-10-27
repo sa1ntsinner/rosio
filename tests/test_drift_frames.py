@@ -1801,6 +1801,8 @@ def test_every_rule_id_is_committed_and_implemented_once():
         "build.unbuilt",
         "build.underlay",
         "remap.matches_nothing",
+        "frame.broadcast_twice",
+        "launch.argument_undeclared",
     }
     assert set(frame_rules.RULES) | set(build_rules.RULES) == committed
     assert not set(frame_rules.RULES) & set(build_rules.RULES)

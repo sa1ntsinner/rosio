@@ -826,7 +826,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.29`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.30`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -1015,6 +1015,17 @@ What was added, in the order it arrived:
   file that are handed the node (`InteractiveMarkerServer(self, 'markers')`, a node base
   another module defines). Both let `remap.matches_nothing` stay silent where a name could
   come from code nobody read.
+
+* in `1.30`, the rule ids `type.incompatible`, `service.no_server`,
+  `launch.argument_undeclared` and `frame.broadcast_twice`; on a declared include fact
+  `args_unread`, a `{name, closest, line_hint}` row for every argument the include passes that
+  no file of the included tree spells, with the closest name the tree declares and the line
+  that writes the name, and `arg_lines`, the line of the including file that
+  writes an argument's literal value when that is not the include line; the blind spot reason
+  `component_class_unregistered`, a composable node whose `plugin=` no component registration
+  of the workspace names; and a declared `publishes` edge from a launch
+  `static_transform_publisher` to `/tf_static`, marked `via_known_wrapper` like the one a
+  `ros2 run` publisher has.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace
@@ -1416,7 +1427,23 @@ keyword is an action endpoint, where it was a node handoff. `remap.matches_nothi
 remap scoped to one node of a site that starts several for that node and skips the others,
 where it gave up on the remap. No release had shipped, so no stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.29` file: `Atlas.from_json` compares the major
+Inside `1.30` several ids and texts moved besides the new keys. `qos.incompatible` is one
+finding per topic and profile, told from the first layer of coded, declared and observed that
+holds the pair and listing every layer that does, so its discriminator lost the layer and its
+id moved; a mismatch the probe confirms no longer adds a second finding with no line to edit.
+An rclpy `ActionClient` or `ActionServer` is one action endpoint with its type, as the C++
+reader reads `rclcpp_action`, where it was five endpoints under `_action/`, so those edge ids
+and the topics and services they named went. A C++ endpoint type spelled through a `using`
+alias of the file or of the class is stated as the type it names, which moved the values of
+those edges. A `message_filters::Subscriber` built in a constructor's member initializer is an
+endpoint. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
+key a later `/**` block of the same file overrides says to move or trim that block, and a bare
+yaml key that is the last segment of a namespaced node's name is `param.owner_name_mismatch`
+rather than `param.orphan_block`. `param.sim_time_mixed` cites the line that writes a value an
+include hands over, when the including file writes it once beside the argument name. No
+release had shipped, so no stored id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.30` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -1463,6 +1490,8 @@ time.drift
 rmw.mixed                   zenoh.router_unreachable      qos.incompatible
 param.sim_time_mixed        launch.file_not_installed     model.mesh_missing
 build.unbuilt               build.underlay                remap.matches_nothing
+type.incompatible           service.no_server             launch.argument_undeclared
+frame.broadcast_twice
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -1520,6 +1549,51 @@ defect in the launch file (a typo, or a name the node renamed). Folding the two 
 dead remap at `info` or every unread package at `warn`. A remap this rule reports is not also
 `remap.unresolved`. The observed half is in `topic.no_publisher`, which names a remap that
 moved the only publisher of a topic away from it.
+
+`type.incompatible` is `error`. It compares the ends of one topic, service or action in one
+layer and one profile, and fires when a producing end (a publisher or a server) and a
+consuming end of another node state two types, both spelled with a package. The type the
+producers state most is the reference, and the finding names the line of the odd end. A node
+that states two types on one name holds alternatives a parameter chooses between and is left
+out, and so is an end under a condition. One line read under several namespaces is one
+finding. It is a rule of its own and not a case of `type.differ`, for the reason
+`qos.incompatible` is not a case of `qos.differ`: `type.differ` is two layers disagreeing about
+one endpoint, a gap between what was written and what runs, while this is two endpoints that
+agree with their own layers and can never connect, which is a defect at `error`.
+
+`service.no_server` is `warn`. It fires when a node calls a service or an action that no node
+of the profile serves, and only when the caller's source was read whole the way
+`remap.matches_nothing` reads it, no node of the profile holds a service or action name the
+reader could not follow, no remap target ends in the name, and a node whose whole source was
+read serves another name of the same type. It names that name, in the caller's namespace
+first and then the closest by spelling, because a client of a name nobody serves is nearly
+always a typo or a rename. A service with no server of its type anywhere stays a question of
+coverage, and the graph keeps saying no server was found. It is not a case of
+`topic.no_publisher`, which asks the observed layer and fires on a topic, while this one reads
+the code and fires on a service or action name.
+
+`launch.argument_undeclared` is `warn`. It fires once per including file and argument name
+when an include passes an argument that no file of the included tree declares or reads, and
+names the closest argument the tree declares that the include does not already pass. The walk
+decides it only when every file below the include resolved, raised nothing and reads its
+configurations by literal names, because a configuration read by a built name could be the
+argument. ROS 2 accepts such an argument without a word and the included file runs on its own
+default, so the value goes nowhere. It is not `launch.raised`: nothing raises.
+
+`frame.broadcast_twice` is `warn`. It fires once per child frame and profile that two nodes
+broadcast, from declared or coded facts that state both frames as literals and sit under no
+condition. tf2 holds one transform per child, so the frame takes whichever arrived last, which
+is what two robots without a frame prefix, or one frame published with two parents, look like.
+Two sites of one node are one broadcaster (section 5 cites one node broadcasting a pair from
+two methods). It is not `frame.parent_differs`, which compares the robot models of the
+profiles with each other.
+
+A composable node whose `plugin=` names a class that no `rclcpp_components` registration or
+`RCLCPP_COMPONENTS_REGISTER_NODE` of the workspace names is a case of `plugin.unresolved` and
+not a rule of its own: it is the same question (a class name nothing provides) asked of the
+component registry rather than of a pluginlib manifest. It is decided only for a package whose
+C++ sources were all read, leaves the blind spot `component_class_unregistered`, is about the
+launch file, and names the closest registered class.
 
 `param.sim_time_mixed` is `warn`. It fires once per profile whose nodes state both values of
 `use_sim_time` in their winning candidates, names the minority side and the line that sets

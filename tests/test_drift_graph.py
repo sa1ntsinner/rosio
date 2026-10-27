@@ -295,9 +295,11 @@ def test_the_two_modules_cover_the_committed_rule_ids() -> None:
         "qos.differ",
         "qos.incompatible",
         "rate.below_declared",
+        "service.no_server",
         "topic.no_publisher",
         "topic.no_subscriber",
         "type.differ",
+        "type.incompatible",
     ]
 
 

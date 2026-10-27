@@ -129,6 +129,10 @@ _ACTION_CALLS = {
     "create_action_client": ("action_client", 2, 1),
 }
 
+_RCLPY_ACTIONS = frozenset({"rclpy.action.ActionClient", "rclpy.action.ActionServer"})
+"""Read as one action endpoint with its type, as the C++ reader reads `rclcpp_action`, and
+not as the five endpoints rcl_action derives from the name."""
+
 _WRAPPER_KEYWORDS = {
     "message_filters.Subscriber": ("topic", "msg_type", "qos_profile"),
     "rclpy.action.ActionClient": ("action_name", "action_type", ""),
@@ -1752,6 +1756,9 @@ class PyFile:
             return Val(expr=text, reason="call_result")
 
         row = self._wrapper_of(dotted)
+        if row is not None and row.symbol in _RCLPY_ACTIONS:
+            self._action(node, ctx, row.symbol.rpartition(".")[2])
+            return Val(expr=text, reason="call_result")
         if row is not None:
             return self._wrapper(node, ctx, row, text)
         if tail in _ACTION_CALLS and self._looks_like_action(node):
@@ -2022,9 +2029,11 @@ class PyFile:
     def _action(self, node: ast.Call, ctx: Ctx, call: str) -> None:
         kind, name_index, type_index = _ACTION_CALLS[call]
         args = self._action_arguments(node)
-        if len(args) <= name_index:
+        name = args[name_index] if len(args) > name_index else self._keyword(node, "action_name")
+        if name is None:
             return
-        record = self._named_endpoint(kind, "other", args[name_index], args[type_index], ctx, node)
+        kind_of = args[type_index] if len(args) > type_index else self._keyword(node, "action_type")
+        record = self._named_endpoint(kind, "other", name, kind_of, ctx, node)
         record["qos"] = None
         self.endpoints.append(record)
 

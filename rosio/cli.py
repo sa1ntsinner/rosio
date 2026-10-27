@@ -119,6 +119,10 @@ class _Version(argparse.Action):
         parser.exit()
 
 
+PROFILES_SHOWN = 8
+"""How many profile names the extract summary prints before it counts the rest."""
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -1303,7 +1307,10 @@ def _print_summary(report: dict, elapsed: float, atlas=None) -> None:
         print("    parameter and plugin counts below are a lower bound")
         break
     profiles = report["profiles"]
-    print(f"  profiles {len(profiles)}: {', '.join(profiles) or 'none'}")
+    shown = ", ".join(profiles[:PROFILES_SHOWN]) or "none"
+    if len(profiles) > PROFILES_SHOWN:
+        shown += f" and {len(profiles) - PROFILES_SHOWN} more, rosio extract --json lists all"
+    print(f"  profiles {len(profiles)}: {shown}")
     print(f"  layers: {', '.join(report['layers']) or 'none'}")
     print(f"  entities {report['entities']}: {_counts(report['entities_by_kind'])}")
     print(f"  edges {report['edges']}: {_counts(report['edges_by_kind'])}")

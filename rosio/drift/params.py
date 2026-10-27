@@ -303,19 +303,33 @@ def shadowed(atlas: model.Atlas) -> list[model.Finding]:
                 f"Edit {win_at} to change it."
             )
         else:
-            names = ", ".join(row.name for row in group[:3])
+            names = ", ".join(dict.fromkeys(row.name for row in group[:3]))
+            owners = sorted({rules.node_text(row.owner) for row in group})
+            whose = owner if len(owners) == 1 else f"{len(owners)} nodes ({', '.join(owners[:3])})"
             title = f"{len(group)} values at {lose_at} are overridden"
             detail = (
                 f"{rules.path_of(head.winner.source.file)} sets {len(group)} parameters of "
-                f"{owner} that {rules.path_of(head.loser.source.file)} also sets, in profile "
+                f"{whose} that {rules.path_of(head.loser.source.file)} also sets, in profile "
                 f"{slug}, and wins all of them. Affected: {names}."
             )
             say = (
                 f"In profile {slug}, {rules.path_of(head.winner.source.file)} overrides "
-                f"{len(group)} parameters that {lose_at} sets for {owner}, including "
+                f"{len(group)} parameters that {lose_at} sets for {whose}, including "
                 f"{head.name} ({rules.value_text(head.loser.value)} becomes "
                 f"{rules.value_text(head.winner.value)}). Edit "
                 f"{rules.path_of(head.winner.source.file)}, the values at {lose_at} are dead."
+            )
+        fix = (
+            f"Change the value at {win_at}, or remove the losing line at {lose_at} so one file "
+            "states it."
+        )
+        later = _block_of(head.winner.source)
+        if same_file and later == "/**" and _block_of(head.loser.source) not in ("", "/**"):
+            # The more specific key was meant to win and loses only by its place in the file.
+            fix = (
+                f"Drop {head.name} from the /** block at {win_at}, or move the /** block above "
+                f"the {_block_of(head.loser.source)} block, so the value at {lose_at} takes "
+                "effect: in one file the later key wins, however much it matches."
             )
         out.append(
             model.Finding(
@@ -325,10 +339,7 @@ def shadowed(atlas: model.Atlas) -> list[model.Finding]:
                 discriminator=discs[key],
                 title=title,
                 detail=detail,
-                fix=(
-                    f"Change the value at {win_at}, or remove the losing line at {lose_at} so "
-                    "one file states it."
-                ),
+                fix=fix,
                 say=say,
                 profiles=[head.profile],
                 layers=_layers(head.winner, head.loser),
@@ -945,15 +956,20 @@ def _unnamed(atlas: model.Atlas, profile: str) -> int:
 
 
 def _near_names(atlas: model.Atlas, profile: str, selector: str) -> list[str]:
-    """Launched nodes whose name is the block key plus or minus a suffix."""
+    """Launched nodes whose name is the block key plus or minus a suffix, or, for a key that
+    names no namespace, the node of that name in a namespace: rcl reads `planner:` as
+    `/planner`, so the block misses `/robot1/planner`."""
     key = selector.strip("/").rsplit("/", 1)[-1]
     if not key:
         return []
+    bare = "/" not in selector.strip("/")
     found = []
     for node_id in _launched(atlas, profile):
         fqn = ids.parse_node(node_id).fqn or ""
         base = fqn.strip("/").rsplit("/", 1)[-1]
         if base == key:
+            if bare and fqn.count("/") > 1:
+                found.append(fqn)
             continue
         if base.startswith(f"{key}_") or key.startswith(f"{base}_"):
             found.append(fqn)
@@ -1128,8 +1144,22 @@ def sim_time_mixed(atlas: model.Atlas) -> list[model.Finding]:
         if len(fewer) > 3:
             named += f" and {len(fewer) - 3} more"
         first_owner, first = sorted(fewer)[0]
-        include = _included_at(atlas, first.source, profile)
+        include = _included_at(atlas, first.source, profile, fewer_value)
         at = f", included at {rules.where(include)}" if include else ""
+        other = ""
+        if len(fewer) == len(more):
+            # No side is the odd one out, so the line of each value is named.
+            second_owner, second = sorted(more)[0]
+            beside = _included_at(atlas, second.source, profile, not fewer_value)
+            other = (
+                f" {rules.node_text(second_owner)} gets {not fewer_value} from "
+                f"{rules.where(second.source)}"
+                + (f", included at {rules.where(beside)}" if beside else "")
+                + "."
+            )
+            include_rows = [beside] if beside else []
+        else:
+            include_rows = []
         out.append(
             model.Finding(
                 rule="param.sim_time_mixed",
@@ -1158,13 +1188,15 @@ def sim_time_mixed(atlas: model.Atlas) -> list[model.Finding]:
                 say=(
                     f"{named} run with use_sim_time {fewer_value} while {len(more)} other nodes "
                     f"of profile {slug} use {not fewer_value}; {rules.node_text(first_owner)} "
-                    f"gets it from {rules.where(first.source)}{at}. Set one value for the "
-                    "profile."
+                    f"gets it from {rules.where(first.source)}{at}.{other} Set one value for "
+                    "the profile."
                 ),
                 profiles=[profile],
                 layers=sorted({layer for _, row in fewer + more for layer in _layers(row)}),
                 where=rules.sources(
-                    [row.source for _, row in sorted(fewer)] + ([include] if include else [])
+                    [row.source for _, row in sorted(fewer)]
+                    + ([include] if include else [])
+                    + include_rows
                 ),
             )
         )
@@ -1172,12 +1204,14 @@ def sim_time_mixed(atlas: model.Atlas) -> list[model.Finding]:
 
 
 def _included_at(
-    atlas: model.Atlas, source: model.Source | None, profile: str
+    atlas: model.Atlas, source: model.Source | None, profile: str, value: object = None
 ) -> model.Source | None:
     """The include line that brought the launch file holding a value into the profile.
 
     nav2 states rviz's use_sim_time as a default inside rviz_launch.py, and the line to edit
-    is the include that does not pass it, in the file that starts the profile."""
+    is the include that does not pass it, in the file that starts the profile. An include
+    that passes the value, read from a literal the launch walk found on another line of the
+    including file (a table an OpaqueFunction reads), is cited at that literal."""
     if source is None:
         return None
     try:
@@ -1185,6 +1219,18 @@ def _included_at(
         target = ids.build_launchfile(parsed.package, parsed.relpath)
     except ContractError:
         return None
+    spelled = str(value).lower() if isinstance(value, bool) else None
+    for entity in atlas.by_kind(model.NodeKind.LAUNCHENT.value):
+        fact = entity.fact(DECLARED, profile)
+        if fact is None or fact.values.get("included_file") != target or not fact.evidence:
+            continue
+        passed = {str(row[0]): str(row[1]).lower() for row in fact.values.get("args") or []}
+        if spelled is None or passed.get("use_sim_time") != spelled:
+            continue
+        for row in fact.values.get("arg_lines") or []:
+            if row.get("name") == "use_sim_time" and row.get("line_hint"):
+                at = fact.evidence[0]
+                return model.Source(file=at.file, root=at.root, line_hint=row["line_hint"])
     for edge in sorted(atlas.edges.values(), key=lambda item: item.id):
         if edge.kind != "includes" or edge.dst != target:
             continue
@@ -1213,6 +1259,16 @@ def owner_name_mismatch(atlas: model.Atlas) -> list[model.Finding]:
         at = rules.where(block.source)
         listed = ", ".join(near)
         target = near[0] if len(near) == 1 else "the node it configures"
+        key = block.selector.strip("/")
+        namespaced = all(name.rsplit("/", 1)[-1] == key for name in near)
+        if namespaced and len(near) > 1:
+            target = f"/**/{key}"
+        how = (
+            "which run in a namespace, and a key with no namespace names the node in the root "
+            "namespace alone"
+            if namespaced
+            else "whose names start the same way"
+        )
         out.append(
             model.Finding(
                 rule="param.owner_name_mismatch",
@@ -1222,8 +1278,8 @@ def owner_name_mismatch(atlas: model.Atlas) -> list[model.Finding]:
                 title=f"block {block.selector} misses the node name in {slug}",
                 detail=(
                     f"The block {block.selector} carries {_keys(len(block.keys))} and profile "
-                    f"{slug} launches no node of that name. It launches {listed}, whose names "
-                    "start the same way, so nothing in the block is read."
+                    f"{slug} launches no node of that name. It launches {listed}, {how}, so "
+                    "nothing in the block is read."
                 ),
                 fix=f"Rename the block key {block.selector} to {target}.",
                 say=(

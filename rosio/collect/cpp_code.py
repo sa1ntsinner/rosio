@@ -1488,6 +1488,11 @@ class _Reader:
         self._wrapper_endpoints(
             wrapper, f"{wrapper}({_flat(arguments, self.src)[1:-1]})", arguments, conditional=False
         )
+        # `odom_sub_(this, "~/input/localization", qos)` names its topic like a declaration.
+        self._named_wrapper_endpoints(member, wrapper, arguments)
+        listed = [item for item in arguments.named_children if item.type != "comment"]
+        if wrapper == "message_filters::Subscriber" and len(listed) > 1:
+            self._filter_endpoint(member, listed[1], arguments, "Subscriber")
 
     def _declaration(self, node: Any) -> None:
         type_node = _child(node, "type")
@@ -3132,6 +3137,7 @@ def parse_text(
     for name, values, _site in sites:
         reader.constructor_arguments.setdefault(name, []).append(values)
     reader.walk(root)
+    unit.endpoints = _aliased_interfaces(root, src, unit.endpoints)
     unit.type_aliases = _type_aliases(root, src)
     unit.plugin_loaders = sorted(set(_PLUGIN_LOADER.findall(text)))
     unit.auto_declare, auto_sites, unit.auto_declare_classes = _auto_declare(root, src)
@@ -3436,6 +3442,33 @@ def _resolve_construction_calls(units: Sequence[Unit]) -> None:
             if len(matches) == 1 and row not in unit.constructions:
                 unit.constructions.append(row)
         unit.constructions.sort(key=lambda row: (row["class"], row["line_hint"]))
+
+
+def _aliased_interfaces(root: Any, src: bytes, endpoints: list[Endpoint]) -> list[Endpoint]:
+    """An endpoint typed by an alias the file states for one interface, class scope included
+    (`using Dock = fleet_msgs::action::Dock;` then `create_server<Dock>`), states the
+    interface. A name two aliases of the file spell differently stays as written."""
+    if not any(item.type_text and not interface_parts(item.type_text) for item in endpoints):
+        return endpoints
+    targets: dict[str, set[str]] = {}
+    pending = [root]
+    while pending:
+        node = pending.pop()
+        if node.type in {"alias_declaration", "type_definition"}:
+            name = _child(node, "name") or _child(node, "declarator")
+            target = _child(node, "type")
+            if name is not None and target is not None:
+                targets.setdefault(_text(name, src), set()).add(_text(target, src).strip())
+        pending.extend(node.named_children)
+    out = []
+    for item in endpoints:
+        spelled = targets.get(item.type_text.rpartition("::")[2], set())
+        if item.type_text and not interface_parts(item.type_text) and len(spelled) == 1:
+            target = next(iter(spelled))
+            if interface_parts(target):
+                item = replace(item, type_text=target)
+        out.append(item)
+    return out
 
 
 def _type_aliases(root: Any, src: bytes) -> list[dict[str, Any]]:

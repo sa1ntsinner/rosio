@@ -28,8 +28,10 @@ def test_the_written_file_reads_back_as_the_same_configuration(workspace: Path) 
     assert target == workspace / CONFIG_NAME
     read = load_config(str(target), workspace=str(workspace))
     assert [profile.slug for profile in read.profiles] == [p.slug for p in written.profiles]
+    offered = scaffold.offered(default_config(str(workspace))).profiles
+    inside = scaffold.started_inside(offered)
     assert [profile.slug for profile in read.profiles] == [
-        p.slug for p in scaffold.offered(default_config(str(workspace))).profiles
+        p.slug for p in offered if p.slug not in inside
     ]
     assert {Path(spec.path).resolve() for spec in read.roots} == {
         Path(spec.path).resolve() for spec in written.roots
@@ -528,12 +530,38 @@ def test_init_over_many_launch_files_names_the_ones_nothing_includes(
         f'  <include file="$(find-pkg-share bot_bringup)/launch/part_{index:02d}.launch.xml"/>\n'
         for index in range(scaffold.MANY_PROFILES)
     )
-    (launch / "robot.launch.xml").write_text(f"<launch>\n{included}</launch>\n", encoding="utf-8")
+    (launch / "robot.launch.xml").write_text(
+        f'<launch>\n  <arg name="world"/>\n{included}</launch>\n', encoding="utf-8"
+    )
     assert cli.main(["init", str(workspace)]) == 0
     said = capsys.readouterr().out
     assert "--package NAME" in said
     assert "2 files no other launch file includes: bot_bringup/plain.launch.py, " in said
     assert "bot_bringup/robot.launch.xml" in said
+
+
+def test_init_comments_out_the_files_a_file_needing_no_argument_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Each part is read by the file that includes it, so as its own profile it repeats every
+    finding of that file."""
+    from rosio.resolve import launch_exec
+
+    monkeypatch.setattr(launch_exec, "importable", lambda names, ros_setup=(): None)
+    workspace = _markup_workspace(tmp_path)
+    launch = workspace / "src" / "bot_bringup" / "launch"
+    for index in range(3):
+        (launch / f"part_{index:02d}.launch.xml").write_text("<launch/>\n", encoding="utf-8")
+    included = "".join(
+        f'  <include file="$(find-pkg-share bot_bringup)/launch/part_{index:02d}.launch.xml"/>\n'
+        for index in range(3)
+    )
+    (launch / "robot.launch.xml").write_text(f"<launch>\n{included}</launch>\n", encoding="utf-8")
+    assert cli.main(["init", str(workspace)]) == 0
+    text = (workspace / CONFIG_NAME).read_text(encoding="utf-8")
+    assert text.count("# bot_bringup/robot.launch.xml includes and starts this one") == 3
+    slugs = [item["slug"] for item in yaml.safe_load(text)["profiles"]]
+    assert not any("part" in slug for slug in slugs)
 
 
 def test_a_top_level_file_its_simulators_include_stays_offered(

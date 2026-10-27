@@ -263,8 +263,47 @@ def render(cfg: Config, base: Path) -> str:
         if key in payload and not payload[key]:
             del payload[key]
     body = yaml.safe_dump(payload, sort_keys=False, default_flow_style=False)
-    profiles = "".join(_profile(profile) for profile in cfg.profiles)
-    return f"{HEADER}\n{defaults}{body}profiles:" + (f"\n{profiles}" if profiles else " []\n")
+    inside = started_inside(cfg.profiles)
+    profiles = "".join(
+        _profile(profile) if profile.slug not in inside else _commented(profile, inside)
+        for profile in cfg.profiles
+    )
+    empty = all(profile.slug in inside for profile in cfg.profiles)
+    return f"{HEADER}\n{defaults}{body}profiles:" + (" []\n" if empty else "\n") + profiles
+
+
+def started_inside(profiles: Sequence[ProfileSpec]) -> dict[str, str]:
+    """Slug to the offered file of the same package that includes this profile's launch file
+    and starts with no argument, through an OpaqueFunction or plainly. Read as a profile of its
+    own, such a file restates every finding of the file that starts it, so it is written
+    commented out."""
+    included = _included(profiles)
+    runs = {
+        id(item): f"{item.pkg}/{Path(item.target).name}"
+        for profile in profiles
+        for item in profile.entrypoints
+        if item.verb == "launch" and not _required_arguments(item)
+    }
+    out = {}
+    for profile in profiles:
+        if len(profile.entrypoints) != 1:
+            continue
+        (entry,) = profile.entrypoints
+        if entry.verb != "launch" or entry.origin is None:
+            continue
+        starters = sorted(
+            runs[id(includer)]
+            for includer in included.get(Path(entry.origin.path).name, ())
+            if id(includer) in runs and includer.pkg == entry.pkg
+        )
+        if starters:
+            out[profile.slug] = starters[0]
+    return out
+
+
+def _commented(profile: ProfileSpec, inside: Mapping[str, str]) -> str:
+    note = f"{inside[profile.slug]} includes and starts this one; uncomment it to read it alone"
+    return f"# {note}\n" + "".join(f"# {line}\n" for line in _profile(profile).splitlines())
 
 
 DEFAULTS_NOTE = """\
@@ -380,8 +419,10 @@ def write(
     """
     cfg = offered(default_config(str(workspace), packages))
     wanted = target or workspace / CONFIG_NAME
+    inside = started_inside(cfg.profiles)
+    shown = replace(cfg, profiles=tuple(item for item in cfg.profiles if item.slug not in inside))
     try:
-        return _write(wanted, cfg, force), cfg
+        return _write(wanted, cfg, force), shown
     except OSError as exc:
         here = Path.cwd() / CONFIG_NAME
         if target is not None or here.absolute() == wanted.absolute():
@@ -390,7 +431,7 @@ def write(
                 "name a file you may write with --config FILE, or print it with --print"
             ) from exc
     try:
-        return _write(here, cfg, force), cfg
+        return _write(here, cfg, force), shown
     except OSError as exc:
         raise UsageError(
             f"cannot write {wanted} or {here}: {exc.strerror or exc}. "
