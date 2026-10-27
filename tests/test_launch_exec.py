@@ -352,6 +352,70 @@ def test_a_document_xacro_processed_is_a_robot_model_read(tmp_path: Path, serial
     assert first.nodes[0].file_reads == second.nodes[0].file_reads
 
 
+PY_XACRO_MODEL = (
+    '<robot name="bot" xmlns:xacro="http://www.ros.org/wiki/xacro">'
+    '<xacro:arg name="x" default="0.1"/><xacro:arg name="prefix" default=""/>'
+    '<link name="$(arg prefix)base_link"/><link name="$(arg prefix)base_scan"/>'
+    '<joint name="scan_joint" type="fixed"><parent link="$(arg prefix)base_link"/>'
+    '<child link="$(arg prefix)base_scan"/><origin xyz="$(arg x) 0 0.2"/></joint></robot>'
+)
+
+
+def _py_xacro_walk(tmp_path: Path, call: str, value: str, args=()) -> records.LaunchWalk:
+    model = tmp_path / "robot.urdf.xacro"
+    model.write_text(PY_XACRO_MODEL, encoding="utf-8")
+    entry = tmp_path / "py_xacro.launch.py"
+    entry.write_text(
+        "import xacro\n"
+        "from launch import LaunchDescription\n"
+        "from launch.actions import DeclareLaunchArgument, OpaqueFunction\n"
+        "from launch.substitutions import Command, LaunchConfiguration\n"
+        "from launch_ros.actions import Node\n"
+        "def make(context):\n"
+        f"    path = {str(model)!r}\n"
+        f"    mappings = {{'x': {value}, 'prefix': 'tb3/'}}\n"
+        f"    text = {call}\n"
+        "    return [Node(package='robot_state_publisher', executable='robot_state_publisher', "
+        "parameters=[{'robot_description': text}])]\n"
+        "def generate_launch_description():\n"
+        "    return LaunchDescription([DeclareLaunchArgument('x', default_value='0.1'), "
+        "OpaqueFunction(function=make)])\n"
+    )
+    return launch_exec.walk(str(entry), args=args)
+
+
+PY_XACRO_CALLS = [
+    "xacro.process_file(path, mappings=mappings).toxml()",
+    "xacro.process(path, mappings=mappings)",
+    "xacro.process_doc(doc := xacro.parse(open(path)), mappings=mappings) or doc.toxml()",
+]
+
+
+@pytest.mark.ros
+@pytest.mark.parametrize("call", PY_XACRO_CALLS)
+def test_a_model_xacro_expands_in_python_carries_its_mappings(tmp_path: Path, call: str):
+    pytest.importorskip("xacro")
+    value = "LaunchConfiguration('x').perform(context)"
+    walk = _py_xacro_walk(tmp_path, call, value, [("x", "0.3")])
+    assert not walk.exceptions
+    (read,) = walk.nodes[0].file_reads
+    assert (read.path, read.role) == (str(tmp_path / "robot.urdf.xacro"), "robot_model")
+    assert read.xacro_args == (("prefix", "tb3/"), ("x", "0.3"))
+    assert read.blind == ""
+
+
+@pytest.mark.ros
+def test_a_python_mapping_the_walk_cannot_perform_is_blind_and_names_nothing(tmp_path: Path):
+    pytest.importorskip("xacro")
+    value = "context.perform_substitution(Command('hostname'))"
+    walk = _py_xacro_walk(tmp_path, PY_XACRO_CALLS[0], value)
+    assert not walk.exceptions
+    (read,) = walk.nodes[0].file_reads
+    assert read.role == "robot_model"
+    assert read.xacro_args == ()
+    assert read.blind == f"xacro {tmp_path / 'robot.urdf.xacro'} prefix:=tb3/ x:=Command(hostname)"
+
+
 def _installed_walk(tmp_path: Path, read: str) -> records.LaunchWalk:
     """A launch file where a binary install puts it, beside a library that can read too."""
     model = tmp_path / "robot.urdf"

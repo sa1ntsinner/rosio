@@ -2295,6 +2295,108 @@ def test_a_profile_states_the_frames_its_xacro_arguments_make(tmp_path: Path) ->
     assert atlas.canonical_bytes() == again.canonical_bytes()
 
 
+PY_XACRO_MODEL = (
+    '<robot name="bot" xmlns:xacro="http://www.ros.org/wiki/xacro">'
+    '<xacro:arg name="x" default="0.1"/><xacro:arg name="prefix" default=""/>'
+    '<link name="$(arg prefix)base_link"/><link name="$(arg prefix)base_scan"/>'
+    '<joint name="scan_joint" type="fixed"><parent link="$(arg prefix)base_link"/>'
+    '<child link="$(arg prefix)base_scan"/><origin xyz="$(arg x) 0 0.2"/></joint></robot>'
+)
+PY_XACRO_LAUNCH = (
+    "import os\n"
+    "import xacro\n"
+    "from launch import LaunchDescription\n"
+    "from launch.actions import DeclareLaunchArgument, OpaqueFunction\n"
+    "from launch.substitutions import LaunchConfiguration\n"
+    "from launch_ros.actions import Node\n"
+    "def make(context):\n"
+    "    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bot.urdf.xacro')\n"
+    "    x = LaunchConfiguration('x').perform(context)\n"
+    "    text = xacro.process_file(path, mappings={'x': x, 'prefix': 'tb3/'}).toxml()\n"
+    "    return [Node(package='robot_state_publisher', executable='robot_state_publisher', "
+    "parameters=[{'robot_description': text}])]\n"
+    "def generate_launch_description():\n"
+    "    return LaunchDescription([DeclareLaunchArgument('x', default_value='0.1'), "
+    "OpaqueFunction(function=make)])\n"
+)
+
+
+def _py_xacro_atlas(tmp_path: Path, launch: str = PY_XACRO_LAUNCH) -> model.Atlas:
+    from rosio import extract
+
+    package = tmp_path / "src" / "bot"
+    package.mkdir(parents=True)
+    (package / "package.xml").write_text(
+        "<package format='3'><name>bot</name><version>0.0.0</version></package>"
+    )
+    (package / "bot.urdf.xacro").write_text(PY_XACRO_MODEL, encoding="utf-8")
+    (package / "bringup.launch.py").write_text(launch, encoding="utf-8")
+    cfg = Config(
+        roots=(RootSpec("src", str(tmp_path / "src")),),
+        profiles=tuple(
+            ProfileSpec(slug, entrypoints=(Entrypoint("launch", "bot", "bringup.launch.py", x),))
+            for slug, x in (("near", (("x", "0.3"),)), ("far", (("x", "0.7"),)))
+        ),
+        out_dir=str(tmp_path / "out"),
+    )
+    return extract.run(cfg, Workspace.discover(cfg.roots), collectors=["launch_declared"])
+
+
+@pytest.mark.ros
+def test_each_profile_states_the_frames_its_python_xacro_mappings_make(tmp_path: Path) -> None:
+    pytest.importorskip("xacro")
+    atlas = _py_xacro_atlas(tmp_path)
+    edges = [
+        item
+        for item in atlas.edges.values()
+        if item.kind == "tf_parent" and item.src == ids.build_frame("tb3/base_scan")
+    ]
+    assert {edge.dst for edge in edges} == {ids.build_frame("tb3/base_link")}
+    assert {
+        fact.profile: (fact.values["xacro_args"], fact.values["xyz"])
+        for edge in edges
+        for fact in edge.facts
+    } == {
+        "profile:far": ([["prefix", "tb3/"], ["x", "0.7"]], [0.7, 0.0, 0.2]),
+        "profile:near": ([["prefix", "tb3/"], ["x", "0.3"]], [0.3, 0.0, 0.2]),
+    }
+    scan = atlas.entities[ids.build_frame("tb3/base_scan")]
+    assert sorted(fact.profile for fact in scan.facts) == ["profile:far", "profile:near"]
+    reads = {
+        fact.profile: read["xacro_args"]
+        for site in atlas.by_kind("launchent")
+        for fact in site.facts
+        for read in fact.values.get("file_reads", ())
+        if read["role"] == "robot_model"
+    }
+    assert reads == {
+        "profile:far": [["prefix", "tb3/"], ["x", "0.7"]],
+        "profile:near": [["prefix", "tb3/"], ["x", "0.3"]],
+    }
+    assert not [entry for entry in atlas.unresolved if entry.want == model.Want.FRAME_ID.value]
+    assert schema.validate(atlas.to_json()) == []
+    again = _py_xacro_atlas(tmp_path / "again")
+    assert atlas.canonical_bytes() == again.canonical_bytes()
+
+
+@pytest.mark.ros
+def test_a_python_xacro_mapping_nobody_could_perform_names_no_frame(tmp_path: Path) -> None:
+    pytest.importorskip("xacro")
+    launch = PY_XACRO_LAUNCH.replace(
+        "LaunchConfiguration('x').perform(context)", "Command('hostname').perform(context)"
+    ).replace("import LaunchConfiguration", "import Command")
+    atlas = _py_xacro_atlas(tmp_path, launch)
+    assert not atlas.by_kind("frame")
+    blinds = [entry for entry in atlas.unresolved if entry.reason == "xacro_argument_unresolved"]
+    assert [(entry.owner, entry.expr) for entry in blinds] == [
+        (
+            ids.build_file("bot", "bot.urdf.xacro"),
+            "xacro @src/bot/bot.urdf.xacro prefix:=tb3/ x:=Command(hostname)",
+        )
+    ]
+    assert str(tmp_path) not in model.dumps(atlas.to_json())
+
+
 @pytest.mark.ros
 def test_a_model_argument_nobody_could_perform_names_no_frame(tmp_path: Path) -> None:
     atlas = _model_profile(tmp_path, (((), "xacro @src/bot/urdf/bot.urdf namespace:=Ns(...)"),))

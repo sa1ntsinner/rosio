@@ -133,9 +133,9 @@ class Gate:
 
 @dataclass(frozen=True)
 class FileRead:
-    """A file a node reads. A robot model a `xacro` command expands carries the arguments the
-    command passes, sorted by name, or `blind`, the command text, when one of them is a
-    substitution the walk could not perform."""
+    """A file a node reads. A robot model a `xacro` command or a python xacro call expands
+    carries the arguments or mappings it passes, sorted by name, or `blind`, the command text,
+    when one of them is a value the walk could not perform."""
 
     path: str
     role: str

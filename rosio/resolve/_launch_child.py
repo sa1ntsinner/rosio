@@ -443,6 +443,8 @@ class _ModelTexts:
     def __init__(self) -> None:
         self.opened: set[tuple[str, Any, Any, Any]] = set()
         self.produced: dict[str, set[str]] = {}
+        self.expansions: dict[tuple[str, str], set[tuple[tuple[tuple[str, str], ...], str]]] = {}
+        """The mappings each xacro document was processed with, by its text and its file."""
         self._saved: list[tuple[Any, str, Any]] = []
         self._open = open
         self._read: dict[tuple[str, Any, Any, Any], str] = {}
@@ -456,8 +458,12 @@ class _ModelTexts:
             import xacro
         except ImportError:
             return
-        if callable(getattr(xacro, "process_file", None)):
-            self._patch(xacro, "process_file", self._wrap_xacro)
+        # process_file and process reach both through the module globals
+        if callable(getattr(xacro, "parse", None)) and callable(
+            getattr(xacro, "process_doc", None)
+        ):
+            self._patch(xacro, "parse", self._wrap_parse)
+            self._patch(xacro, "process_doc", self._wrap_process_doc)
 
     def restore(self) -> None:
         for owner, name, original in reversed(self._saved):
@@ -508,27 +514,58 @@ class _ModelTexts:
 
         return read_text
 
-    def _wrap_xacro(self, original):
-        def process_file(input_file_name, *args, **kwargs):
-            document = original(input_file_name, *args, **kwargs)
-            path = str(Path(input_file_name).absolute())
-            for name in ("toxml", "toprettyxml"):
-                method = getattr(document, name, None)
-                if method is not None:
-                    with contextlib.suppress(AttributeError, TypeError):
-                        setattr(document, name, self._serialised(method, path))
+    def _wrap_parse(self, original):
+        def parse(inp, filename=None):
+            document = original(inp, filename)
+            name = filename if inp is None else getattr(inp, "name", None)
+            if isinstance(name, (str, os.PathLike)) and document is not inp:
+                with contextlib.suppress(AttributeError, TypeError):
+                    document._rosio_model = str(Path(name).absolute())
             return document
 
-        return process_file
+        return parse
 
-    def _serialised(self, method, path: str):
+    def _wrap_process_doc(self, original):
+        def process_doc(doc, mappings=None, **kwargs):
+            result = original(doc, mappings, **kwargs)
+            path = getattr(doc, "_rosio_model", None)
+            if path is not None:
+                expansion = _xacro_mappings(path, mappings or {})
+                for name in ("toxml", "toprettyxml"):
+                    method = getattr(doc, name, None)
+                    if method is not None:
+                        with contextlib.suppress(AttributeError, TypeError):
+                            setattr(doc, name, self._serialised(method, path, expansion))
+            return result
+
+        return process_doc
+
+    def _serialised(self, method, path: str, expansion):
         def serialise(*args, **kwargs):
             text = method(*args, **kwargs)
             if isinstance(text, str):
-                self.produced.setdefault(text, set()).add(path)
+                # a value holding an unrun command reaches the node as the command text
+                for stated in {text, _command_text(text) or text}:
+                    self.produced.setdefault(stated, set()).add(path)
+                    self.expansions.setdefault((stated, path), set()).add(expansion)
             return text
 
         return serialise
+
+
+def _xacro_mappings(path: str, mappings) -> tuple[tuple[tuple[str, str], ...], str]:
+    """The arguments a python xacro call passes, sorted by name, or the call spelled as a
+    command when one value is not a string the walk performed."""
+    stated = sorted((str(key), value) for key, value in dict(mappings).items())
+    if all(isinstance(value, str) and not _COMMAND.search(value) for _key, value in stated):
+        return tuple(stated), ""
+
+    def spelled(value) -> str:
+        if not isinstance(value, str):
+            return substitutions.describe_value(value)
+        return _COMMAND.sub(lambda match: f"Command({_command_text(match[0])})", value)
+
+    return (), " ".join(["xacro", path, *(f"{key}:={spelled(value)}" for key, value in stated)])
 
 
 def _action_site(action, file: str, locator: str) -> records.Site:
@@ -1081,7 +1118,9 @@ class Walker:
             site=_action_site(description, frame.file, f"ComposableNode({disc})"),
             attrs={} if reachable else {"unreachable": True},
         )
-        node = _finish_node(node, self.roots, self.models.texts(), self.commands.partial)
+        node = _finish_node(
+            node, self.roots, self.models.texts(), self.commands.partial, self.models.expansions
+        )
         self.result.nodes.append(node)
 
     def _node(self, action, frame: _Frame) -> records.ResolvedNode | None:
@@ -1167,7 +1206,9 @@ class Walker:
             site=_action_site(action, frame.file, f"{type(action).__name__}({disc})"),
             attrs=attrs,
         )
-        node = _finish_node(node, self.roots, self.models.texts(), self.commands.partial)
+        node = _finish_node(
+            node, self.roots, self.models.texts(), self.commands.partial, self.models.expansions
+        )
         self.result.nodes.append(node)
         if form == "lifecycle_node":
             self._lifecycle_nodes.append((action, node))
@@ -1209,7 +1250,9 @@ class Walker:
             node,
             role_content=_role_content(node.argv, node.remaps, node.params, self.roots),
         )
-        node = _finish_node(node, self.roots, self.models.texts(), self.commands.partial)
+        node = _finish_node(
+            node, self.roots, self.models.texts(), self.commands.partial, self.models.expansions
+        )
         self.result.nodes.append(node)
 
     # ------------------------------------------------------------------
@@ -1650,6 +1693,7 @@ def _finish_node(
     roots,
     texts: dict[str, set[str]] | None = None,
     partial: set[str] | frozenset[str] = frozenset(),
+    expansions: dict | None = None,
 ) -> records.ResolvedNode:
     blinds = [(gate.command_role, command) for gate in node.gates for command in gate.commands]
 
@@ -1717,17 +1761,22 @@ def _finish_node(
         node = replace(node, entity_path=(*node.entity_path[:-1], f"{action}({disc})"))
         if node.site:
             node = replace(node, site=node.site.with_locator(f"{action}({disc})"))
-    role = _role_content(node.argv, node.remaps, node.params, roots)
+    role = _role_content(
+        node.argv, node.remaps, node.params, roots, _xacro_documents(roots, texts, expansions)
+    )
     for key, expr in node.command_blinds:
         text = substitutions.command_text(expr, lambda path: identity.relative_path(path, roots))
         role += (f"command:{key}:{text}",)
-    return replace(node, file_reads=_file_reads(node, texts, partial), role_content=role)
+    return replace(
+        node, file_reads=_file_reads(node, texts, partial, expansions), role_content=role
+    )
 
 
 def _file_reads(
     node: records.ResolvedNode,
     texts: dict[str, set[str]] | None = None,
     partial: set[str] | frozenset[str] = frozenset(),
+    expansions: dict | None = None,
 ) -> tuple[records.FileRead, ...]:
     reads: set[tuple[str, str]] = set()
     models: set[tuple[str, tuple[tuple[str, str], ...], str]] = set()
@@ -1767,10 +1816,19 @@ def _file_reads(
             reads.add((path, "parameters_file"))
         for name, value in source.values:
             commands(value)
+            marked = uncarried_reason(value)
+            if marked is not None and marked[1] == "command_substitution":
+                value = marked[0]
             if name.rsplit(".", 1)[-1] == "robot_description" and isinstance(value, str):
                 paths = (texts or {}).get(value, ())
                 if len(paths) == 1:
-                    reads.add((next(iter(paths)), "robot_model"))
+                    path = next(iter(paths))
+                    expanded = (expansions or {}).get((value, path))
+                    if expanded:
+                        # mappings that give one text give one document, so any of them states it
+                        models.add((path, *min(expanded)))
+                    else:
+                        reads.add((path, "robot_model"))
     for index, word in enumerate(node.argv):
         if Path(word).is_absolute():
             flag = node.argv[index - 1] if index else ""
@@ -1860,10 +1918,31 @@ def _without_outputs(payload, produced: dict[str, str]):
     return clean(payload) if pairs else payload
 
 
-def _role_content(argv, remaps, params, roots):
+def _xacro_documents(roots, texts, expansions) -> dict[str, str]:
+    """Each document python xacro produced from one file, spelled as the command that makes
+    it. The banner xacro writes names the file by where this machine holds it, so the text
+    itself would put the mount point into a role digest."""
+    out = {}
+    for (text, path), found in (expansions or {}).items():
+        if (texts or {}).get(text) == {path}:
+            args, blind = min(found)
+            command = blind or " ".join(["xacro", path, *(f"{k}:={v}" for k, v in args)])
+            out[text] = substitutions.command_text(
+                command, lambda path: identity.relative_path(path, roots)
+            )
+    return out
+
+
+def _role_content(argv, remaps, params, roots, documents=None):
+    documents = documents or {}
+
     def stated(value):
+        if isinstance(value, str) and value in documents:
+            return documents[value]
         mark = uncarried_reason(value)
         if mark is not None and mark[1] == "command_substitution":
+            if mark[0] in documents:
+                return documents[mark[0]]
             return uncarried(
                 substitutions.command_text(
                     mark[0], lambda path: identity.relative_path(path, roots)

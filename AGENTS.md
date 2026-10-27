@@ -807,6 +807,16 @@ discriminator, so a failure inside one node is one finding per node rather than 
 message, which had folded two nodes failing on one missing package into a single finding
 that named neither. A row without `kept` keeps the id it had.
 
+A model python builds is read the same way, inside `1.18` and with no new key. A launch file
+that calls `xacro.process_file`, `xacro.process` or `xacro.parse` with `xacro.process_doc`
+hands the walk its `mappings`, which become the `xacro_args` of the read, and a mapping value
+that is not a string the walk performed (an unrun command) is the same
+`xacro_argument_unresolved` blind spot. The role digest of a node handed such a document no
+longer reads the text, whose banner names the model by where the machine holds it, but the
+document spelled as its command with the path relative to its root, so the synthetic node id
+and the launch entity id of that node moved once and stopped depending on the checkout. No
+release had shipped, so no stored id existed.
+
 A reader pinned to `1.0` still loads a `1.18` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
