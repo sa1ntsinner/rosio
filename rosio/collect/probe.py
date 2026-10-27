@@ -264,13 +264,17 @@ class ObservedSystem:
 def plan_passes(
     processes: Sequence[proc.RosProcess], forced: Sequence[str] | None = None
 ) -> list[str]:
-    """Unknown environments cannot select a library. With no evidence, use the default."""
+    """Unknown environments cannot select a library. With no evidence, use the default.
+
+    A Zenoh router serves every domain and runs no node, so one started for another system
+    selects no pass of its own: the nodes of this domain decide which middleware is probed.
+    """
     if forced is not None:
         return sorted(set(forced))
     known = {
         row.rmw
         for row in processes
-        if (row.is_node or row.is_launcher) and row.rmw not in ("", "unknown")
+        if (row.is_node or row.is_launcher) and not row.is_router and row.rmw not in ("", "unknown")
     }
     return sorted(known or {"default"})
 

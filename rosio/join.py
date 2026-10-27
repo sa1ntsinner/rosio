@@ -60,7 +60,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -918,6 +918,29 @@ def blind_names(atlas: model.Atlas, want: str) -> dict[str, list[str]]:
 
 def blind_files(atlas: model.Atlas, want: str) -> set[str]:
     return set(blind_names(atlas, want))
+
+
+def blind_nodes(atlas: model.Atlas, wants: Iterable[str], profile: str = "") -> set[str]:
+    """Nodes of a profile, or of any profile, whose code holds a site of one of `wants` that
+    was not read: the blind spot is the node's own, or it sits in a file the join bound to
+    the node there."""
+    wanted = set(wants)
+    files = set().union(*(blind_files(atlas, want) for want in wanted))
+    owners = {entry.owner for entry in atlas.unresolved if entry.want in wanted}
+    out = set()
+    for node in atlas.by_kind(model.NodeKind.NODE.value):
+        if node.id in owners and (not profile or profile in node.profiles):
+            out.add(node.id)
+            continue
+        for fact in node.facts:
+            if fact.layer != CODED or (
+                profile and fact.profile not in (profile, model.ANY_PROFILE)
+            ):
+                continue
+            if files & set(fact.values.get("coded_sources") or []):
+                out.add(node.id)
+                break
+    return out
 
 
 _STRING = re.compile(r"\"((?:[^\"\\]|\\.)*)\"|'((?:[^'\\]|\\.)*)'")
@@ -2062,6 +2085,7 @@ def _settle_params(builder: model.AtlasBuilder, node_id: str) -> None:
 
 LAUNCH_MECHANISMS = YAML_MECHANISMS | {
     model.Mechanism.LAUNCH_INLINE_DICT.value,
+    model.Mechanism.LAUNCH_SET_PARAMETER.value,
     model.Mechanism.ROS_ARGS_P.value,
     model.Mechanism.PYTHON_OVERRIDE.value,
 }

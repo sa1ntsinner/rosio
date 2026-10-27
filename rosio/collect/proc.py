@@ -141,6 +141,14 @@ def parse(argv: Sequence[str], pid: int = 0) -> RosProcess | None:
     program = tokens[0]
     executable = program.rsplit("/", 1)[-1]
     verb, target = _cli(tokens, executable)
+    if (
+        not verb
+        and executable.startswith("python")
+        and len(tokens) > 1
+        and not tokens[1].startswith("-")
+    ):
+        # A python node is its script behind the interpreter, which is what launch names.
+        executable = tokens[1].rsplit("/", 1)[-1]
     if ROS_ARGS not in tokens and not verb and executable != "rmw_zenohd":
         return None
     parsed = ros_args.parse_ros_args(tokens)
@@ -326,7 +334,11 @@ class ProcCollector:
         )
         builder.node(
             run,
-            attrs={"commands": sorted(_command(ctx, item) for item in rows if item.is_launcher)},
+            attrs={
+                "commands": sorted(
+                    _command(ctx, item) for item in rows if item.is_launcher and not item.is_router
+                )
+            },
         )
         builder.fact(
             run,

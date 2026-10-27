@@ -388,6 +388,56 @@ TABLE: tuple[Wrapper, ...] = (
         "topic carries geometry_msgs/msg/Twist. Checked on navigation2 main, not on humble.",
     ),
     Wrapper(
+        symbol="nav2_util::TwistSubscriber",
+        library="nav2_util",
+        language="cpp",
+        endpoints=(
+            WrapperEndpoint(
+                "subscriber",
+                type="geometry_msgs/msg/TwistStamped",
+                name_source="argument",
+                qos="the qos argument, nav2::qos::StandardTopicQoS by default",
+            ),
+        ),
+        argument=1,
+        evidence="nav2_util/include/nav2_util/twist_subscriber.hpp, both constructors "
+        "TwistSubscriber(node, topic, ...) create the subscription on topic",
+        parameters=("enable_stamped_cmd_vel",),
+        note="enable_stamped_cmd_vel, declared true, picks TwistStamped; set false the same "
+        "topic carries geometry_msgs/msg/Twist. Checked on navigation2 main.",
+    ),
+    *(
+        Wrapper(
+            symbol=f"{namespace}::InterProcessPollingSubscriber",
+            library=library,
+            language="cpp",
+            endpoints=(WrapperEndpoint("subscriber", name_source="argument", qos="depth 1"),),
+            argument=1,
+            evidence=f"{header}: InterProcessPollingSubscriber(node, topic_name, qos) creates "
+            "the subscription on topic_name, rclcpp::QoS{1} by default",
+            note="Autoware declares most of these as class members initialized in the header, "
+            'odom_sub_{this, "~/input/odometry"}, and reads them with take_data().',
+        )
+        for namespace, library, header in (
+            (
+                "autoware_utils_rclcpp",
+                "autoware_utils_rclcpp",
+                "autoware_utils_rclcpp/include/autoware_utils_rclcpp/polling_subscriber.hpp",
+            ),
+            (
+                "autoware_utils",
+                "autoware_utils_rclcpp",
+                "autoware_utils_rclcpp/include/autoware_utils_rclcpp/polling_subscriber.hpp",
+            ),
+            (
+                "autoware::universe_utils",
+                "autoware_universe_utils",
+                "autoware_universe_utils/include/autoware/universe_utils/ros/"
+                "polling_subscriber.hpp",
+            ),
+        )
+    ),
+    Wrapper(
         symbol="rclpy.action.ActionClient",
         library="rclpy",
         language="python",
@@ -511,6 +561,7 @@ TABLE: tuple[Wrapper, ...] = (
             WrapperEndpoint("service_server", "~/list_parameters"),
             WrapperEndpoint("service_server", "~/set_parameters"),
             WrapperEndpoint("service_server", "~/set_parameters_atomically"),
+            WrapperEndpoint("service_server", "~/get_type_description"),
         ),
         evidence="local/lib/python3.10/dist-packages/rclpy/node.py:200 creates the "
         "/parameter_events publisher; strings lib/librcl.so holds /rosout and "
@@ -534,9 +585,12 @@ TABLE: tuple[Wrapper, ...] = (
             WrapperEndpoint("service_server", "~/list_parameters"),
             WrapperEndpoint("service_server", "~/set_parameters"),
             WrapperEndpoint("service_server", "~/set_parameters_atomically"),
+            WrapperEndpoint("service_server", "~/get_type_description"),
         ),
         evidence="strings lib/librcl.so holds /rosout, lib/librclcpp.so holds "
         "/parameter_events and the six parameter service names",
+        note="Since jazzy every node also serves ~/get_type_description, from the type "
+        "description service of rcl_interfaces (start_type_description_service, default true).",
     ),
 )
 

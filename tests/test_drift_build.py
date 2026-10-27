@@ -61,7 +61,7 @@ def test_build_underlay_is_one_finding_for_the_workspace_naming_every_package():
     (found,) = build_rules.build_underlay(builder.build())
     assert found.subject == ids.build_pkg(ids.REPO_PKG)
     assert "costmap_queue, nav2_bringup and nav2_common" in found.say
-    assert found.title.startswith("3 packages run from another tree")
+    assert found.title.startswith("3 packages the launch walk looked up run from another tree")
 
 
 def test_build_underlay_is_silent_on_a_package_read_from_the_workspace():

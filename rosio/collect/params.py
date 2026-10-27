@@ -57,6 +57,7 @@ the records the launch walk produced, and the launch file text through the synta
 from __future__ import annotations
 
 import ast
+import difflib
 import functools
 import re
 import weakref
@@ -112,10 +113,12 @@ SELECTOR_KEYS = (
     "controller_plugins",
     "dock_plugins",
     "edge_cost_functions",
+    "filters",
     "goal_checker_plugins",
     "navigators",
     "observation_sources",
     "operations",
+    "path_handler_plugins",
     "planner_plugins",
     "plugins",
     "polygons",
@@ -148,9 +151,11 @@ SELECTOR_BASE_CLASS = {
     "controller_plugins": "nav2_core::Controller",
     "dock_plugins": "opennav_docking_core::ChargingDock",
     "edge_cost_functions": "nav2_route::EdgeCostFunction",
+    "filters": "nav2_costmap_2d::Layer",
     "goal_checker_plugins": "nav2_core::GoalChecker",
     "navigators": "nav2_core::NavigatorBase",
     "operations": "nav2_route::RouteOperation",
+    "path_handler_plugins": "nav2_core::PathHandler",
     "planner_plugins": "nav2_core::GlobalPlanner",
     "plugins": "nav2_costmap_2d::Layer",
     "progress_checker_plugin": "nav2_core::ProgressChecker",
@@ -2241,6 +2246,17 @@ def _citable(source: records.ParamSource, path: str, *, ws: Workspace) -> bool:
     return ws.aliased(path)
 
 
+def _similar_files(ws: Workspace, path: str) -> list[str]:
+    """Files beside a missing one whose names are one slip from its name, as file ids:
+    `lidar.yaml` beside a launch default naming `lidar_params.yaml`."""
+    local = Path(ws.localise(path))
+    if not local.parent.is_dir():
+        return []
+    names = sorted(item.name for item in local.parent.iterdir() if item.is_file())
+    close = difflib.get_close_matches(local.name, names, n=3, cutoff=0.6)
+    return sorted(ws.file_id(str(local.parent / name)) for name in close)
+
+
 def _merge_group(sources: Sequence[records.ParamSource]) -> dict[int, int]:
     """Rank of each file source inside a merge performed outside the launch system.
 
@@ -2266,11 +2282,11 @@ def _mechanism(
     if override:
         return override
     if source.kind == "inline_dict":
-        return (
-            model.Mechanism.PYTHON_OVERRIDE.value
-            if source.produced_by
-            else model.Mechanism.LAUNCH_INLINE_DICT.value
-        )
+        if source.produced_by:
+            return model.Mechanism.PYTHON_OVERRIDE.value
+        if source.note.startswith("SetParameter"):
+            return model.Mechanism.LAUNCH_SET_PARAMETER.value
+        return model.Mechanism.LAUNCH_INLINE_DICT.value
     if source.kind == "ros_args_assign":
         return model.Mechanism.ROS_ARGS_P.value
     if source.kind == "ros_args_file":
@@ -2415,18 +2431,46 @@ def _selected_instances(winners: Mapping[str, Any]) -> dict[str, str]:
     the pair together is the only way the two can never come apart.
     """
     out: dict[str, str] = {}
+    chosen: dict[str, str] = {}
     for name in sorted(winners):
         parts = name.split(".")
-        if parts[-1] not in SELECTOR_KEYS:
-            continue
         prefix = ".".join(parts[:-1])
         value = winners[name]
+        if parts[-1] not in SELECTOR_KEYS:
+            # A string naming a sibling block that declares a plugin selects it, the way
+            # `motion_model: "diff_drive"` picks the `diff_drive` block of an MPPI controller.
+            block = f"{prefix}.{value}" if prefix else str(value)
+            if (
+                isinstance(value, str)
+                and value
+                and parts[-1] != PLUGIN_KEY
+                and f"{block}.{PLUGIN_KEY}" in winners
+            ):
+                chosen.setdefault(block, name)
+            continue
         items = value if isinstance(value, (list, tuple)) else [value]
         for item in items:
             if not isinstance(item, str) or not item:
                 continue
             out.setdefault(f"{prefix}.{item}" if prefix else item, name)
+    for block, name in chosen.items():
+        out.setdefault(block, name)
+    # A plugin block nested in a selected instance is that plugin's to load, by a name its
+    # code states: MPPI reads `<name>.TrajectoryValidator.plugin`. The selector is the parent's
+    # plugin key, which names no base class, so no plugin id is minted for it.
+    suffix = f".{PLUGIN_KEY}"
+    for key in sorted((name for name in winners if name.endswith(suffix)), key=_depth):
+        block = key[: -len(suffix)]
+        parent = block.rpartition(".")[0]
+        while parent and block not in out:
+            if parent in out and f"{parent}{suffix}" in winners:
+                out[block] = f"{parent}{suffix}"
+            parent = parent.rpartition(".")[0]
     return out
+
+
+def _depth(name: str) -> tuple[int, str]:
+    return (name.count("."), name)
 
 
 def _governing_block(
@@ -2611,8 +2655,15 @@ class ParamsCollector:
         """
         seen: dict[str, tuple[str, records.Site | None, str]] = {}
         exprs: dict[str, str] = {}
+        origins: dict[str, records.Site] = {}
         roots = [spec.path for spec in ctx.ws.roots]
         for walk in walks:
+            supplied = {name for name, _value in walk.args}
+            for declaration in walk.arg_declarations:
+                # A path an argument default spells is written on the declaration's line,
+                # and that line is the one to correct when the file is not there.
+                if declaration.default and declaration.site and declaration.name not in supplied:
+                    origins.setdefault(declaration.default, declaration.site)
             for path, source, node in _file_reads(walk, pipelines, ctx.ws):
                 if path not in seen:
                     reader = node.site or source.site
@@ -2661,6 +2712,8 @@ class ParamsCollector:
                 line = _YAML_LINE.search(reason)
                 site = ctx.ws.site(path, line_hint=int(line.group(1)) if line else None)
                 evidence.append(ctx.ws.source(site))
+            if not exists and path in origins:
+                evidence.append(ctx.ws.source(origins[path]))
             if not exists and reader is not None:
                 evidence.append(ctx.ws.source(reader))
             if expr is not None:
@@ -2703,6 +2756,10 @@ class ParamsCollector:
             attrs["refused_detail"] = reason
         if because == BUILT_ONLY:
             attrs["found_elsewhere"] = same_name_in_package(ws, path)
+        if because == MISSING_FILE:
+            similar = _similar_files(ws, path)
+            if similar:
+                attrs["similar_files"] = similar
         held = ctx.builder.atlas.entities.get(file_id)
         stated = held.attrs.get("refused_because") if held is not None else None
         if held is not None and stated:

@@ -1020,6 +1020,58 @@ class LaunchDeclaredCollector:
             )
         self._emit_gates(ctx, spec, run, row)
         self._emit_remaps(ctx, spec, run, row)
+        self._emit_static_transform(ctx, spec, run, row)
+
+    def _emit_static_transform(
+        self, ctx: CollectContext, spec: ProfileSpec, run: str, row: _Placed
+    ) -> None:
+        """The frame pair a static_transform_publisher is started with, as a broadcast.
+
+        Its arguments are the parameters its node reads, so a pair both arguments spell as
+        literals is what the node broadcasts on /tf_static. Only the broadcast is stated: the
+        geometry stays with the parameters.
+        """
+        found = ros_args.program_assignments(row.node.pkg, row.node.executable, row.node.argv)
+        try:
+            parent = ids.normalise_frame(found.get("frame_id", ("", ""))[0])
+            child = ids.normalise_frame(found.get("child_frame_id", ("", ""))[0])
+        except ContractError:
+            return
+        if "$(" in parent + child or parent == child:
+            return
+        profile_id = ids.build_profile(spec.slug)
+        builder = ctx.builder
+        for frame in (parent, child):
+            frame_id = ids.build_frame(frame)
+            builder.node(frame_id)
+            builder.fact(
+                frame_id,
+                LAYER,
+                profile=profile_id,
+                run=run,
+                values={"name": frame},
+                confidence=row.confidence,
+                evidence=[row.source],
+            )
+        builder.edge(
+            model.EdgeKind.BROADCASTS_TF.value,
+            row.identity.node_id,
+            ids.build_frame(child),
+            key=ids.edge_key(
+                launchent=row.launchent_id, profile=spec.slug, pair=f"{parent}>{child}"
+            ),
+            layer=LAYER,
+            profile=profile_id,
+            run=run,
+            values={
+                "parent": parent,
+                "child": child,
+                "static": True,
+                "source": "static_transform_publisher",
+            },
+            confidence=row.confidence,
+            evidence=[row.source],
+        )
 
     def _emit_site(
         self, builder: model.AtlasBuilder, spec: ProfileSpec, run: str, row: _Placed
@@ -1286,6 +1338,12 @@ class LaunchDeclaredCollector:
                     )
             if not _in_launch_transition(row.node):
                 continue
+            # jazzy launch_ros configures and activates a LifecycleNode built with autostart.
+            mechanism = (
+                "OnStateTransition"
+                if _transitions(row.node) or not row.node.attrs.get("autostart")
+                else "autostart"
+            )
             ctx.builder.edge(
                 model.EdgeKind.MANAGES_LIFECYCLE.value,
                 row.launchent_id,
@@ -1293,16 +1351,17 @@ class LaunchDeclaredCollector:
                 key=ids.edge_key(
                     profile=spec.slug,
                     launchent=row.launchent_id,
-                    mechanism="OnStateTransition",
+                    mechanism=mechanism,
                     target=row.identity.node_id,
                 ),
                 layer=LAYER,
                 profile=profile_id,
                 run=run,
                 values={
-                    "mechanism": "OnStateTransition",
+                    "mechanism": mechanism,
                     "in_launch": True,
-                    "transitions": _transitions(row.node),
+                    "transitions": _transitions(row.node)
+                    or (["activate", "configure"] if mechanism == "autostart" else []),
                 },
                 evidence=[row.source],
             )
@@ -2181,7 +2240,11 @@ def _lifecycle_names(node: records.ResolvedNode) -> list[str]:
 def _in_launch_transition(node: records.ResolvedNode) -> bool:
     if any(gate.mechanism == "OnStateTransition" for gate in node.gates):
         return True
-    return bool(node.attrs.get("lifecycle_transitions") or node.attrs.get("emit_events"))
+    return bool(
+        node.attrs.get("lifecycle_transitions")
+        or node.attrs.get("emit_events")
+        or node.attrs.get("autostart")
+    )
 
 
 def _transitions(node: records.ResolvedNode) -> list[str]:

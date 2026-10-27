@@ -73,6 +73,7 @@ COMMITTED = (
     "model.mesh_missing",
     "build.unbuilt",
     "build.underlay",
+    "remap.matches_nothing",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -133,6 +134,7 @@ SEVERITY: dict[str, str] = {
     "model.mesh_missing": ERROR,
     "build.unbuilt": WARN,
     "build.underlay": WARN,
+    "remap.matches_nothing": WARN,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {

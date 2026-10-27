@@ -63,6 +63,14 @@ _NODE_BASES = {
     "rclpy.lifecycle.node.LifecycleNode": "lifecycle_node",
 }
 
+_QOS_PROFILE_DEFAULTS = {
+    "history": "keep_last",
+    "reliability": "reliable",
+    "durability": "volatile",
+}
+"""What `rclpy.qos.QoSProfile(...)` holds for a policy it is not given: history keep_last, the
+rest from `rmw_qos_profile_default` (rclpy/qos.py, `QoSProfile.__init__`)."""
+
 _QOS_PRESETS = {
     "qos_profile_sensor_data": "sensor_data",
     "qos_profile_system_default": "system_default",
@@ -2082,6 +2090,7 @@ class PyFile:
             "preset": None,
             "mutated": False,
         }
+        given = {keyword.arg for keyword in node.keywords}
         for keyword in node.keywords:
             if keyword.arg is None:
                 continue
@@ -2090,6 +2099,11 @@ class PyFile:
                 stated["depth"] = val.value if val.known else None
             elif keyword.arg in ("reliability", "durability", "history", "liveliness"):
                 stated[keyword.arg] = val.value if val.known else None
+        if None not in given and not node.args:
+            # rclpy fills a policy the constructor is not given from rmw_qos_profile_default.
+            for key, value in _QOS_PROFILE_DEFAULTS.items():
+                if key not in given:
+                    stated[key] = value
         return Val(expr=text, known=False, qos=stated, reason="call_result")
 
     # -- wrappers ----------------------------------------------------------

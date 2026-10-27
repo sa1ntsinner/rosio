@@ -183,6 +183,16 @@ KNOWN_WRAPPERS: dict[str, dict[str, str]] = {
     },
     "image_transport::SubscriberFilter": {"reason": ""},
     "nav2_util::TwistPublisher": {"reason": "the qos is a constructor argument of the wrapper"},
+    "nav2_util::TwistSubscriber": {"reason": "the qos is a constructor argument of the wrapper"},
+    "autoware_utils_rclcpp::InterProcessPollingSubscriber": {
+        "reason": "the qos is a constructor argument of the wrapper"
+    },
+    "autoware_utils::InterProcessPollingSubscriber": {
+        "reason": "the qos is a constructor argument of the wrapper"
+    },
+    "autoware::universe_utils::InterProcessPollingSubscriber": {
+        "reason": "the qos is a constructor argument of the wrapper"
+    },
 }
 """Types this reader recognises as creating a real endpoint no `create_publisher` or
 `create_subscription` call names, with the C++ specific note each one needs. What each
@@ -1246,6 +1256,10 @@ class _Reader:
                 inner = re.search(r"<(.+)>", type_text)
                 if head or inner is not None:
                     self.member_types[f"{member}::type"] = head or inner.group(1).strip()
+                if default is not None and default.type == "initializer_list":
+                    # `odom_sub_{this, "~/input/odometry"}` is built by every constructor.
+                    constructor = f"{self.klass}::{self.klass.rpartition('::')[2]}"
+                    self._named_wrapper_endpoints(member, wrapper, default, sym=constructor)
         self._children(node)
 
     def _function(self, node: Any) -> None:
@@ -1603,7 +1617,9 @@ class _Reader:
             if arguments is not None and arguments.type == "argument_list" and len(listed) > 1:
                 self._filter_endpoint(name, listed[1], value, "Subscriber")
 
-    def _named_wrapper_endpoints(self, member: str, wrapper: str, value: Any) -> None:
+    def _named_wrapper_endpoints(
+        self, member: str, wrapper: str, value: Any, sym: str = ""
+    ) -> None:
         """The endpoints a wrapper class creates under the name its constructor is handed,
         `TwistPublisher(node, "cmd_vel")`. message_filters and image_transport have readers
         of their own."""
@@ -1616,9 +1632,14 @@ class _Reader:
             for item in (arguments.named_children if arguments is not None else [])
             if item.type != "comment"
         ]
-        if arguments is None or arguments.type != "argument_list" or len(listed) <= row.argument:
+        if (
+            arguments is None
+            or arguments.type not in ("argument_list", "initializer_list")
+            or len(listed) <= row.argument
+        ):
             return
         ref = self.resolve(listed[row.argument])
+        sym = sym or self.sym
         for item in row.endpoints:
             if item.name_source != "argument":
                 continue
@@ -1626,7 +1647,7 @@ class _Reader:
                 Endpoint(
                     kind=item.kind,
                     name=ref,
-                    sym=self.sym,
+                    sym=sym,
                     owner_class=self.klass,
                     line=_line(value),
                     api=wrapper,
@@ -3476,11 +3497,34 @@ def analyse(
                 unit.classes[position] = _merge_class(index.classes.get(item.qualname), item)
     _plugin_suffixes(units)
     _finish_node_helpers(units)
+    _member_constructions(units)
     _local_constructions(units)
     _header_constructions(units, include_dirs or {}, definitions)
     _map_defaults(units, include_dirs or {})
     _member_defaults(units)
     return index
+
+
+def _member_constructions(units: Sequence[Unit]) -> None:
+    """A wrapper member a header builds where it declares it, `odom_sub_{this, "topic"}`, is
+    built by the constructor, which a source file of the package defines."""
+    headers = (".h", ".hpp", ".hh", ".hxx")
+    defined: dict[tuple[str, str], Unit] = {}
+    for unit in units:
+        if not unit.relpath.endswith(headers):
+            for method in unit.methods:
+                defined.setdefault((unit.pkg, method), unit)
+    for unit in units:
+        if not unit.relpath.endswith(headers):
+            continue
+        moved = [
+            item
+            for item in unit.endpoints
+            if item.api in KNOWN_WRAPPERS and (unit.pkg, item.sym) in defined
+        ]
+        for item in moved:
+            defined[(unit.pkg, item.sym)].endpoints.append(item)
+        unit.endpoints = [item for item in unit.endpoints if item not in moved]
 
 
 _MEMBER_TYPES = {"double": float, "int": int, "int64_t": int, "bool": bool, "std::string": str}

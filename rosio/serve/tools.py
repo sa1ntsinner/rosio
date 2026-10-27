@@ -619,6 +619,61 @@ def _wrapper(edge: Edge, wanted: str) -> bool:
     )
 
 
+def _library_end(edge: Edge, wanted: str) -> bool:
+    """A wrapper endpoint on a name the library owns, `/tf` or `/diagnostics`. A wrapper
+    handed its name by the node, a `message_filters` subscription to `/scan`, is the node's
+    own endpoint and stays in the graph."""
+    from rosio.drift.topics import is_quiet
+
+    return _wrapper(edge, wanted) and is_quiet(slices.label(edge.dst))
+
+
+def _blind_text(atlas: Atlas, kind: str, wanted: str, cache: dict[str, int]) -> str:
+    """How many nodes of the profile hold a name of this channel kind the reader could not
+    follow, so a missing side reads as not found rather than as absent."""
+    if kind not in cache:
+        from rosio import join
+
+        want = {"topic": "topic_name", "service": "service_name", "action": "action_name"}[kind]
+        cache[kind] = len(join.blind_nodes(atlas, [want], wanted))
+    count = cache[kind]
+    if not count:
+        return ""
+    return (
+        f" found, {plural(count, 'node')} {'has' if count == 1 else 'have'} unresolved {kind} names"
+    )
+
+
+def _merged_ends(edges: Sequence[Edge], wanted: str) -> set[tuple[str, str]]:
+    """(node, qos) per end. The probe keys an endpoint by its name and the join by its source
+    site, so one endpoint two layers state sits on two edges: those are one end, with the
+    QoS each states, unless they state one policy two ways."""
+    by_node: dict[str, list[Edge]] = {}
+    for edge in edges:
+        by_node.setdefault(edge.src, []).append(edge)
+    out = set()
+    for node, group in by_node.items():
+        texts = [_qos(edge, wanted) for edge in group]
+        parts: list[str] = []
+        for text in texts:
+            parts.extend(part for part in text.split(", ") if part and part not in parts)
+        if len(group) > 1 and _one_view(group, wanted):
+            out.add((slices.label(node), ", ".join(parts)))
+        else:
+            out.update((slices.label(node), text) for text in texts)
+    return out
+
+
+def _one_view(group: Sequence[Edge], wanted: str) -> bool:
+    layers: dict[str, int] = {}
+    for edge in group:
+        for layer in {
+            fact.layer for fact in edge.facts if not wanted or fact.profile in (wanted, ANY_PROFILE)
+        }:
+            layers[layer] = layers.get(layer, 0) + 1
+    return all(count == 1 for count in layers.values())
+
+
 def _channel_type(atlas: Atlas, channel: str, wanted: str) -> str:
     names = {
         "/".join(ids.parse(edge.dst).segments)
@@ -730,7 +785,7 @@ def select_graph(
         scope = reached
         links = [edge for edge in links if edge.src in scope and edge.dst in scope]
 
-    shown = links if wrappers else [edge for edge in links if not _wrapper(edge, wanted)]
+    shown = links if wrappers else [edge for edge in links if not _library_end(edge, wanted)]
     hidden = len(links) - len(shown)
     by_channel: dict[str, list[Edge]] = {}
     for edge in shown:
@@ -872,6 +927,7 @@ def graph(
     if not chosen.endpoints and not chosen.focus_id:
         lines.append(_why_empty(atlas, chosen, cli))
     rows = _limit(limit)
+    blind: dict[str, int] = {}
     for entity_id in chosen.channels[:rows]:
         kind = atlas.entities[entity_id].kind
         rules = chosen.rules[entity_id]
@@ -879,11 +935,10 @@ def graph(
         sides = []
         for edge_kind, verb, none in _SIDES[kind]:
             # one entry per distinct QoS, so a clip never cuts into a bracket
-            ends = {
-                (slices.label(edge.src), _qos(edge, wanted))
-                for edge in chosen.by_channel.get(entity_id, [])
-                if edge.kind == edge_kind
-            }
+            ends = _merged_ends(
+                [edge for edge in chosen.by_channel.get(entity_id, []) if edge.kind == edge_kind],
+                wanted,
+            )
             stated = {name for name, qos in ends if qos}
             named = [
                 name + (f" [{qos}]" if qos else "")
@@ -893,7 +948,11 @@ def graph(
             implicit = chosen.lifecycle.get(entity_id)
             if not named and implicit and implicit[0] == edge_kind:
                 named = [f"{slices.label(implicit[1])} (lifecycle node)"]
-            sides.append(f"{verb} {_named(named, more='more')}" if named else none)
+            sides.append(
+                f"{verb} {_named(named, more='more')}"
+                if named
+                else none + _blind_text(atlas, kind, wanted, blind)
+            )
         type_name = _channel_type(atlas, entity_id, wanted)
         typed = f" ({type_name})" if type_name else ""
         lines.append(f"{slices.label(entity_id)}{typed}{flags}: " + "; ".join(sides))
@@ -1256,6 +1315,8 @@ def _broadcast_hops(atlas: Atlas, wanted: str) -> dict[str, list[_Hop]]:
         for fact in edge.facts:
             if wanted and fact.profile not in (wanted, ANY_PROFILE):
                 continue
+            if fact.values.get("source") == STATIC_TF:
+                continue  # read off its argv, with the numbers, by `_static_hops`
             parent = _frame_ref(fact.values.get("parent"))
             if parent and not any(
                 hop.node == edge.src and hop.parent == parent for hop in out.get(edge.dst, [])
@@ -1559,12 +1620,21 @@ def _chain_answer(
     casted = [hop for hop in hops if hop.node and not hop.static]
     if casted:
         first = casted[0]
-        return ("stop", key), [
-            f"  not static: {ids.parse_frame(first.parent)} -> {ids.parse_frame(first.child)} "
-            f"is broadcast by {slices.label(first.node)} at {first.site}, so its value exists "
-            "only at run time and nothing is composed across it",
-            *chain,
-        ]
+        pair = f"{ids.parse_frame(first.parent)} -> {ids.parse_frame(first.child)}"
+        if first.values.get("static") is True:
+            # A StaticTransformBroadcaster in a source: static, with numbers the code sets.
+            head = (
+                f"  static, numbers in code: {pair} is sent once on /tf_static by "
+                f"{slices.label(first.node)} at {first.site}, and rosio does not evaluate the "
+                "numbers the source fills in, so nothing is composed across it"
+            )
+        else:
+            head = (
+                f"  not static: {pair} is broadcast by {slices.label(first.node)} at "
+                f"{first.site}, so its value exists only at run time and nothing is composed "
+                "across it"
+            )
+        return ("stop", key), [head, *chain]
     blind = [hop for hop in hops if not _readable(hop)]
     if blind and blind[0].static:
         return ("unreadable", key), [

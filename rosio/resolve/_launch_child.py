@@ -660,6 +660,20 @@ def _xacro_mappings(path: str, mappings) -> tuple[tuple[tuple[str, str], ...], s
     return (), " ".join(["xacro", path, *(f"{key}:={spelled(value)}" for key, value in stated)])
 
 
+def _autostart(context, action) -> bool:
+    """`LifecycleNode(autostart=True)`, which launch_ros since jazzy configures and activates
+    itself. A value that does not perform to a bool states nothing."""
+    from launch.utilities import type_utils
+
+    value = getattr(action, "_LifecycleNode__autostart", False)
+    if isinstance(value, bool):
+        return value
+    try:
+        return type_utils.perform_typed_substitution(context, value, bool) is True
+    except Exception:
+        return False
+
+
 def _action_site(action, file: str, locator: str) -> records.Site:
     lines = getattr(action, "_rosio_construction_lines", {})
     return records.Site(file, locator, lines.get(file))
@@ -968,7 +982,7 @@ class Walker:
                     name=str(action.name),
                     default=text,
                     description=description,
-                    site=records.Site(frame.file, f"DeclareLaunchArgument({action.name})"),
+                    site=_action_site(action, frame.file, f"DeclareLaunchArgument({action.name})"),
                 )
             )
         supplied = str(action.name) in self.context.launch_configurations
@@ -1337,6 +1351,8 @@ class Walker:
             attrs["name_sentinel"] = substitutions.UNSPECIFIED_NAME
         if raw_namespace == substitutions.UNSPECIFIED_NAMESPACE:
             attrs["namespace_sentinel"] = substitutions.UNSPECIFIED_NAMESPACE
+        if form == "lifecycle_node" and _autostart(self.context, action):
+            attrs["autostart"] = True
         node = records.ResolvedNode(
             pkg=package,
             executable=executable,

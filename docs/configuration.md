@@ -20,7 +20,7 @@ list is refused, so a typing error never passes unnoticed.
 | `launch_timeout` | seconds one launch walk may take. | `60` |
 | `launch_sandbox` | `auto` walks launch files inside bubblewrap when it works, `required` refuses to walk without it, `off` (or `false`) never uses it. `--launch-sandbox` overrides it. | `auto` |
 | `profiles` | one per system you actually run, a list of profile mappings (below). | one profile per launch file, leaving out ROS 1 and test launch files; an empty list is taken as written and extracts no profile |
-| `out` | the output directory, relative to the working directory. `--out` overrides it. | `rosio-out` |
+| `out` | the output directory, relative to the working directory. `--out` overrides it. Keep it in `.gitignore` when the git hooks rebuild it: a hook leaves a tracked `atlas.json` as committed. | `rosio-out` |
 | `out_dir` | the older spelling of `out`. | |
 | `deterministic` | accepted for older files. `rosio extract` is deterministic unless `--no-deterministic` is passed. | |
 | `waivers` | waiver files `rosio drift` grades with, a path or a list. `--waivers` replaces it. Never read by extract. | none |

@@ -1021,6 +1021,14 @@ def cmd_init(args: argparse.Namespace) -> int:
         f"{PROG} init: wrote {target} with {plural(len(cfg.roots), 'root')} and "
         f"{plural(len(cfg.profiles), 'profile')}. Edit the profiles, then run: {command}"
     )
+    if not cfg.profiles:
+        runs = scaffold.run_entrypoints(cfg)
+        print(
+            f"{PROG} init: no launch file found, so no profile was written. A profile can start "
+            "executables instead, one entrypoint line each"
+            + (": " + ", ".join(runs[:5]) + (", ..." if len(runs) > 5 else "") if runs else "")
+            + ". See docs/configuration.md."
+        )
     if len(cfg.profiles) > scaffold.MANY_PROFILES and not packages:
         top = scaffold.top_level(cfg)
         print(
@@ -1872,7 +1880,7 @@ def _probe_config(args: argparse.Namespace, source):
 
 def _observed_counts(atlas) -> dict:
     """What the observed layer put into the atlas, counted from the facts themselves."""
-    from rosio.model import Layer, NodeKind
+    from rosio.model import EdgeKind, Layer, NodeKind
 
     layer = Layer.OBSERVED.value
     wanted = {
@@ -1886,9 +1894,23 @@ def _observed_counts(atlas) -> dict:
         name = wanted.get(entity.kind)
         if name and any(fact.layer == layer for fact in entity.facts):
             counts[name] += 1
-    counts["endpoints"] = sum(
-        1 for edge in atlas.edges.values() if any(fact.layer == layer for fact in edge.facts)
+    seen = [edge for edge in atlas.edges.values() if any(f.layer == layer for f in edge.facts)]
+    # The probe states a frame by the transform that names it, not by a fact on the frame.
+    counts["frames"] = len(
+        {
+            end
+            for edge in seen
+            if edge.kind == EdgeKind.TF_PARENT.value
+            for end in (edge.src, edge.dst)
+        }
     )
+    endpoint_kinds = {
+        EdgeKind.PUBLISHES.value,
+        EdgeKind.SUBSCRIBES.value,
+        EdgeKind.SERVES.value,
+        EdgeKind.CALLS.value,
+    }
+    counts["endpoints"] = sum(1 for edge in seen if edge.kind in endpoint_kinds)
     return counts
 
 
@@ -2035,9 +2057,21 @@ def _hook_run(args: argparse.Namespace) -> int:
         print(dumps({"verb": "hook run", "ok": record["ok"], "data": record}), end="")
     elif not args.quiet:
         seconds = record["volatile"]["seconds"]
-        if record["ok"]:
+        if record.get("left_tracked"):
+            print(
+                f"{PROG} hook {record['event']}: {record['atlas']} is tracked by git, so the "
+                f"hook left it as committed; run {PROG} hook run to rebuild it, then commit it"
+            )
+        elif record["ok"]:
             how = "atlas read back from the build cache" if record["cached"] else "atlas rebuilt"
             print(f"{PROG} hook {record['event']}: {how} in {seconds}s")
+            dropped = record.get("dropped_layers") or []
+            if dropped:
+                print(
+                    f"{PROG} hook {record['event']}: the rebuild holds no {' or '.join(dropped)} "
+                    f"layer, which the replaced atlas had; run {PROG} probe again to restate it",
+                    file=sys.stderr,
+                )
         else:
             print(
                 f"{PROG} hook {record['event']}: the rebuild failed after {seconds}s "

@@ -818,7 +818,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.27`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.28`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -992,6 +992,15 @@ What was added, in the order it arrived:
 * in `1.27`, the unresolved reason `angle_unreadable`: a roll, pitch or yaw a
   `static_transform_publisher` is handed that is not a number leaves `rotation.x` to
   `rotation.w` of its node blind spots, where the rotation was dropped and nothing said so.
+
+* in `1.28`, the rule id `remap.matches_nothing`; the candidate mechanism
+  `launch_set_parameter`, a value a launch `SetParameter` hands every node of its group, which
+  was `launch_inline_dict` before; the `manages_lifecycle` mechanism `autostart`, a
+  `LifecycleNode(autostart=True)` that launch_ros configures and activates itself; the file
+  attribute `similar_files`, the files in the directory of a missing parameters file whose name
+  is close to its name (`lidar.yaml` beside a default naming `lidar_params.yaml`); and a declared `broadcasts_tf` edge from a `static_transform_publisher`
+  whose frame pair its arguments spell as literals, with the value `static`, so the frames it
+  names exist in the declared layer.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace
@@ -1309,7 +1318,30 @@ none of the records it wrote before the refusal, and the pass goes on. A rotatio
 `static_transform_publisher` reads from angles cites the flags written, or `positional`, where
 it cited `--roll --pitch --yaw`. No release had shipped, so no stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.27` file: `Atlas.from_json` compares the major
+Inside `1.28` several ids and texts moved besides the new keys. `param.set_undeclared` is one
+finding per line, listing the profiles and the nodes it is handed to, and its subject is the
+parameter when the line sets one name and the file otherwise; its discriminator is a digest
+over the file, the locator and the names, so every such id moved. A key a `SetParameter` hands
+a group is asked to be stopped at that line only when no node of the group reads it, never
+removed from a dictionary. The file list of a `set_undeclared` finding names the node's own
+sources first. `remap.unresolved` is silent on a remap `remap.matches_nothing` reports, and the
+remaps one file writes on the same nodes are one finding whose discriminator is a digest over
+their sorted expressions, which moved those ids. A selector list of `filters` or
+`path_handler_plugins`, a block a string value names (`motion_model: diff_drive`) and a plugin
+block nested in a selected instance are live, so `plugin.inert_by_design` stopped firing on
+them, and its title names the node that owns the block. `extract.input_refused` over a missing
+parameters file cites the `DeclareLaunchArgument` default that names it, and its fix names a
+file beside it whose name is close. `qos.differ`, `type.differ` and `rate.below_declared` compare one endpoint
+a node states from several sites once, and `endpoint.observed_only` is silent on an observed
+endpoint another site of the same node states in source. An rclpy `QoSProfile` built with only
+a depth states the reliable and volatile defaults rclpy gives it. `topic.no_publisher` over an
+observed topic names the remap that moved its publisher away. The observed `executable` of a
+python node is its script, a Zenoh router process is never a profile command, and `rosio
+probe` counts the frames observed `tf_parent` edges name. `build.underlay` titles say the
+count is of the packages the walk looked up. No release had shipped, so no stored id or waiver
+existed.
+
+A reader pinned to `1.0` still loads a `1.28` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -1355,7 +1387,7 @@ time.frozen                 time.zero                     time.gap
 time.drift
 rmw.mixed                   zenoh.router_unreachable      qos.incompatible
 param.sim_time_mixed        launch.file_not_installed     model.mesh_missing
-build.unbuilt               build.underlay
+build.unbuilt               build.underlay                remap.matches_nothing
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -1393,6 +1425,22 @@ root names. The walk reads the workspace copy, as section 9 point 9 states, and 
 names each package with the tree `ros2 launch` runs it from and the profiles, and says an
 edit in the workspace takes effect only once it is built and sourced. Its fix names the setup
 file to source, and an install tree beside src that no root names when there is one.
+
+`remap.matches_nothing` is `warn`. It fires once per remap line whose source name no endpoint
+of the node it is written on carries, in every profile that starts the node there, and only
+when the join read that node's whole source and found no topic, service or action name in it
+that the reader could not follow. It stays silent when the node states no endpoint at all,
+when a class of the node's package hands the node to a class no source of the read set
+defines, when the name is a sub topic of one of the node's endpoints (image_transport and
+cuda_blackboard add those), and when any source of the read set spells the name as an
+endpoint, because a helper the join did not bind to the node may create it. It names the node's real endpoint names, the closest one
+when one is near, and the line to edit. It is a rule of its own and not a case of
+`remap.unresolved`: that rule is `info` and says nothing states the kind of a name, which is a
+gap in what rosio read, while this one says the code was read and the rule is dead, which is a
+defect in the launch file (a typo, or a name the node renamed). Folding the two would grade a
+dead remap at `info` or every unread package at `warn`. A remap this rule reports is not also
+`remap.unresolved`. The observed half is in `topic.no_publisher`, which names a remap that
+moved the only publisher of a topic away from it.
 
 `param.sim_time_mixed` is `warn`. It fires once per profile whose nodes state both values of
 `use_sim_time` in their winning candidates, names the minority side and the line that sets

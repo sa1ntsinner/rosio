@@ -419,24 +419,27 @@ def restated_identical(atlas: model.Atlas) -> list[model.Finding]:
 def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
     """A file sets a parameter that the node's own source never declares.
 
-    When the node declares a name close to the one the file sets, the finding names it: a key
-    one letter off from a declared parameter is a typo far more often than a new parameter.
+    One line is one finding, with every profile that reads it and every node that ignores it:
+    a yaml key nineteen profiles read, or one `SetParameter` loop handing a group its keys, is
+    one place to edit. When the node declares a name close to the one the file sets, the
+    finding names it: a key one letter off from a declared parameter is a typo far more often
+    than a new parameter.
 
-    A line another node of the profile also reads and declares, a `/**` key or a launch
-    `SetParameter` that reaches several nodes, is silent on a node that ignores it: the line
-    exists for that node and deleting it breaks it. A `/**` block in a file only this node is
-    handed reaches this node alone, so it is reported like any other line.
+    A line some node reads and declares, in any profile, is silent: a `/**` key or a launch
+    `SetParameter` that reaches several nodes exists for the node that reads it, and deleting
+    it breaks that node. A `/**` block in a file only this node is handed reaches this node
+    alone, so it is reported like any other line.
     """
-    out: list[model.Finding] = []
     blind, declared = join.parameter_declarations(atlas)
-    needed: set[tuple[str, str, str, str]] = set()
+    needed: set[tuple[str, str, str]] = set()
     for node in _params(atlas):
         parsed = ids.parse_param(node.id)
         for row in node.candidates:
             if parsed.name in join.declared_in(declared, parsed.owner, row.profile) | declared.get(
                 (parsed.owner, join.REACHED), set()
             ):
-                needed.add((row.profile, parsed.name, row.source.file, row.source.locator))
+                needed.add((parsed.name, row.source.file, row.source.locator))
+    lines: dict[tuple[str, str, int], list[_Ignored]] = defaultdict(list)
     for node in _params(atlas):
         owner_id = ids.parse_param(node.id).owner
         name = ids.parse_param(node.id).name
@@ -450,75 +453,146 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             winner = next((row for row in chain if row.wins or row.note == join.IGNORED_NOTE), None)
             if winner is None:
                 continue
-            if (profile, name, winner.source.file, winner.source.locator) in needed:
+            if (name, winner.source.file, winner.source.locator) in needed:
                 continue
-            slug = rules.slug_of(profile)
-            at = rules.where(winner.source)
-            owner_text = rules.node_text(owner_id)
-            coded = owner.fact(CODED, profile).values
-            home = ids.parse(str(coded["exe"])).segments[0] if coded.get("exe") else ""
-            # The node's own package first, so a plugin it loads does not lead the list.
-            sources = sorted(
-                coded.get("coded_sources") or [],
-                key=lambda item: (ids.parse_file(item).package != home, item),
-            )
-            shown = [rules.path_of(item) for item in sources[:3]]
-            if len(sources) > 3:
-                shown.append(f"{len(sources) - 3} more files")
-            read = (
-                shown[0]
-                if len(shown) == 1
-                else f"{', '.join(shown[:-1])} and {shown[-1]}"
-                if shown
-                else "its source"
-            )
-            declares = "declares" if len(sources) <= 1 else "declare"
             near = _nearest_name(name, join.declared_in(declared, owner_id, profile))
-            # A dict the launch file builds holds every key on the line that hands it over,
-            # and that line also carries the values the node does read.
-            drop = (
-                f"remove {name} from the dictionary passed at {at}"
-                if winner.mechanism == model.Mechanism.LAUNCH_INLINE_DICT.value
-                else f"delete the line at {at}"
+            source = winner.source
+            lines[(source.file, source.locator, source.line_hint or 0)].append(
+                _Ignored(profile, node.id, owner_id, name, winner, near, _read_by(owner, profile))
             )
-            meant = (
-                f" {owner_text} declares {near}, which is likely what was meant." if near else ""
-            )
-            out.append(
-                model.Finding(
-                    rule="param.set_undeclared",
-                    severity=rules.severity_of("param.set_undeclared"),
-                    subject=node.id,
-                    discriminator=slug,
-                    title=f"{name} is set for {owner_text} and never declared",
-                    detail=(
-                        f"{owner_text} is configured with {name} = "
-                        f"{rules.value_text(winner.value)} in profile {slug}, and no "
-                        f"declaration for that name was found in {read}. A node ignores a "
-                        "parameter it never declares."
-                    ),
-                    fix=(
-                        f"Rename {name} to {near} at {at}, or correct the declaration if "
-                        f"{near} is the misspelling."
-                        if near
-                        else f"Declare {name} in the node source, or {drop}."
-                    ),
-                    say=(
-                        f"In profile {slug}, {at} sets {owner_text} {name} to "
-                        f"{rules.value_text(winner.value)} and {read} {declares} no parameter "
-                        f"with that name, so the value is ignored.{meant}"
-                        + (
-                            ""
-                            if near
-                            else f" {drop[:1].upper()}{drop[1:]} or declare the parameter."
-                        )
-                    ),
-                    profiles=[profile],
-                    layers=[CODED, DECLARED],
-                    where=[winner.source],
-                )
-            )
-    return out
+    # The line number only groups; the id is a digest over the file, the locator and the
+    # names, and two lines that would share one are one place to look.
+    merged: dict[str, list[_Ignored]] = defaultdict(list)
+    for key in sorted(lines):
+        rows = lines[key]
+        source = rows[0].winner.source
+        merged[ids.digest(source.file, source.locator, *sorted({row.name for row in rows}))].extend(
+            rows
+        )
+    return [_undeclared_line(disc, merged[disc]) for disc in sorted(merged)]
+
+
+@dataclass(frozen=True)
+class _Ignored:
+    profile: str
+    param: str
+    owner: str
+    name: str
+    winner: model.Candidate
+    near: str
+    read: tuple[str, ...]
+
+
+def _read_by(owner: model.Node, profile: str) -> tuple[str, ...]:
+    """The files the join read for a node, the ones that state the node itself first.
+
+    A declaration belongs beside the name literal of the node, and a solver or a plugin the
+    node loads sorted ahead of that file by name sent a reader to the wrong place.
+    """
+    coded = owner.fact(CODED, profile)
+    if coded is None:
+        return ()
+    values = coded.values
+    home = ids.parse(str(values["exe"])).segments[0] if values.get("exe") else ""
+    stating = {source.file for source in coded.evidence}
+    return tuple(
+        sorted(
+            values.get("coded_sources") or [],
+            key=lambda item: (item not in stating, ids.parse_file(item).package != home, item),
+        )
+    )
+
+
+def _listing(items: list[str], limit: int = 4, noun: str = "") -> str:
+    shown = list(items[:limit])
+    if len(items) > limit:
+        shown.append(f"{len(items) - limit} more{noun}")
+    if len(shown) < 2:
+        return "".join(shown)
+    return f"{', '.join(shown[:-1])} and {shown[-1]}"
+
+
+def _undeclared_line(disc: str, rows: list[_Ignored]) -> model.Finding:
+    rows = sorted(rows, key=lambda row: (row.name, row.owner, row.profile))
+    head = rows[0]
+    source = head.winner.source
+    at = rules.where(source)
+    names = sorted({row.name for row in rows})
+    owners = sorted({row.owner for row in rows})
+    profiles = sorted({row.profile for row in rows})
+    owner_text = _listing([rules.node_text(item) for item in owners], noun=" nodes")
+    profile_text = ("profile " if len(profiles) == 1 else "profiles ") + _listing(
+        [rules.slug_of(item) for item in profiles], limit=6
+    )
+    name_text = _listing(names, limit=6)
+    single = len(names) == 1
+    shown = [rules.path_of(item) for item in head.read[:3]]
+    if len(head.read) > 3:
+        shown.append(f"{len(head.read) - 3} more files")
+    read = _listing(shown) if shown else "its source"
+    if len(owners) > 1:
+        read = "their sources"
+    declares = "declares" if len(head.read) <= 1 and len(owners) == 1 else "declare"
+    if single and len(owners) == 1:
+        title = f"{head.name} is set for {owner_text} and never declared"
+    elif single:
+        title = f"{head.name} is set for {len(owners)} nodes and none declares it"
+    else:
+        title = f"{len(names)} parameters at {at} are set and never declared"
+    if head.winner.mechanism == model.Mechanism.LAUNCH_SET_PARAMETER.value:
+        # A SetParameter hands its key to every node of its group, so the node that reads it
+        # may be in a profile this atlas does not run.
+        drop = (
+            f"stop the SetParameter at {at} handing {name_text} to the group if no node it "
+            f"starts reads {'it' if single else 'them'}"
+        )
+    elif head.winner.mechanism == model.Mechanism.LAUNCH_INLINE_DICT.value:
+        # A dict the launch file builds holds every key on the line that hands it over, and
+        # that line also carries the values the node does read.
+        drop = f"remove {name_text} from the dictionary passed at {at}"
+    else:
+        drop = f"delete the line at {at}"
+    nears = sorted({(row.name, row.near) for row in rows if row.near})
+    meant = "".join(
+        f" {rules.node_text(next(row.owner for row in rows if row.name == name))} declares "
+        f"{near}, which is likely what was meant."
+        for name, near in nears
+    )
+    if nears and len(nears) == len(names):
+        fix = " ".join(
+            f"Rename {name} to {near} at {at}, or correct the declaration if {near} is the "
+            "misspelling."
+            for name, near in nears
+        )
+    else:
+        fix = f"Declare {name_text} in the node source, or {drop}."
+    value = f" to {rules.value_text(head.winner.value)}" if single and len(rows) == 1 else ""
+    subject_text = (
+        f"{owner_text} {name_text}{value}" if len(owners) == 1 else f"{name_text} on {owner_text}"
+    )
+    those = "that name" if single else "those names"
+    say = (
+        f"In {profile_text}, {at} sets {subject_text} and {read} {declares} no parameter with "
+        f"{those}, so {'the value is' if single else 'the values are'} ignored.{meant}"
+        + ("" if nears else f" {drop[:1].upper()}{drop[1:]} or declare the parameter.")
+    )
+    return model.Finding(
+        rule="param.set_undeclared",
+        severity=rules.severity_of("param.set_undeclared"),
+        subject=head.param if len({row.param for row in rows}) == 1 else source.file,
+        discriminator=disc,
+        title=title,
+        detail=(
+            f"{owner_text} {'is' if len(owners) == 1 else 'are'} configured with {name_text} "
+            f"at {at} in {profile_text}, and no declaration for {those} was found in {read}. "
+            "A node ignores a parameter it never declares."
+        ),
+        fix=fix,
+        say=say,
+        profiles=profiles,
+        layers=[CODED, DECLARED],
+        where=[source],
+    )
 
 
 def _nearest_name(name: str, declared: set[str]) -> str:

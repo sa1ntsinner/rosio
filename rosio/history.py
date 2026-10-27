@@ -3,7 +3,10 @@
 An atlas is only useful while it still describes the tree it was built from, and it stops
 describing it the moment somebody edits a launch file. A hook rebuilds it after a commit,
 after a checkout and after a merge, so the file in the working tree is never older than the
-sources beside it.
+sources beside it. That holds for an atlas git does not track, which is the setting the
+hooks are for: `rosio-out/` belongs in `.gitignore`. A tracked atlas is one somebody
+committed on purpose, and a hook that rewrote it would leave the work tree dirty after every
+commit and stop the next checkout, so a hook leaves it as committed and says so.
 
 Three properties decide whether a hook survives contact with a real team:
 
@@ -610,10 +613,12 @@ def run_rebuild(
     The seconds are under a `volatile` key, the same one the atlas uses, so nothing here can
     be mistaken for compared data.
 
-    `reuse` reads the built atlas back when nothing the extraction reads has moved. The
-    documented workflow pays for two rebuilds per change, one for the source commit and one
-    for the commit that carries the atlas rebuilt from it, and the second reads the same
-    bytes out of the same files as the first. It is a read rather than an incremental build:
+    A hook event leaves an atlas git tracks alone, and only a manual run rewrites it. The
+    rebuild drops the observed and recorded layers a probe added, because an extraction does
+    not read them again, and the record names them in `dropped_layers` so the caller says so.
+
+    `reuse` reads the built atlas back when nothing the extraction reads has moved, which is
+    a checkout back and forth between two branches. It is a read rather than an incremental build:
     there is no incremental extraction here, and a partial answer that is fast is worse than
     a whole one that is slow.
 
@@ -625,13 +630,21 @@ def run_rebuild(
     state = load_state(root)
     atlas = root / argv_out(state.argv) / ATLAS_NAME
     started = time.perf_counter()
+    if event in HOOK_EVENTS and _tracked(root, atlas):
+        record = _rebuild_record(root, event, 0, "", atlas, started, cached=False, key="")
+        record["left_tracked"] = True
+        return record
+    held = _probed_layers(atlas)
     key, built_from = worktree_key(root, state.argv, state.python)
     if reuse and key:
         text = read_cache(root, key)
         if text is not None and _place(atlas, text):
-            return _rebuild_record(root, event, 0, "", atlas, started, cached=True, key=key)
+            record = _rebuild_record(root, event, 0, "", atlas, started, cached=True, key=key)
+            record["dropped_layers"] = sorted(held - _probed_layers(atlas))
+            return record
     code, error = _build(root, state)
     record = _rebuild_record(root, event, code, error, atlas, started, cached=False, key=key)
+    record["dropped_layers"] = sorted(held - _probed_layers(atlas))
     if record["ok"] and key and atlas.is_file():
         write_cache(
             root,
@@ -642,6 +655,32 @@ def run_rebuild(
             volatile={"seconds": record["volatile"]["seconds"]},
         )
     return record
+
+
+def _tracked(root: Path, atlas: Path) -> bool:
+    """Whether git tracks the atlas. A hook never rewrites a tracked atlas: the rebuild would
+    leave the work tree dirty after every commit and stop the next checkout, and the atlas a
+    commit carries is the one somebody built and committed on purpose."""
+    try:
+        relative = atlas.relative_to(root).as_posix()
+    except ValueError:
+        return False
+    return bool(_git(root, "ls-files", "--", relative, check=False).strip())
+
+
+def _probed_layers(atlas: Path) -> set[str]:
+    """The observed and recorded layers an atlas holds, which an extraction does not
+    restate: a probe or a recording is not read again by a rebuild."""
+    try:
+        payload = json.loads(atlas.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    layers = payload.get("layers") if isinstance(payload, dict) else None
+    return {
+        name
+        for name, row in (layers or {}).items()
+        if name in ("observed", "recorded") and isinstance(row, dict) and row.get("present")
+    }
 
 
 def _build(root: Path, state: HookState) -> tuple[int, str]:

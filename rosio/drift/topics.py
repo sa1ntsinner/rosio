@@ -77,6 +77,7 @@ from rosio.drift.nodes import (
     slug,
     stated,
 )
+from rosio.errors import ContractError
 from rosio.resolve import qos_presets, wrappers
 
 TOPIC = model.NodeKind.TOPIC.value
@@ -197,6 +198,46 @@ def _layer_facts(edge: model.Edge, profile: str) -> dict[str, model.LayerFact]:
     return out
 
 
+def _sites(atlas: model.Atlas, kinds: tuple[str, ...] = ENDPOINT_KINDS) -> list[list[model.Edge]]:
+    """Endpoint edges grouped by node, kind and channel."""
+    out: dict[tuple[str, str, str], list[model.Edge]] = {}
+    for edge in endpoint_edges(atlas, kinds):
+        out.setdefault((edge.kind, edge.src, edge.dst), []).append(edge)
+    return [out[key] for key in sorted(out)]
+
+
+def _views(edges: list[model.Edge]) -> list[tuple[model.Edge, str, dict[str, model.LayerFact]]]:
+    """(subject edge, profile, facts per layer) for one endpoint as the layers state it.
+
+    The probe keys an endpoint by its name and the join by the source site, so one endpoint
+    two layers both state sits on two edges. Where each layer states it on one edge at most,
+    those edges are one endpoint and are compared as one, cited at the edge a source states;
+    a layer stating two sites keeps every edge apart, because then the sites differ.
+    """
+    out = []
+    profiles = sorted({p for edge in edges for p in edge.profiles} or {model.ANY_PROFILE})
+    for profile in profiles:
+        each = [(edge, _layer_facts(edge, profile)) for edge in edges]
+        each = [(edge, facts) for edge, facts in each if facts]
+        counts: dict[str, int] = {}
+        for _edge, facts in each:
+            for layer in facts:
+                counts[layer] = counts.get(layer, 0) + 1
+        if len(each) > 1 and all(count == 1 for count in counts.values()):
+            merged: dict[str, model.LayerFact] = {}
+            for _edge, facts in each:
+                merged.update(facts)
+            subject = next((edge for edge, facts in each if set(facts) - {OBSERVED}), each[0][0])
+            out.append((subject, profile, merged))
+        else:
+            out.extend(
+                (edge, profile, facts)
+                for edge, facts in each
+                if profile in (set(edge.profiles) or {model.ANY_PROFILE})
+            )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # topic connectivity
 
@@ -286,6 +327,7 @@ def _lonely(
             live = [edge for edge in present[topic_id] if stated(edge, OBSERVED, profile)]
             if not live:
                 continue
+            extra_where: list[model.Source] = []
             owners = sorted({human(edge.src) for edge in live})
             who = ", ".join(owners)
             where = slug(profile)
@@ -316,6 +358,25 @@ def _lonely(
                     "remap the publisher onto this name, or point the subscriber at the name "
                     "that is actually published"
                 )
+                onto = _remaps_onto(atlas, name, profile)
+                if onto:
+                    rules_text = "; ".join(
+                        f"{node} runs with the remap {frm} to {to}" for node, frm, to, _ in onto
+                    )
+                    lines = [rules.where(rows[0]) for *_head, rows in onto if rows]
+                    detail += (
+                        f". {rules_text}, and no endpoint of "
+                        f"{'that node' if len(onto) == 1 else 'those nodes'} landed on {name}, "
+                        "so the remap matched nothing the node creates"
+                    )
+                    say += f"; {rules_text}, which matched no endpoint of it"
+                    fix = (
+                        f"correct the remap {onto[0][1]} to {onto[0][2]}"
+                        + (f" at {', '.join(lines)}" if lines else "")
+                        + " to the name the node publishes, or "
+                        + fix
+                    )
+                    extra_where = [row for *_head, rows in onto for row in rows]
             out.append(
                 model.Finding(
                     rule=rule,
@@ -328,10 +389,45 @@ def _lonely(
                     discriminator=disc_for(profile),
                     profiles=[profile],
                     layers=[OBSERVED],
-                    where=evidence_of(*[stated(edge, OBSERVED, profile) for edge in live]),
+                    where=evidence_of(*[stated(edge, OBSERVED, profile) for edge in live])
+                    + extra_where,
                 )
             )
     return out
+
+
+def _remaps_onto(
+    atlas: model.Atlas, name: str, profile: str
+) -> list[tuple[str, str, str, list[model.Source]]]:
+    """(node, from, to, remap line) for every running node started with a rule onto `name`
+    and holding no endpoint on it, with the launch line that writes the rule when the
+    declared layer holds it. Such a rule matched nothing the node creates."""
+    out = []
+    on_topic = {edge.src for edge in atlas.in_edges(ids.build_topic(name))}
+    for node in atlas.by_kind(model.NodeKind.NODE.value):
+        fact = stated(node, OBSERVED, profile)
+        if fact is None or node.id in on_topic:
+            continue
+        namespace = str(fact.values.get("namespace") or "/")
+        own = str(fact.values.get("name") or "") or None
+        for row in fact.values.get("remaps") or []:
+            if not isinstance(row, (list, tuple)) or len(row) != 2:
+                continue
+            frm, to = str(row[0]), str(row[1])
+            try:
+                if ids.normalise_ros_name(to, namespace, own) != name:
+                    continue
+            except ContractError:
+                continue
+            sites = [edge.src for edge in atlas.in_edges(node.id) if edge.kind == "launches"]
+            written = [
+                source
+                for entry in atlas.unresolved
+                if entry.role == "remap" and entry.owner in sites and entry.expr == f"{frm}:={to}"
+                for source in entry.evidence
+            ]
+            out.append((human(node.id), frm, to, rules.sources(written)))
+    return sorted(out, key=lambda row: (row[0], row[1], row[2]))
 
 
 @rules.register("topic.no_subscriber")
@@ -375,52 +471,49 @@ def type_key(text: str) -> tuple[str, str] | None:
 def qos_differ(atlas: model.Atlas) -> list[model.Finding]:
     """Two layers stated a different QoS for one endpoint."""
     out: list[model.Finding] = []
-    for edge in endpoint_edges(atlas):
-        for profile in sorted(set(edge.profiles) or {model.ANY_PROFILE}):
-            if _via_wrapper(edge, profile):
-                continue
-            stated_by = {
-                layer: _qos_of(fact) for layer, fact in _layer_facts(edge, profile).items()
-            }
-            stated_by = {layer: values for layer, values in stated_by.items() if values}
-            if len(stated_by) < 2:
-                continue
-            layers = sorted(stated_by)
-            differ: dict[str, list[str]] = {}
-            for key in QOS_KEYS:
-                seen = {layer: stated_by[layer][key] for layer in layers if key in stated_by[layer]}
-                if len(seen) > 1 and len(set(map(repr, seen.values()))) > 1:
-                    differ[key] = [f"{layer} says {seen[layer]}" for layer in sorted(seen)]
-            if not differ:
-                continue
-            keys = sorted(differ)
-            spelled = "; ".join(f"{key}: {', '.join(differ[key])}" for key in keys)
-            label = f"{human(edge.src)} {edge.kind} {ids.label_for(edge.dst)}"
-            out.append(
-                model.Finding(
-                    rule="qos.differ",
-                    severity=rules.severity_of("qos.differ"),
-                    subject=_ref(edge),
-                    title=f"{label} has two different qos settings",
-                    detail=(
-                        f"in {slug(profile)} the layers disagree about {', '.join(keys)} on this "
-                        f"endpoint: {spelled}"
-                    ),
-                    fix=(
-                        "make the qos in the source match the one the running system uses, or "
-                        "the connection will not be made at all for an incompatible pair"
-                    ),
-                    say=(
-                        f"{label} is created with a different qos than the running system "
-                        f"reports ({spelled}), which is what stops a publisher and a subscriber "
-                        "from connecting"
-                    ),
-                    discriminator=disc_for(profile, *keys),
-                    profiles=[profile] if profile != model.ANY_PROFILE else [],
-                    layers=layers,
-                    where=evidence_of(*_layer_facts(edge, profile).values()),
-                )
+    for edge, profile, facts in (view for group in _sites(atlas) for view in _views(group)):
+        if _via_wrapper(edge, profile):
+            continue
+        stated_by = {layer: _qos_of(fact) for layer, fact in facts.items()}
+        stated_by = {layer: values for layer, values in stated_by.items() if values}
+        if len(stated_by) < 2:
+            continue
+        layers = sorted(stated_by)
+        differ: dict[str, list[str]] = {}
+        for key in QOS_KEYS:
+            seen = {layer: stated_by[layer][key] for layer in layers if key in stated_by[layer]}
+            if len(seen) > 1 and len(set(map(repr, seen.values()))) > 1:
+                differ[key] = [f"{layer} says {seen[layer]}" for layer in sorted(seen)]
+        if not differ:
+            continue
+        keys = sorted(differ)
+        spelled = "; ".join(f"{key}: {', '.join(differ[key])}" for key in keys)
+        label = f"{human(edge.src)} {edge.kind} {ids.label_for(edge.dst)}"
+        out.append(
+            model.Finding(
+                rule="qos.differ",
+                severity=rules.severity_of("qos.differ"),
+                subject=_ref(edge),
+                title=f"{label} has two different qos settings",
+                detail=(
+                    f"in {slug(profile)} the layers disagree about {', '.join(keys)} on this "
+                    f"endpoint: {spelled}"
+                ),
+                fix=(
+                    "make the qos in the source match the one the running system uses, or "
+                    "the connection will not be made at all for an incompatible pair"
+                ),
+                say=(
+                    f"{label} is created with a different qos than the running system "
+                    f"reports ({spelled}), which is what stops a publisher and a subscriber "
+                    "from connecting"
+                ),
+                discriminator=disc_for(profile, *keys),
+                profiles=[profile] if profile != model.ANY_PROFILE else [],
+                layers=layers,
+                where=evidence_of(*facts.values()),
             )
+        )
     return out
 
 
@@ -542,45 +635,44 @@ def _incompatible(
 def type_differ(atlas: model.Atlas) -> list[model.Finding]:
     """Two layers stated a different message type for one endpoint."""
     out: list[model.Finding] = []
-    for edge in endpoint_edges(atlas):
-        for profile in sorted(set(edge.profiles) or {model.ANY_PROFILE}):
-            if _via_wrapper(edge, profile):
+    for edge, profile, facts in (view for group in _sites(atlas) for view in _views(group)):
+        if _via_wrapper(edge, profile):
+            continue
+        spelled: dict[str, str] = {}
+        keys: dict[str, tuple[str, str]] = {}
+        for layer, fact in facts.items():
+            text = str(fact.values.get("type") or "")
+            key = type_key(text) if text else None
+            if key is None:
                 continue
-            spelled: dict[str, str] = {}
-            keys: dict[str, tuple[str, str]] = {}
-            for layer, fact in _layer_facts(edge, profile).items():
-                text = str(fact.values.get("type") or "")
-                key = type_key(text) if text else None
-                if key is None:
-                    continue
-                spelled[layer] = text
-                keys[layer] = key
-            if len(keys) < 2 or len(set(keys.values())) < 2:
-                continue
-            layers = sorted(keys)
-            said = ", ".join(f"{layer} says {spelled[layer]}" for layer in layers)
-            label = f"{human(edge.src)} {edge.kind} {ids.label_for(edge.dst)}"
-            out.append(
-                model.Finding(
-                    rule="type.differ",
-                    severity=rules.severity_of("type.differ"),
-                    subject=_ref(edge),
-                    title=f"{label} has two different message types",
-                    detail=(
-                        f"in {slug(profile)} the layers disagree about the type of this "
-                        f"endpoint: {said}"
-                    ),
-                    fix="use one type on both ends of this endpoint",
-                    say=(
-                        f"{label} is declared with {said}, and two types on one name never "
-                        "connect, so the data does not flow"
-                    ),
-                    discriminator=disc_for(profile),
-                    profiles=[profile] if profile != model.ANY_PROFILE else [],
-                    layers=layers,
-                    where=evidence_of(*_layer_facts(edge, profile).values()),
-                )
+            spelled[layer] = text
+            keys[layer] = key
+        if len(keys) < 2 or len(set(keys.values())) < 2:
+            continue
+        layers = sorted(keys)
+        said = ", ".join(f"{layer} says {spelled[layer]}" for layer in layers)
+        label = f"{human(edge.src)} {edge.kind} {ids.label_for(edge.dst)}"
+        out.append(
+            model.Finding(
+                rule="type.differ",
+                severity=rules.severity_of("type.differ"),
+                subject=_ref(edge),
+                title=f"{label} has two different message types",
+                detail=(
+                    f"in {slug(profile)} the layers disagree about the type of this "
+                    f"endpoint: {said}"
+                ),
+                fix="use one type on both ends of this endpoint",
+                say=(
+                    f"{label} is declared with {said}, and two types on one name never "
+                    "connect, so the data does not flow"
+                ),
+                discriminator=disc_for(profile),
+                profiles=[profile] if profile != model.ANY_PROFILE else [],
+                layers=layers,
+                where=evidence_of(*facts.values()),
             )
+        )
     return out
 
 
@@ -625,55 +717,55 @@ def rate_below_declared(atlas: model.Atlas) -> list[model.Finding]:
     probes of one slow system produce the same compared bytes.
     """
     out: list[model.Finding] = []
-    for edge in endpoint_edges(atlas, (PUBLISHES,)):
-        for profile in sorted(set(edge.profiles) or {model.ANY_PROFILE}):
-            if _via_wrapper(edge, profile):
-                continue
-            facts = _layer_facts(edge, profile)
-            live = facts.get(OBSERVED)
-            if live is None:
-                continue
-            measured = _measured_rate(live)
-            if measured is None:
-                continue
-            stated_by = {
-                layer: _expected_rate(fact)
-                for layer, fact in facts.items()
-                if layer != OBSERVED and _expected_rate(fact) is not None
-            }
-            if not stated_by:
-                continue
-            layer = _authority(stated_by)
-            expected = stated_by[layer]
-            if expected is None or measured >= expected * (1.0 - RATE_TOLERANCE):
-                continue
-            label = f"{human(edge.src)} publishing {ids.label_for(edge.dst)}"
-            out.append(
-                model.Finding(
-                    rule="rate.below_declared",
-                    severity=rules.severity_of("rate.below_declared"),
-                    subject=_ref(edge),
-                    title=f"{label} runs slower than the {expected:g} Hz it states",
-                    detail=(
-                        f"in {slug(profile)} the {layer} layer states {expected:g} Hz for this "
-                        f"publisher and the running system stays more than "
-                        f"{int(RATE_TOLERANCE * 100)} percent under it"
-                    ),
-                    fix=(
-                        "find what blocks the publishing loop, or state the rate the node can "
-                        "actually hold"
-                    ),
-                    say=(
-                        f"{label} states {expected:g} Hz and runs below it, so anything "
-                        "downstream that assumes the stated rate is working on stale data"
-                    ),
-                    discriminator=disc_for(profile),
-                    profiles=[profile] if profile != model.ANY_PROFILE else [],
-                    layers=[layer, OBSERVED],
-                    where=evidence_of(facts.get(layer), live),
-                    extra={"volatile": {"measured": f"{measured:g} Hz"}},
-                )
+    for edge, profile, facts in (
+        view for group in _sites(atlas, (PUBLISHES,)) for view in _views(group)
+    ):
+        if _via_wrapper(edge, profile):
+            continue
+        live = facts.get(OBSERVED)
+        if live is None:
+            continue
+        measured = _measured_rate(live)
+        if measured is None:
+            continue
+        stated_by = {
+            layer: _expected_rate(fact)
+            for layer, fact in facts.items()
+            if layer != OBSERVED and _expected_rate(fact) is not None
+        }
+        if not stated_by:
+            continue
+        layer = _authority(stated_by)
+        expected = stated_by[layer]
+        if expected is None or measured >= expected * (1.0 - RATE_TOLERANCE):
+            continue
+        label = f"{human(edge.src)} publishing {ids.label_for(edge.dst)}"
+        out.append(
+            model.Finding(
+                rule="rate.below_declared",
+                severity=rules.severity_of("rate.below_declared"),
+                subject=_ref(edge),
+                title=f"{label} runs slower than the {expected:g} Hz it states",
+                detail=(
+                    f"in {slug(profile)} the {layer} layer states {expected:g} Hz for this "
+                    f"publisher and the running system stays more than "
+                    f"{int(RATE_TOLERANCE * 100)} percent under it"
+                ),
+                fix=(
+                    "find what blocks the publishing loop, or state the rate the node can "
+                    "actually hold"
+                ),
+                say=(
+                    f"{label} states {expected:g} Hz and runs below it, so anything "
+                    "downstream that assumes the stated rate is working on stale data"
+                ),
+                discriminator=disc_for(profile),
+                profiles=[profile] if profile != model.ANY_PROFILE else [],
+                layers=[layer, OBSERVED],
+                where=evidence_of(facts.get(layer), live),
+                extra={"volatile": {"measured": f"{measured:g} Hz"}},
             )
+        )
     return out
 
 
@@ -681,6 +773,7 @@ def rate_below_declared(atlas: model.Atlas) -> list[model.Finding]:
 def endpoint_observed_only(atlas: model.Atlas) -> list[model.Finding]:
     """An endpoint only the running system knows about, on a node whose source was read."""
     out: list[model.Finding] = []
+    siblings = {(edge.kind, edge.src, edge.dst): group for group in _sites(atlas) for edge in group}
     for edge in endpoint_edges(atlas):
         owner = atlas.entities.get(edge.src)
         if owner is None:
@@ -689,7 +782,12 @@ def endpoint_observed_only(atlas: model.Atlas) -> list[model.Finding]:
             live = stated(edge, OBSERVED, profile)
             if live is None or _via_wrapper(edge, profile):
                 continue
-            if stated(edge, CODED, profile) or stated(edge, DECLARED, profile):
+            # The probe keys an endpoint by name and the join by source site, so the source
+            # may state this endpoint on another edge between the same node and channel.
+            if any(
+                stated(other, CODED, profile) or stated(other, DECLARED, profile)
+                for other in siblings[(edge.kind, edge.src, edge.dst)]
+            ):
                 continue
             if not says_anything(owner, CODED, profile):
                 # The source of this node was never read, so the endpoint is coverage.

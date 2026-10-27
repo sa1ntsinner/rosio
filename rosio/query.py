@@ -363,10 +363,13 @@ def not_found_lines(atlas: Atlas, selector: str) -> list[str]:
         ]
     else:
         lines = [f"nothing in this atlas is named {text!r}"]
-    raised = raised_profiles(atlas)
+    raised = sorted(raised_profiles(atlas))
     if raised:
+        shown = _profiles(raised[:5])
+        if len(raised) > 5:
+            shown = f"{plural(len(raised), 'profile')}, {shown} and {len(raised) - 5} more"
         lines.append(
-            f"  a launch file raised in {_profiles(raised)}, so names it starts may be missing, "
+            f"  a launch file raised in {shown}, so names it starts may be missing, "
             "see the launch.raised findings"
         )
     if slash:
@@ -710,7 +713,7 @@ def param(
     if how == "substring":
         lines.append(substring_note(f"{node} {name or ''}".strip(), label(param_id)))
     if entity.state != "effective":
-        lines.append("  no effective value: " + _state_note(str(entity.state)))
+        lines.append("  no effective value: " + _state_reason(atlas, entity, wanted))
     profiles = sorted({item.profile for item in entity.candidates} | set(entity.effective))
     if wanted:
         profiles = [item for item in profiles if item == wanted]
@@ -859,6 +862,42 @@ _STATE_NOTES = {
 
 def _state_note(state: str) -> str:
     return _STATE_NOTES.get(state, "see the state field")
+
+
+def _state_reason(atlas: Atlas, entity: Node, wanted: str) -> str:
+    """Why no value wins, from the notes the chain carries before the generic sentence, and
+    with the declarations whose names are built at run time that could be this one."""
+    from rosio import join
+
+    notes = sorted(
+        {
+            row.note
+            for row in entity.candidates
+            if row.note and (not wanted or row.profile == wanted)
+        }
+    )
+    if not notes:
+        return _state_note(str(entity.state))
+    text = "; ".join(notes)
+    if join.BLIND_NOTE in notes:
+        owner, name = ids.parse_param(entity.id)
+        node = atlas.entities.get(owner)
+        read = {
+            source
+            for fact in (node.facts if node is not None else [])
+            if fact.layer == "coded"
+            for source in fact.values.get("coded_sources") or []
+        }
+        built = sorted(
+            f"{expr} in {ids.parse_file(file).package}/{ids.parse_file(file).relpath}"
+            for file, exprs in join.blind_names(atlas, "param_name").items()
+            if file in read
+            for expr in exprs
+            if join.could_name(expr, name)
+        )
+        if built:
+            text += f" ({', '.join(built[:3])}{', and more' if len(built) > 3 else ''})"
+    return text
 
 
 def _param_id(

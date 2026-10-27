@@ -283,7 +283,9 @@ def inert_by_design(atlas: model.Atlas) -> list[model.Finding]:
                 severity=rules.severity_of("plugin.inert_by_design"),
                 subject=block.file,
                 discriminator=f"{block.owner.strip('/').replace('/', '.')}.{block.block}",
-                title=f"block {block.block} is configured and not selected in {slug}",
+                title=(
+                    f"block {block.block} of {block.owner} is configured and not selected in {slug}"
+                ),
                 detail=(
                     f"{block.owner} carries {_keys(len(block.keys))} under {block.block}, and "
                     f"{misses}, so none of them is loaded in {_profile_word(profiles)} "

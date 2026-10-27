@@ -33,6 +33,7 @@ from rosio.config import (
 )
 from rosio.errors import UsageError
 from rosio.resolve import parse_python
+from rosio.workspace import Workspace
 
 HEADER = """# rosio configuration, written by `rosio init`.
 #
@@ -71,6 +72,20 @@ def offered(cfg: Config) -> Config:
 
 MANY_PROFILES = 20
 """Past this many, init names the files a robot most likely starts from."""
+
+
+def run_entrypoints(cfg: Config) -> list[str]:
+    """`ros2 run` lines for the executables the roots build, for a workspace with no launch
+    file to offer as a profile."""
+    if not cfg.roots:
+        return []
+    ws = Workspace.discover(cfg.roots, cfg.ignore)
+    return [
+        f"ros2 run {name} {exe}"
+        for name, package in ws.packages.items()
+        if package.src_path
+        for exe in package.executables
+    ]
 
 
 def top_level(cfg: Config) -> list[str]:

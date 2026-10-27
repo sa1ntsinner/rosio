@@ -251,6 +251,15 @@ def _profiles(atlas: Atlas) -> list[str]:
         "of launch files is not a profile, because it describes a system nobody runs."
     )
     lines.append("")
+    if not _profile_ids(atlas):
+        lines.extend(
+            [
+                "This atlas has no profile, so nothing below is about a running system. A "
+                "profile names the `ros2 launch` or `ros2 run` commands that start one, in "
+                "rosio.yaml.",
+                "",
+            ]
+        )
     for profile_id in _profile_ids(atlas):
         entity = atlas.entities[profile_id]
         entries = _value(entity, "entrypoints") or []
@@ -300,9 +309,17 @@ def _inventory(atlas: Atlas) -> list[str]:
         )
     lines.append("")
     lines.extend(
-        table(["node", "package and executable", "profiles", "source read", "name source"], rows)
+        _table(
+            ["node", "package and executable", "profiles", "source read", "name source"],
+            rows,
+            "No profile launches a node.",
+        )
     )
     return lines
+
+
+def _table(headers: list[str], rows: list, empty: str) -> list[str]:
+    return table(headers, rows) or [empty]
 
 
 def _busiest(atlas: Atlas) -> list[str]:
@@ -344,7 +361,13 @@ def _busiest(atlas: Atlas) -> list[str]:
         for node_id, _count in _rank(totals)
     ]
     lines.append("")
-    lines.extend(table(["node", "publishes", "subscribes", "services and actions"], rows))
+    lines.extend(
+        _table(
+            ["node", "publishes", "subscribes", "services and actions"],
+            rows,
+            "The source layer states no endpoint of a launched node.",
+        )
+    )
     topics: dict[str, int] = {}
     for key in set(topic_pub) | set(topic_sub):
         topics[key] = len(topic_pub.get(key, ())) + len(topic_sub.get(key, ()))
@@ -353,7 +376,7 @@ def _busiest(atlas: Atlas) -> list[str]:
         for topic_id, _count in _rank(topics)
     ]
     lines.append("")
-    lines.extend(table(["topic", "publishers", "subscribers"], rows))
+    lines.extend(_table(["topic", "publishers", "subscribers"], rows, "No topic has an endpoint."))
     orphans = [
         entity.id
         for entity in atlas.by_kind("topic")
@@ -426,9 +449,10 @@ def _parameters(atlas: Atlas) -> list[str]:
     )
     lines.append("")
     lines.extend(
-        table(
+        _table(
             ["mechanism", "candidates", "wins"],
             [[name, row[0], row[1]] for name, row in sorted(mechanisms.items())],
+            "No profile writes a value, so there is no candidate.",
         )
     )
     if shadows:
@@ -567,7 +591,11 @@ def _plugins(atlas: Atlas) -> list[str]:
         )
     lines.append("")
     lines.extend(
-        table(["lookup name", "base class", "exported by", "selected by", "profiles"], rows)
+        _table(
+            ["lookup name", "base class", "exported by", "selected by", "profiles"],
+            rows,
+            "No pluginlib manifest exports a plugin and no profile selects one.",
+        )
     )
     return lines
 

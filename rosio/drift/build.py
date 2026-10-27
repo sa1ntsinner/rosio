@@ -914,8 +914,8 @@ def build_underlay(atlas: Atlas) -> list[Finding]:
     title = (
         f"{names[0]} runs from {trees[0]}, and the atlas reads it from the workspace"
         if one
-        else f"{len(rows)} packages run from another tree, and the atlas reads them from the "
-        "workspace"
+        else f"{len(rows)} packages the launch walk looked up run from another tree, and the "
+        "atlas reads them from the workspace"
     )
     took = (
         "a file the build links back to src takes effect as soon as it is saved, and one it "
@@ -1387,8 +1387,19 @@ def _refused_fix(
             "when it is a released package, which nothing in this workspace can change"
         )
     if because == params_collector.MISSING_FILE:
-        at = f" at {rules.where(readers[0])}" if readers else ""
-        return f"correct the path{at} that names {label} or add the file, then extract again"
+        # The argument default that spells the path is the line to correct, not the node
+        # that reads the argument.
+        origin = [row for row in readers if row.locator.startswith("DeclareLaunchArgument(")]
+        at = f" at {rules.where((origin or list(readers))[0])}" if readers else ""
+        similar = [rules.path_of(item) for item in node.attrs.get("similar_files") or []]
+        beside = (
+            f"; the package holds {' and '.join(similar)} beside it, which may be the file meant"
+            if similar
+            else ""
+        )
+        return (
+            f"correct the path{at} that names {label} or add the file{beside}, then extract again"
+        )
     package = _MISSING_PACKAGE.search(detail)
     if because == "xacro_failed" and package:
         return (

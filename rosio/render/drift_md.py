@@ -59,8 +59,6 @@ NEEDS_LAYER = {
     "endpoint.observed_only": "observed",
     "node.declared_not_observed": "observed",
     "node.observed_only": "observed",
-    "node.ambiguous_identity": "observed",
-    "lifecycle.unmanaged": "observed",
 }
 """Rules that cannot speak until a live system has been probed. A rule outside this table
 that produced nothing ran over the atlas and matched nothing, which is a different
@@ -335,6 +333,17 @@ def _held_back(gates: Sequence[dict[str, str]]) -> list[str]:
     return lines
 
 
+def _severity(atlas: Atlas, rule: str) -> str:
+    """The severity the rule fires at on this atlas: the budget rule is info until a budget
+    is stated."""
+    if (
+        rule == "resolution.below_budget"
+        and (atlas.x.get("drift") or {}).get("resolution_budget") is None
+    ):
+        return rules.severity_of(rule, "unbudgeted")
+    return rules.SEVERITY.get(rule, "")
+
+
 def _silences(atlas: Atlas, gates: Sequence[dict[str, str]]) -> list[str]:
     fired = {item.rule for item in atlas.findings}
     counters = _drift_counters(atlas)
@@ -364,7 +373,7 @@ def _silences(atlas: Atlas, gates: Sequence[dict[str, str]]) -> list[str]:
             reason = f"needs the {needs} layer, which this atlas does not have"
         else:
             reason = "ran over this atlas and matched nothing"
-        rows.append([rule, rules.SEVERITY.get(rule, ""), reason])
+        rows.append([rule, _severity(atlas, rule), reason])
     lines.append("")
     lines.extend(table(["rule", "severity when it fires", "why it is silent"], rows))
     if held:

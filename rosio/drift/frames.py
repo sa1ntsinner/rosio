@@ -39,7 +39,9 @@ nothing. A finding that does fire states the guard of a tie it relies on, with i
 
 from __future__ import annotations
 
+import difflib
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from rosio import ids, model
@@ -919,6 +921,7 @@ def frame_no_publisher(atlas: Atlas) -> list[Finding]:
     """
     broadcast: dict[str, set[str]] = {}
     broadcasters: dict[str, set[str]] = {}
+    read: set[str] = set()
     for handle in sorted(atlas.edges):
         edge = atlas.edges[handle]
         if edge.kind != model.EdgeKind.BROADCASTS_TF.value:
@@ -927,7 +930,10 @@ def frame_no_publisher(atlas: Atlas) -> list[Finding]:
             if rules.usable(fact):
                 broadcast.setdefault(fact.profile, set()).add(edge.dst)
                 broadcasters.setdefault(fact.profile, set()).add(edge.src)
-    if not broadcast:
+                # A launch argument list is not a broadcast read from code.
+                if fact.values.get("source") != "static_transform_publisher":
+                    read.add(fact.profile)
+    if not read:
         return []
     published = _published_frames(atlas, broadcast)
     wanted = _wanted_frames(atlas)
@@ -941,7 +947,7 @@ def frame_no_publisher(atlas: Atlas) -> list[Finding]:
     findings: list[Finding] = []
     for key in sorted(wanted):
         profile, frame = key
-        if profile not in broadcast or profile in unseen:
+        if profile not in read or profile in unseen:
             continue
         if ids.parse_frame(frame) in WORLD_FRAMES:
             continue
@@ -1042,9 +1048,10 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
 
     Reported once per remap written in one file, with the raw name exactly as that file
     writes it: one line read through eleven entry points or two robot namespaces is one
-    line to look at. No topic, service or action id is minted here: the whole point of the
-    blind spot is that nothing in the atlas says which of the three it is. A destination
-    that the join has since bound to an endpoint is silent, and so is a destination a robot
+    line to look at. The remaps one file writes on the same nodes are one finding. No
+    topic, service or action id is minted here: the whole point of the blind spot is that
+    nothing in the atlas says which of the three it is. A destination that the join has
+    since bound to an endpoint is silent, and so is a destination a robot
     model the profile loads states, per profile: a name one profile's model publishes is
     still a blind spot in a profile that loads no model naming it. A launch site whose
     condition is false in a profile starts no node there, so its remap binds nothing.
@@ -1054,9 +1061,10 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
     """
     bound = _bound_names(atlas)
     modelled = _model_names(atlas)
+    dead = _dead_remaps(atlas)
     sites: dict[tuple[str, str], list[tuple[model.Unresolved, list[str]]]] = {}
     for entry in sorted(atlas.unresolved, key=lambda item: item.id):
-        if entry.role != "remap" or entry.owner not in atlas.entities:
+        if entry.role != "remap" or entry.owner not in atlas.entities or entry.id in dead:
             continue
         _source, sep, target = entry.expr.partition(":=")
         if not sep or not target:
@@ -1080,7 +1088,7 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
         file_id = entry.evidence[0].file if entry.evidence else ""
         subject = file_id if file_id in atlas.entities else entry.owner
         sites.setdefault((subject, entry.expr), []).append((entry, profiles))
-    findings: list[Finding] = []
+    by_node: dict[tuple[str, tuple[str, ...]], list[tuple[str, Finding]]] = {}
     for (subject, expr), group in sorted(sites.items()):
         source, _sep, target = expr.partition(":=")
         first = group[0][0]
@@ -1141,30 +1149,317 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
                 f"read the node source for the endpoint behind {source}, or add the package "
                 "that owns it to the workspace so the kind is stated"
             )
+        owners = tuple(sorted({entry.owner for entry, _ in group}))
+        finding = Finding(
+            rule="remap.unresolved",
+            severity=rules.severity_of("remap.unresolved"),
+            subject=subject,
+            title=f"nothing states what kind of endpoint the remap {source} to {target} binds",
+            detail=(
+                f"{' '.join(sentences)}{included} No source in the read set publishes or "
+                "subscribes either name and no interface definition names it, so nothing "
+                f"states whether {target} is a topic, a service or an action, and the "
+                "endpoint stays unbound."
+            ),
+            fix=f"{remedy}{change}",
+            say=(
+                f"{writer} remaps {source} to {target}{via} and nothing in the workspace "
+                f"states what kind of endpoint {target} is, so the connection is unverified."
+            ),
+            discriminator=_disc(expr),
+            profiles=[profile for _, profiles in group for profile in profiles],
+            layers=[model.Layer.DECLARED.value],
+            where=[row for entry, _ in group for row in entry.evidence],
+        )
+        by_node.setdefault((subject, owners), []).append((expr, finding))
+    return [
+        _one_node_remaps(subject, owners, rows) if len(rows) > 1 else rows[0][1]
+        for (subject, owners), rows in sorted(by_node.items())
+    ]
+
+
+def _one_node_remaps(
+    subject: str, owners: Sequence[str], rows: Sequence[tuple[str, Finding]]
+) -> Finding:
+    """The remaps one file writes on the same nodes, as one finding: a node written with
+    forty remaps whose endpoints nothing states is one thing to look at, not forty."""
+    pairs = [expr.replace(":=", " to ") for expr, _finding in rows]
+    nodes = ", ".join(ids.label_for(owner) for owner in owners)
+    where = _base_name(subject) or nodes
+    first = rows[0][1]
+    shown = "; ".join(pairs[:8]) + ("; ..." if len(pairs) > 8 else "")
+    return Finding(
+        rule=first.rule,
+        severity=first.severity,
+        subject=subject,
+        title=f"nothing states what kind of endpoint {len(rows)} remaps on {nodes} bind",
+        detail=(
+            f"{where} remaps {len(rows)} names on {nodes}: {shown}. No source in the read set "
+            "publishes or subscribes those names and no interface definition names them, so "
+            "nothing states whether each is a topic, a service or an action, and the "
+            "endpoints stay unbound."
+        ),
+        fix=(
+            f"check the source of {nodes} for the endpoints behind those names, or probe the "
+            "running system so their kinds are observed"
+        ),
+        say=(
+            f"{where} remaps {len(rows)} names on {nodes} and nothing in the workspace states "
+            "what kind of endpoint they are, so those connections are unverified."
+        ),
+        discriminator=_disc(*sorted(expr for expr, _finding in rows)),
+        profiles=sorted({profile for _expr, item in rows for profile in item.profiles}),
+        layers=list(first.layers),
+        where=[row for _expr, item in rows for row in item.where],
+    )
+
+
+# ---------------------------------------------------------------------------
+# remap.matches_nothing
+
+
+@rules.register("remap.matches_nothing")
+def remap_matches_nothing(atlas: Atlas) -> list[Finding]:
+    """A remap whose source name no endpoint of the node it is written on carries.
+
+    Only said of a node whose whole source was read in every profile that starts it there:
+    the join bound its code, and no topic, service or action name in that code is a blind
+    spot. Then the endpoint set is known, a rule naming none of it renames nothing, and the
+    name it was meant to connect to gets no endpoint from this node. That is a different
+    claim from `remap.unresolved`, which says the kind of a name is unknown, and it is a
+    defect rather than a gap, so it has a rule and a severity of its own.
+    """
+    dead = _dead_remaps(atlas)
+    sites: dict[tuple[str, str], list[tuple[model.Unresolved, _Dead]]] = {}
+    for entry in sorted(atlas.unresolved, key=lambda item: item.id):
+        found = dead.get(entry.id)
+        if found is None:
+            continue
+        file_id = entry.evidence[0].file if entry.evidence else ""
+        subject = file_id if file_id in atlas.entities else entry.owner
+        sites.setdefault((subject, entry.expr), []).append((entry, found))
+    findings: list[Finding] = []
+    for (subject, expr), group in sorted(sites.items()):
+        source, _sep, target = expr.partition(":=")
+        first = group[0][0]
+        at = rules.where(first.evidence[0]) if first.evidence else _remap_label(first)
+        names: dict[str, dict[str, set[str]]] = {}
+        files: set[str] = set()
+        profiles: set[str] = set()
+        for _entry, found in group:
+            profiles.update(found.profiles)
+            files.update(found.files)
+            for node_id, ends in found.nodes.items():
+                for kind, raw in ends:
+                    names.setdefault(rules.node_text(node_id), {}).setdefault(kind, set()).add(raw)
+        nodes = sorted(names)
+        uses = "; ".join(
+            f"{node} "
+            + ", ".join(
+                f"{kind} {', '.join(sorted(raws))}" for kind, raws in sorted(names[node].items())
+            )
+            if names[node]
+            else f"{node} creates no endpoint"
+            for node in nodes
+        )
+        candidates = sorted(
+            {raw for node in nodes for raws in names[node].values() for raw in raws}
+        )
+        near = difflib.get_close_matches(source.lstrip("~/"), candidates, n=1, cutoff=0.6)
+        read = ", ".join(rules.path_of(item) for item in sorted(files)[:3])
+        more = f" and {len(files) - 3} more files" if len(files) > 3 else ""
+        change = (
+            f"change {source} to {near[0]} at {at}, the endpoint name closest to it, or delete "
+            "the remap"
+            if near
+            else f"write the endpoint name the node uses at {at}, or delete the remap"
+        )
         findings.append(
             Finding(
-                rule="remap.unresolved",
-                severity=rules.severity_of("remap.unresolved"),
+                rule="remap.matches_nothing",
+                severity=rules.severity_of("remap.matches_nothing"),
                 subject=subject,
-                title=f"nothing states what kind of endpoint the remap {source} to {target} binds",
+                title=f"the remap {source} to {target} matches no endpoint of {', '.join(nodes)}",
                 detail=(
-                    f"{' '.join(sentences)}{included} No source in the read set publishes or "
-                    "subscribes either name and no interface definition names it, so nothing "
-                    f"states whether {target} is a topic, a service or an action, and the "
-                    "endpoint stays unbound."
+                    f"{at} remaps {source} to {target} on {', '.join(nodes)}, whose source "
+                    f"({read}{more}) was read whole, and no endpoint in it is named {source}: "
+                    f"{uses}. The rule renames nothing, so nothing of this node reaches "
+                    f"{target} through it."
                 ),
-                fix=f"{remedy}{change}",
+                fix=f"{change[:1].upper()}{change[1:]}.",
                 say=(
-                    f"{writer} remaps {source} to {target}{via} and nothing in the workspace "
-                    f"states what kind of endpoint {target} is, so the connection is unverified."
+                    f"{at} remaps {source} to {target}, but {', '.join(nodes)} has no endpoint "
+                    f"named {source} ({uses}), so the remap does nothing"
+                    + (f"; {near[0]} is the likely name." if near else ".")
                 ),
                 discriminator=_disc(expr),
-                profiles=[profile for _, profiles in group for profile in profiles],
-                layers=[model.Layer.DECLARED.value],
+                profiles=sorted(profiles),
+                layers=[model.Layer.DECLARED.value, model.Layer.CODED.value],
                 where=[row for entry, _ in group for row in entry.evidence],
             )
         )
     return findings
+
+
+@dataclass
+class _Dead:
+    """What a remap that renames nothing was checked against."""
+
+    profiles: set[str] = field(default_factory=set)
+    files: set[str] = field(default_factory=set)
+    nodes: dict[str, set[tuple[str, str]]] = field(default_factory=dict)
+
+
+_NAME_WANTS = (
+    model.Want.TOPIC_NAME.value,
+    model.Want.SERVICE_NAME.value,
+    model.Want.ACTION_NAME.value,
+)
+
+
+def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
+    """Remap blind spots whose source name no endpoint of a wholly read node carries, by id.
+
+    A node not bound to code in a profile that starts it, or one whose code holds a name the
+    reader could not follow, could carry the name, and then the remap is not decided.
+    """
+    from rosio import join
+
+    blind: dict[str, set[str]] = {}
+    out: dict[str, _Dead] = {}
+    spelled = _spelled_names(atlas)
+    classes = _class_rows(atlas)
+    defined = {
+        _short_class(str(row.get("name") or "")) for rows in classes.values() for row in rows
+    }
+    for entry in atlas.unresolved:
+        if entry.role != "remap" or entry.owner not in atlas.entities:
+            continue
+        source, sep, _target = entry.expr.partition(":=")
+        if not sep or not source or source.startswith("__") or _bare(source) in spelled:
+            continue
+        owner = atlas.entities[entry.owner]
+        live = [p for p in _owner_profiles(atlas, entry.owner) if rules.site_live(owner, p)]
+        launched = _launched_by(atlas, entry.owner)
+        if not live or not launched:
+            continue
+        found = _Dead()
+        decided = True
+        for profile in live:
+            if profile not in blind:
+                blind[profile] = join.blind_nodes(atlas, _NAME_WANTS, profile)
+            for node_id in launched:
+                node = atlas.entities.get(node_id)
+                if node is None or profile not in node.profiles:
+                    continue
+                read = rules.coded_sources(atlas, node_id, profile)
+                ends = _endpoint_names(atlas, node_id, profile)
+                renamed = _remap_source(source, node_id)
+                own = {_remap_source(raw, node_id) for _kind, raw in ends}
+                if (
+                    not read
+                    or not ends
+                    or _hands_off_unread(read, classes, defined)
+                    or node_id in blind[profile]
+                    or renamed in own
+                    # image_transport and cuda_blackboard add sub topics under a base name
+                    or any(renamed.startswith(name.rstrip("/") + "/") for name in own)
+                ):
+                    decided = False
+                    break
+                found.profiles.add(profile)
+                found.files.update(read)
+                found.nodes.setdefault(node_id, set()).update(ends)
+            if not decided:
+                break
+        if decided and found.nodes:
+            out[entry.id] = found
+    return out
+
+
+def _short_class(name: str) -> str:
+    return name.split("<", 1)[0].rpartition("::")[2]
+
+
+def _class_rows(atlas: Atlas) -> dict[str, list[dict]]:
+    """The `classes` record rows each source file states, by file id."""
+    out: dict[str, list[dict]] = {}
+    for entity in atlas.by_kind(model.NodeKind.FILE.value):
+        for fact in entity.facts:
+            if fact.layer == model.Layer.CODED.value:
+                rows = fact.values.get("classes") or []
+                out.setdefault(entity.id, []).extend(row for row in rows if isinstance(row, dict))
+    return out
+
+
+def _hands_off_unread(
+    files: set[str], classes: Mapping[str, list[dict]], defined: set[str]
+) -> bool:
+    """Whether a class of a node's packages hands the node to a class no source of the read
+    set defines, `make_shared<Synchronizer>(this, topics)`: that class may create any
+    endpoint. The class rows sit in the header that declares the class, so every file of
+    the package is asked."""
+    packages = {ids.parse_file(file).package for file in files if ids.kind_of(file) == "file"}
+    return any(
+        not str(other).endswith("()") and _short_class(str(other)) not in defined
+        for file, rows in classes.items()
+        if ids.parse_file(file).package in packages
+        for row in rows
+        for other in row.get("node_handoffs") or []
+    )
+
+
+def _bare(name: str) -> str:
+    return name.strip("\"'").lstrip("~").lstrip("/")
+
+
+def _spelled_names(atlas: Atlas) -> set[str]:
+    """Every endpoint name any source of the read set spells, bound to a node or not. A
+    helper class the join did not bind to the node (a controller a factory picks, a library
+    handed `*this`) may create the name a remap targets, so such a remap is not decided."""
+    out = set()
+    for entity in atlas.entities.values():
+        if entity.kind not in (model.NodeKind.SYM.value, model.NodeKind.FILE.value):
+            continue
+        rows = [entity.attrs.get("endpoints") or []]
+        rows += [
+            fact.values.get("endpoints") or []
+            for fact in entity.facts
+            if fact.layer == model.Layer.CODED.value
+        ]
+        for listed in rows:
+            for row in listed if isinstance(listed, list) else []:
+                if isinstance(row, dict):
+                    for key in ("raw", "name"):
+                        if row.get(key):
+                            out.add(_bare(str(row[key])))
+    return out
+
+
+def _endpoint_names(atlas: Atlas, node_id: str, profile: str) -> set[tuple[str, str]]:
+    """(edge kind, raw name) of every endpoint the code of a node states in a profile."""
+    out = set()
+    for edge in atlas.out_edges(node_id):
+        if edge.kind not in _ENDPOINT_KINDS:
+            continue
+        for fact in edge.facts:
+            if fact.layer != model.Layer.CODED.value or fact.profile not in (
+                profile,
+                model.ANY_PROFILE,
+            ):
+                continue
+            raw = str(fact.values.get("raw_name") or "")
+            if raw:
+                out.add((edge.kind, raw))
+    return out
+
+
+def _remap_source(name: str, node_id: str) -> str:
+    namespace, node = _node_scope(node_id)
+    try:
+        return ids.normalise_ros_name(name, namespace or "/", node or None)
+    except ContractError:
+        return name
 
 
 def _launch_label(entity_id: str, file_id: str = "") -> str:
@@ -1562,6 +1857,7 @@ RULES: dict[str, Callable[[Atlas], list[Finding]]] = {
     "frame.orphan_root": frame_orphan_root,
     "frame.parent_differs": frame_parent_differs,
     "lifecycle.unmanaged": lifecycle_unmanaged,
+    "remap.matches_nothing": remap_matches_nothing,
     "remap.unresolved": remap_unresolved,
 }
 
@@ -1586,6 +1882,7 @@ __all__ = [
     "frame_orphan_root",
     "frame_parent_differs",
     "lifecycle_unmanaged",
+    "remap_matches_nothing",
     "remap_unresolved",
     "silences",
 ]

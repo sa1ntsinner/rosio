@@ -186,7 +186,7 @@ MCP server. `Ctrl+Alt+R` finds any node, topic, parameter or frame.
 | --- | --- |
 | **Effective parameter values** | The full candidate chain behind one parameter, winner first, every shadowed value with its file and line, and the mechanism that decided it. It follows a value through a group `SetParameter`, a launch time rewrite, an overlay merge and a Python script that assembles a parameters file, and provenance never terminates at a temp path. |
 | **Real topic names** | A code literal plus a launch remap plus a namespace is the topic that actually exists. Neither half states it alone. |
-| **Drift between layers** | Forty eight rules with a committed vocabulary and stable waiver keys. Each finding carries a sentence to quote, the line to edit, why it is true and a fix. |
+| **Drift between layers** | Forty nine rules with a committed vocabulary and stable waiver keys. Each finding carries a sentence to quote, the line to edit, why it is true and a fix. |
 | **Middleware** | Which `RMW_IMPLEMENTATION` every running process was started under, Fast DDS, Cyclone DDS or Zenoh, and whether a Zenoh router is there. Two middlewares in one system, or Zenoh nodes with no router, are errors with the process to fix. |
 | **Clocks and stamps** | Backward stamps, frozen and zero stamps, gaps, drift between clocks and offsets that match a known fault (TAI, GPS leap, an unset clock), in a recording and in a live system. |
 | **Honest blind spots** | A name built from a variable, a parameter read at runtime, a plugin loaded from a table: all recorded as unresolved with the raw expression, never invented. The resolution rate is a CI gate. |
@@ -336,6 +336,15 @@ Node facts carry `seen_through`, and refused passes remain on the observed run.
 a merge, and registers the merge driver that resolves two rebuilds of `atlas.json` without conflict
 markers. It is not part of `install`, which registers rosio with an assistant, because the two
 share no flag.
+
+Whether to commit `rosio-out/atlas.json` is a choice, and the hooks assume you do not: put
+`rosio-out/` in `.gitignore` and each clone keeps its own atlas current. A team that wants the
+atlas in history (to review it in a pull request or to run `rosio diff` against a released
+one) builds it with `rosio extract` or `rosio hook run`, commits it with the sources it
+describes, and lets CI check it is current. A hook leaves a tracked atlas as committed, because
+rewriting it after a commit leaves the work tree dirty and stops the next `git checkout`. A
+rebuild is an extraction, so it holds no observed or recorded layer: a hook that replaces an
+atlas `rosio probe` extended says so on stderr, and `rosio probe` restates it.
 
 Configuration lives in `rosio.yaml`: the roots to read, and one profile per system you actually
 run, each naming its entry points and their arguments. No single launch file describes a running
