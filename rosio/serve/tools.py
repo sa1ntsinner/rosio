@@ -1736,11 +1736,18 @@ def migrate(
         if not Path(directory).is_relative_to(within):
             raise UsageError(CONFINED)
     try:
-        changes, _root = release.plan_workspace(directory, source, target)
+        changes, root = release.plan_workspace(directory, source, target)
     except OSError as exc:
         raise UsageError(
             f"migrate could not read {exc.filename or directory}: {exc.strerror or exc}"
         ) from exc
+    if within is not None:
+        # A link inside the workspace can point anywhere, and its lines must not leave.
+        changes = [
+            change
+            for change in changes
+            if (Path(root) / change.file).resolve().is_relative_to(within)
+        ]
     wanted = _text(package)
     if wanted:
         changes = [change for change in changes if change.package == wanted]

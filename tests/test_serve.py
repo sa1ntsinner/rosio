@@ -1533,3 +1533,39 @@ def test_a_graph_with_no_endpoint_says_why_in_one_line():
     assert "drift with only=launch.raised" in tools.graph(
         _no_endpoints(raised=True), profile="robot"
     )
+
+
+def test_migrate_over_http_says_nothing_about_a_file_a_link_takes_outside(
+    tmp_path: Path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from rosio import migrate as release
+
+    workspace = tmp_path / "ws"
+    (workspace / "src" / "pkg").mkdir(parents=True)
+    secret = tmp_path / "secret.cpp"
+    secret.write_text("#include <tf2_ros/buffer.h>\n")
+    (workspace / "src" / "pkg" / "inside.cpp").write_text("#include <tf2_ros/buffer.h>\n")
+    (workspace / "src" / "pkg" / "linked.cpp").symlink_to(secret)
+
+    def change(name: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            package="pkg",
+            file=f"src/pkg/{name}",
+            line=1,
+            automatic=True,
+            found="tf2_ros/buffer.h",
+            replacement="tf2_ros/buffer.hpp",
+        )
+
+    monkeypatch.setattr(
+        release,
+        "plan_workspace",
+        lambda directory, *args: ([change("inside.cpp"), change("linked.cpp")], directory),
+    )
+    source = tools.AtlasSource(workspace / "rosio-out" / "atlas.json", confined=True)
+    (migrate,) = [item for item in server.bindings(source) if item.__name__ == "migrate"]
+    answer = migrate("jazzy", start="humble")
+    assert "inside.cpp" in answer
+    assert "linked.cpp" not in answer
