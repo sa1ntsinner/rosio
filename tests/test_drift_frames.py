@@ -1045,6 +1045,67 @@ def test_remap_unresolved_mints_no_topic_and_keeps_its_id():
     assert ids.build_topic("/perception/obstacle_cloud") not in atlas.entities
 
 
+def _outside_remap_atlas(written_in: str) -> AtlasBuilder:
+    """turtlebot3 starts nav2 through nav2_bringup, so the remap sits in a file no root holds
+    and the blind spot cites the include line of the entry point."""
+    builder = _builder()
+    entry = ids.build_file("nx_bringup", "launch/navigation2.launch.py")
+    builder.node(entry)
+    owner = ids.build_launchent(
+        "nx_bringup",
+        "launch/navigation2.launch.py",
+        (("Include", "navigation_launch.py"), ("ComposableNode", "controller_server")),
+    )
+    builder.node(owner)
+    builder.unresolved(
+        Unresolved(
+            want=model.Want.OTHER.value,
+            owner=owner,
+            expr="cmd_vel:=cmd_vel_nav",
+            reason="nothing states the kind of the destination",
+            role="remap",
+            evidence=[
+                Source(
+                    file=entry,
+                    locator="Include(navigation_launch.py)/ComposableNode(controller_server)",
+                )
+            ],
+            written_in=written_in,
+        )
+    )
+    return builder
+
+
+def test_remap_unresolved_names_the_outside_file_that_writes_the_remap_and_the_include():
+    stated = "@outside/share/nav2_bringup/launch/navigation_launch.py"
+    found = frame_rules.remap_unresolved(_outside_remap_atlas(stated).build())
+    assert len(found) == 1
+    assert found[0].say == (
+        "nav2_bringup/launch/navigation_launch.py remaps cmd_vel to cmd_vel_nav, included from "
+        "navigation2.launch.py, and nothing in the workspace states what kind of endpoint "
+        "cmd_vel_nav is, so the connection is unverified."
+    )
+    assert "navigation2.launch.py includes it" in found[0].detail
+    assert found[0].fix.endswith("so change it at the include in navigation2.launch.py")
+    assert found[0].subject == ids.build_file("nx_bringup", "launch/navigation2.launch.py")
+    away = frame_rules.remap_unresolved(_outside_remap_atlas("@outside/robot_nav.py").build())
+    assert away[0].say.startswith("@outside/robot_nav.py remaps cmd_vel to cmd_vel_nav")
+
+
+def test_remap_unresolved_names_the_entry_file_when_a_root_holds_the_remap():
+    found = frame_rules.remap_unresolved(_outside_remap_atlas("").build())
+    assert found[0].say.startswith("navigation2.launch.py remaps cmd_vel to cmd_vel_nav and")
+    assert "included from" not in found[0].say and "outside" not in found[0].fix
+
+
+def test_remap_unresolved_keeps_its_id_when_the_outside_file_is_named():
+    stated = "@outside/share/nav2_bringup/launch/navigation_launch.py"
+    named = _ids(frame_rules.remap_unresolved(_outside_remap_atlas(stated).build()))
+    again = _ids(frame_rules.remap_unresolved(_outside_remap_atlas(stated).build()))
+    unnamed = _ids(frame_rules.remap_unresolved(_outside_remap_atlas("").build()))
+    assert named == again == unnamed and len(named) == 1
+
+
 def _shared_remap_atlas(sim_gate: str = "true") -> AtlasBuilder:
     """One remap line in an included file, reached from two entry points in two profiles."""
     builder = _builder()

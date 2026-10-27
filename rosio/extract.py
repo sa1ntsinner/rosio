@@ -246,6 +246,7 @@ def run(
                 say(f"{', '.join(step.names)} for profile {step.profile} ({done}/{scoped})")
     finally:
         ctx.close()
+    _state_exceptions(builder, ws, cfg)
     _declare_layers(builder, passes)
     if any(name in STATIC for name in selected):
         _join(builder)
@@ -775,6 +776,29 @@ def _write(cfg: Config, payload: Mapping[str, Any]) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(model.dumps(payload), encoding="utf-8", newline="\n")
     return target
+
+
+def _state_exceptions(builder: model.AtlasBuilder, ws: Workspace, cfg: Config) -> None:
+    """Every exception row, pass row and refusal detail passes here, whichever collector wrote
+    it, so a path a message names outside every root is stated the one way compared data may
+    carry it."""
+
+    def stated(row: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            key: ws.stated_message(value, cfg.ros_setup) if isinstance(value, str) else value
+            for key, value in row.items()
+        }
+
+    for node in builder.atlas.by_kind("run"):
+        rows = node.attrs.get("exceptions") or []
+        if any(stated(row) != row for row in rows):
+            rows[:] = sorted((stated(row) for row in rows), key=_problem_key)
+        passes = node.attrs.get(model.PASSES_KEY) or []
+        passes[:] = [stated(row) for row in passes]
+    for node in builder.atlas.entities.values():
+        detail = node.attrs.get("refused_detail")
+        if isinstance(detail, str):
+            node.attrs["refused_detail"] = ws.stated_message(detail, cfg.ros_setup)
 
 
 def _problem_key(row: Mapping[str, Any]) -> tuple[str, str, str, str]:

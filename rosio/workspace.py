@@ -382,6 +382,24 @@ class Workspace:
             return stated if stated != path else _outside(path)
         return f"{package}/{relative}" if package else relative
 
+    def stated_message(self, text: str, ros_setup: Sequence[str] = ()) -> str:
+        """Text a tool said, with every absolute path in it stated by `stated_path`.
+
+        A ROS name starts with a slash too, so a token is taken for a path only when its last
+        segment carries a suffix, which no ROS name can, or when it sits under a directory
+        every Linux box has at the top. `/cmd_vel` stays, `/somewhere/else/x.yaml` becomes
+        `@outside/x.yaml`.
+        """
+        text = self.stated_value(text, ros_setup)
+
+        def stated(match: re.Match[str]) -> str:
+            token = match.group(0).rstrip(".")
+            if not _names_a_file(token):
+                return match.group(0)
+            return self.stated_path(token, ros_setup) + match.group(0)[len(token) :]
+
+        return _ABSOLUTE.sub(stated, text)
+
     def _by_content(self, path: str) -> str:
         absolute = self.localise(path)
         target = Path(absolute)
@@ -1169,6 +1187,17 @@ def _nameable(path: str) -> bool:
     except UnicodeEncodeError:
         return False
     return True
+
+
+# A slash after a name, a mark, a scheme or another slash is inside something else
+# (`a/b`, `@src/x`, `package://x`), except the third slash of `file:///`.
+_ABSOLUTE = re.compile(r"(?:(?<=file://)|(?<![\w@.~%:/-]))/[^\s'\"`,;:()\[\]{}<>|=]+")
+_SYSTEM_TOPS = frozenset({"etc", "home", "media", "mnt", "opt", "root", "srv", "tmp", "usr", "var"})
+
+
+def _names_a_file(token: str) -> bool:
+    parts = token.strip("/").split("/")
+    return "." in parts[-1] or (len(parts) > 1 and parts[0] in _SYSTEM_TOPS)
 
 
 def _outside(path: str) -> str:

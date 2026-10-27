@@ -602,6 +602,46 @@ def test_a_collector_that_raises_is_recorded_and_not_fatal(
     assert extract.out_path(cfg).is_file()
 
 
+def test_a_message_names_a_path_outside_every_root_by_its_name_alone(
+    tmp_path: Path, ws: Workspace, monkeypatch: pytest.MonkeyPatch
+):
+    """Every collector writes its own rows, and any of them can quote a path no root holds.
+    The orchestrator states each row once, so none of them reaches compared data as a
+    machine path, and a ROS name with a leading slash is left as it was."""
+    elsewhere = f"{tmp_path}/somewhere/else/x.yaml"
+
+    class Quoting:
+        name = "quoting"
+        layer = LAYER
+
+        def collect(self, ctx: CollectContext) -> None:
+            ctx.builder.add_run(
+                LAYER,
+                input_digest="00000000",
+                exceptions=[
+                    {
+                        "path": "@collector/quoting",
+                        "phase": "read",
+                        "exc_type": "OSError",
+                        "message": f"[Errno 2] No such file or directory: '{elsewhere}'",
+                    }
+                ],
+            )
+            raise RuntimeError(f"cannot remap /cmd_vel from {elsewhere}: it is not there")
+
+    monkeypatch.setitem(REGISTRY, "quoting", Quoting)
+    cfg = _config(tmp_path / "out", ws)
+    atlas = extract.run(cfg, ws, collectors=["quoting", "interfaces"])
+
+    messages = sorted(row["message"] for row in extract.exceptions(atlas))
+    assert messages == [
+        "[Errno 2] No such file or directory: '@outside/x.yaml'",
+        "cannot remap /cmd_vel from @outside/x.yaml: it is not there",
+    ]
+    assert str(tmp_path) not in atlas.canonical_bytes().decode()
+    assert schema.validate(atlas.to_json()) == []
+
+
 def test_a_schema_violation_is_raised_and_nothing_is_written(
     tmp_path: Path, ws: Workspace, monkeypatch: pytest.MonkeyPatch
 ):

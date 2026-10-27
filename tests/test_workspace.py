@@ -678,6 +678,23 @@ def test_a_value_names_a_root_by_its_label_and_keeps_its_text(bench: Path, tmp_p
     assert ws.stated_value(str(bench / "install"), (root_setup,)) == "@install"
 
 
+def test_a_message_states_every_path_it_names_and_no_ros_name(bench: Path, tmp_path: Path):
+    ws = Workspace.discover([RootSpec("src", str(bench / "src"))])
+    ros = tmp_path / "opt" / "ros" / "jazzy"
+    text = (
+        f"remapping /cmd_vel to /robot/cmd_vel failed in '/somewhere/else/x.yaml', "
+        f"/opt/ros/jazzy/lib/x_node, {ros}/share/nav2_bringup/launch/nav.py:12, "
+        f"{bench}/src/demo_pkg/config/demo.yaml, package://demo_pkg/meshes/base.stl, "
+        "file:///usr/share/x/base.dae and /home/robot."
+    )
+    assert ws.stated_message(text, (str(ros / "setup.bash"),)) == (
+        "remapping /cmd_vel to /robot/cmd_vel failed in '@outside/x.yaml', "
+        "@outside/x_node, @outside/share/nav2_bringup/launch/nav.py:12, "
+        "@src/demo_pkg/config/demo.yaml, package://demo_pkg/meshes/base.stl, "
+        "file://@outside/base.dae and @outside/robot."
+    )
+
+
 def test_the_content_of_a_file_outside_the_checkout_still_moves_its_mark(
     bench: Path, tmp_path: Path
 ):

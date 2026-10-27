@@ -434,7 +434,7 @@ class LaunchDeclaredCollector:
         )
         # Every row of this run passes here, and a message names whatever path it raised on.
         for row in late:
-            row["message"] = ctx.ws.stated_value(row["message"], ctx.cfg.ros_setup)
+            row["message"] = ctx.ws.stated_message(row["message"], ctx.cfg.ros_setup)
         late.sort(key=_problem_key)
 
     def _emit_models(
@@ -484,7 +484,7 @@ class LaunchDeclaredCollector:
                 urdf.emit_loaded(ctx, run, profile_id, path, args)
             except (CollectorError, ContractError) as exc:
                 file_id = ctx.ws.file_id(path)
-                message = ctx.ws.stated_value(str(exc).replace(path, file_id), ctx.cfg.ros_setup)
+                message = ctx.ws.stated_message(str(exc).replace(path, file_id), ctx.cfg.ros_setup)
                 late.append(
                     {
                         "path": _problem_path(source.file),
@@ -531,7 +531,7 @@ class LaunchDeclaredCollector:
         # rows, the findings and the blind spots, so the mount point is stated by its label.
         walk.exceptions = [
             dataclasses.replace(
-                failure, message=ctx.ws.stated_value(failure.message, ctx.cfg.ros_setup)
+                failure, message=ctx.ws.stated_message(failure.message, ctx.cfg.ros_setup)
             )
             for failure in walk.exceptions
         ]
@@ -1107,6 +1107,7 @@ class LaunchDeclaredCollector:
         node = row.node
         for remap in node.remaps:
             source = _remap_source(ctx.ws, remap) or row.source
+            written_in = _written_outside(ctx, remap.site)
             resolved = _resolve_endpoint(remap.to, row.identity)
             if resolved is None:
                 ctx.builder.unresolved(
@@ -1119,6 +1120,7 @@ class LaunchDeclaredCollector:
                         role="remap",
                         resolvable_by=["state the namespace", "probe the running system"],
                         evidence=[source],
+                        written_in=written_in,
                     )
                 )
                 continue
@@ -1141,6 +1143,7 @@ class LaunchDeclaredCollector:
                             "probe the running system",
                         ],
                         evidence=[source],
+                        written_in=written_in,
                     )
                 )
                 continue
@@ -2042,6 +2045,13 @@ def _remap_source(ws: Workspace, remap: records.Remap) -> model.Source | None:
     if remap.scope != "global" or site is None or not _in_workspace(ws, site.path):
         return None
     return _source(ws, site.path, site.locator, site.line_hint)
+
+
+def _written_outside(ctx: CollectContext, site: records.Site | None) -> str:
+    """The file a site sits in when no root holds it, which its citation cannot name."""
+    if site is None or not site.path or _in_workspace(ctx.ws, site.path):
+        return ""
+    return ctx.ws.stated_path(site.path, ctx.cfg.ros_setup)
 
 
 def _problem_path(file_id: str) -> str:

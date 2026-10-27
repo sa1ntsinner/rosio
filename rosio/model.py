@@ -34,12 +34,13 @@ from typing import Any
 from rosio import ATLAS_SCHEMA_VERSION, __version__, ids
 from rosio.errors import ContractError
 
-SCHEMA_MINOR = "17"
+SCHEMA_MINOR = "18"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the observed node `command_line`, which took the place of the observed `argv`,
-and node `child_of`; the launch exception row `env`; launch entity `file_reads` rows and tf_parent
-facts carrying `xacro_args`, with the frames and tf_parent edges of a model a profile expands
-with its own arguments stated in that profile's slot, and the `xacro_argument_unresolved`
+stored id: the unresolved entry `written_in`; the observed node `command_line`, which took
+the place of the observed `argv`, and node `child_of`; the launch exception row `env`; launch
+entity `file_reads` rows and tf_parent facts carrying `xacro_args`, with the frames and
+tf_parent edges of a model a profile expands with its own arguments stated in that profile's
+slot, and the `xacro_argument_unresolved`
 blind spot; the `model.mesh_missing` rule and the model file attributes
 `meshes_not_installed` and `meshes_absent`; frame `urdf_geometry`, the visual and collision
 rows each model states;
@@ -787,6 +788,9 @@ class Unresolved:
     resolvable_by: list[str] = field(default_factory=list)
     evidence: list[Source] = field(default_factory=list)
     construction: str = ""
+    written_in: str = ""
+    """The file outside every root that writes the expression, when the evidence can only
+    cite the include line a root holds. Not part of the id."""
 
     def __post_init__(self) -> None:
         self.want = _enum_value(self.want, Want, "unresolved.want")
@@ -814,6 +818,8 @@ class Unresolved:
             payload["role"] = self.role
         if self.construction:
             payload["construction"] = self.construction
+        if self.written_in:
+            payload["written_in"] = self.written_in
         return payload
 
     @classmethod
@@ -825,6 +831,7 @@ class Unresolved:
         entry.reason = str(payload.get("reason", ""))
         entry.role = str(payload.get("role", ""))
         entry.construction = str(payload.get("construction", ""))
+        entry.written_in = str(payload.get("written_in", ""))
         entry.resolvable_by = sorted(str(item) for item in payload.get("resolvable_by") or [])
         entry.evidence = _sorted_sources(
             Source.from_json(row) for row in payload.get("evidence") or []
@@ -1854,6 +1861,7 @@ class AtlasBuilder:
                 continue
             held.reason = _first_stated(held.reason, entry.reason)
             held.role = _first_stated(held.role, entry.role)
+            held.written_in = _first_stated(held.written_in, entry.written_in)
             held.resolvable_by = sorted(dict.fromkeys([*held.resolvable_by, *entry.resolvable_by]))
             held.evidence = _sorted_sources([*held.evidence, *entry.evidence])
         self.atlas.unresolved = [merged[key] for key in sorted(merged)]

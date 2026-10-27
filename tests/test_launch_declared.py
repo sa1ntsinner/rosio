@@ -8,6 +8,7 @@ Neither path needs the launch resolver, so this suite does not wait on it.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import tempfile
 import threading
@@ -2496,6 +2497,41 @@ def test_a_node_an_outside_include_starts_is_cited_at_the_include_in_the_root(
     assert row.line_hint == 7
     rows = [row for run in atlas.by_kind("run") for row in run.attrs["exceptions"]]
     assert rows == []
+    assert str(tmp_path) not in model.dumps(atlas.to_json())
+    assert schema.validate(atlas.to_json()) == []
+
+
+def test_a_remap_an_outside_file_writes_names_that_file_beside_the_include_it_cites(
+    tmp_path: Path,
+) -> None:
+    ctx, walk = _outside_include(tmp_path)
+    controller, planner, rviz = walk.nodes
+    navigation = tmp_path / "opt" / "ros" / "jazzy" / "share" / "nav2_bringup" / "launch"
+    entry = walk.entry_path
+    walk.nodes = [
+        dataclasses.replace(
+            controller,
+            remaps=(
+                records.Remap(
+                    "cmd_vel",
+                    "cmd_vel_nav",
+                    site=records.Site(str(navigation / "navigation_launch.py"), "remappings", 61),
+                ),
+            ),
+        ),
+        planner,
+        dataclasses.replace(
+            rviz,
+            remaps=(records.Remap("cmd_vel", "cmd_vel_rviz", site=records.Site(entry, "r", 9)),),
+        ),
+    ]
+    get(launch_declared.NAME).collect(ctx)
+    atlas = ctx.builder.build()
+    remaps = {entry.expr: entry for entry in atlas.unresolved if entry.role == "remap"}
+    outside = remaps["cmd_vel:=cmd_vel_nav"]
+    assert outside.written_in == "@outside/share/nav2_bringup/launch/navigation_launch.py"
+    assert [row.file for row in outside.evidence] == ["file:bot|launch/nav.launch.py"]
+    assert remaps["cmd_vel:=cmd_vel_rviz"].written_in == ""
     assert str(tmp_path) not in model.dumps(atlas.to_json())
     assert schema.validate(atlas.to_json()) == []
 

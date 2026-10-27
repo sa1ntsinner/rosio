@@ -672,7 +672,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.17`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.18`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -773,6 +773,13 @@ What was added, in the order it arrived:
   `via_known_wrapper` from the node table of `rosio/resolve/wrappers.py`, for a whole node a
   library creates beside its owner.
 
+* in `1.18`, an unresolved entry gained optional `written_in`, the file outside every root
+  that writes the expression, stated the way `Workspace.stated_path` states it, when its
+  evidence can only cite the include line a root holds. A `remap.unresolved` finding names
+  that file as where the remap is written and the include as where it is changed. It is not
+  part of the entry id, so no finding id moved; the detail of such a finding changed, and with
+  it the fingerprint.
+
 One observed key was renamed in `1.17` without a major bump. The process table wrote the
 whole command line of a node under `argv`, the key under which the declared layer states only
 the arguments a launch file passes, so every launched node with arguments disagreed with
@@ -800,7 +807,7 @@ discriminator, so a failure inside one node is one finding per node rather than 
 message, which had folded two nodes failing on one missing package into a single finding
 that named neither. A row without `kept` keeps the id it had.
 
-A reader pinned to `1.0` still loads a `1.17` file: `Atlas.from_json` compares the major
+A reader pinned to `1.0` still loads a `1.18` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

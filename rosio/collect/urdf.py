@@ -1182,8 +1182,8 @@ class UrdfCollector:
         ws = ctx.ws
         file_id = ws.file_id(path)
         # The detail is compared data and it can quote a tool message, so the machine
-        # path in it becomes the file id and every other mount point its label.
-        detail = ws.stated_value(detail.replace(path, file_id), ctx.cfg.ros_setup)
+        # path in it becomes the file id and every other path its label or its name.
+        detail = ws.stated_message(detail.replace(path, file_id), ctx.cfg.ros_setup)
         ctx.builder.node(
             file_id,
             attrs={"loadable": False, "refused_because": reason, "refused_detail": detail},
@@ -1399,8 +1399,8 @@ def _exception_row(ctx: CollectContext, path: str, exc: Exception) -> dict[str, 
         "phase": "describe",
         "exc_type": type(exc).__name__,
         # The message is compared data, so the machine path in it becomes the file id and
-        # every other mount point its label.
-        "message": ws.stated_value(str(exc).replace(path, file_id), ctx.cfg.ros_setup),
+        # every other path its label or its name.
+        "message": ws.stated_message(str(exc).replace(path, file_id), ctx.cfg.ros_setup),
     }
 
 

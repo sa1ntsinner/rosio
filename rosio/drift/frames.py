@@ -1045,6 +1045,9 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
     model the profile loads states, per profile: a name one profile's model publishes is
     still a blind spot in a profile that loads no model naming it. A launch site whose
     condition is false in a profile starts no node there, so its remap binds nothing.
+
+    A remap a file outside every root writes is cited at the include line a root holds, so
+    the sentence names the file that writes the rule and the include it is changed at.
     """
     bound = _bound_names(atlas)
     modelled = _model_names(atlas)
@@ -1080,6 +1083,20 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
         first = group[0][0]
         where = _base_name(subject) or _remap_label(first)
         launched = ", ".join(sorted({ids.label_for(entry.owner) for entry, _ in group}))
+        outside = ", ".join(sorted({_outside_file(entry.written_in) for entry, _ in group} - {""}))
+        writer = outside or where
+        via = f", included from {where}," if outside else ""
+        included = (
+            f" {where} includes it, and that include is the line the workspace holds."
+            if outside
+            else ""
+        )
+        change = (
+            f"; the rule is written in {outside}, outside every root, so change it at the "
+            f"include in {where}"
+            if outside
+            else ""
+        )
         findings.append(
             Finding(
                 rule="remap.unresolved",
@@ -1087,18 +1104,18 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
                 subject=subject,
                 title=f"nothing states what kind of endpoint the remap {source} to {target} binds",
                 detail=(
-                    f"{where} remaps {source} to {target} on {launched}. No source in the read "
-                    "set publishes or subscribes either name and no interface definition names "
-                    f"it, so nothing states whether {target} is a topic, a service or an "
-                    "action, and the endpoint stays unbound."
+                    f"{writer} remaps {source} to {target} on {launched}.{included} No source in "
+                    "the read set publishes or subscribes either name and no interface "
+                    f"definition names it, so nothing states whether {target} is a topic, a "
+                    "service or an action, and the endpoint stays unbound."
                 ),
                 fix=(
                     f"read the node source for the endpoint behind {source}, or add the package "
-                    "that owns it to the workspace so the kind is stated"
+                    f"that owns it to the workspace so the kind is stated{change}"
                 ),
                 say=(
-                    f"{where} remaps {source} to {target} and nothing in the workspace states "
-                    f"what kind of endpoint {target} is, so the connection is unverified."
+                    f"{writer} remaps {source} to {target}{via} and nothing in the workspace "
+                    f"states what kind of endpoint {target} is, so the connection is unverified."
                 ),
                 discriminator=_disc(expr),
                 profiles=[profile for _, profiles in group for profile in profiles],
@@ -1124,6 +1141,13 @@ def _base_name(file_id: str) -> str:
         return ids.parse_file(file_id).relpath.rsplit("/", 1)[-1]
     except ContractError:
         return ""
+
+
+def _outside_file(stated: str) -> str:
+    """A file outside every root as a reader finds it: package relative when it sits in an
+    installed share directory, `@outside/...` otherwise."""
+    prefix = "@outside/share/"
+    return stated[len(prefix) :] if stated.startswith(prefix) else stated
 
 
 def _remap_names(atlas: Atlas, owner: str, target: str) -> list[str]:

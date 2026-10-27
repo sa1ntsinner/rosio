@@ -255,6 +255,7 @@ _UNRESOLVED_SCHEMA: dict[str, Any] = {
         "reason": {"type": "string"},
         "role": {"type": "string"},
         "construction": {"type": "string"},
+        "written_in": {"type": "string"},
         "resolvable_by": {"type": "array", "items": {"type": "string"}},
         "evidence": {"type": "array", "items": _SOURCE_SCHEMA},
     },
