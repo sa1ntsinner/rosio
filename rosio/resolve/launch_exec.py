@@ -388,6 +388,16 @@ def source_shares(workspace: Workspace | None) -> dict[str, str]:
     }
 
 
+def installed_shares(workspace: Workspace | None) -> dict[str, str]:
+    """The share directory of every package an install root holds, by name. A lookup the
+    ament index answers from anywhere else read a copy the configured roots do not hold."""
+    return {
+        name: package.share_path
+        for name, package in getattr(workspace, "packages", {}).items()
+        if package.share_path
+    }
+
+
 def walk(
     entry_path: str,
     *,
@@ -416,6 +426,7 @@ def walk(
         "env": [list(pair) for pair in env],
         "roots": [root.path for root in getattr(workspace, "roots", ())],
         "source_shares": source_shares(workspace),
+        "installed_shares": installed_shares(workspace),
         "timeout": float(timeout),
         "sandbox": bool(sandbox),
     }
@@ -621,6 +632,7 @@ def encode_walk(walk_result: records.LaunchWalk) -> dict[str, Any]:
         "loadable": walk_result.loadable,
         "strategy": walk_result.strategy,
         "notes": list(walk_result.notes),
+        "underlay": dict(sorted(walk_result.underlay.items())),
     }
 
 
@@ -669,6 +681,7 @@ def decode_walk(
         loadable=bool(payload.get("loadable", True)),
         strategy=str(payload.get("strategy", "executed")),
         notes=[str(note) for note in payload.get("notes", ())],
+        underlay={str(k): str(v) for k, v in dict(payload.get("underlay", {})).items()},
     )
 
 
@@ -1023,6 +1036,30 @@ def environment_reads(source: str) -> tuple[str, ...]:
         ):
             name = _arg(node, "name", 0)
         if isinstance(name, ast.Constant) and isinstance(name.value, str):
+            found.append((node.lineno, node.col_offset, name.value))
+    return tuple(dict.fromkeys(text for _line, _col, text in sorted(found)))
+
+
+def required_arguments(source: str) -> tuple[str, ...]:
+    """The launch arguments a python launch file declares with no default, in source order.
+
+    `ros2 launch` refuses the file until each one is given, so a file that has them is either
+    started with arguments or only ever included by another launch file that passes them.
+    """
+    try:
+        tree = parse_python(source)
+    except SyntaxError:
+        return ()
+    found: list[tuple[int, int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _call_name(node.func) != "DeclareLaunchArgument":
+            continue
+        name = _arg(node, "name", 0)
+        if (
+            _arg(node, "default_value", 1) is None
+            and isinstance(name, ast.Constant)
+            and isinstance(name.value, str)
+        ):
             found.append((node.lineno, node.col_offset, name.value))
     return tuple(dict.fromkeys(text for _line, _col, text in sorted(found)))
 

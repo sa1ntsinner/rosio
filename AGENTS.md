@@ -511,6 +511,10 @@ with per candidate provenance.
   includes for this to reach the reference stack, because the two displaced rows acceptance 6
   wants are declared inside `collision_monitor.launch.py` and `_launch_child` keeps only the
   entry point's own.
+* A key the yaml sets that no declaration of the node names is decided per key, never per
+  file. A declaration whose name is built at run time hides only the keys its literal text
+  could spell (`"sensor." + id` never builds `min_range`): such a key is `other` in that
+  profile and wins nothing, with a note saying why, and any other key is `undeclared`.
 * A python write whose value folded but whose guard did not is a candidate carrying the guard
   text, and remains a blind spot: the parameter stays `other` in that profile and nothing
   wins. Dropping the write hides the only line an engineer can edit, and letting it win names
@@ -690,7 +694,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.20`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.21`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -813,6 +817,16 @@ What was added, in the order it arrived:
   `coded` fact. A parameter a file sets for such a node keeps its win, and so does one the
   node's sources read back with no declaration this reader follows.
 
+* in `1.21`, the rule id `build.underlay`, the package attributes `share_read_from` and
+  `install_not_sourced`, the declared run predicates `underlay:<package>` and
+  `workspace:install_unnamed`, and the launch exception row `missing`. A package the roots
+  hold whose share lookup the ament index answered from another tree (the release under
+  `/opt/ros` for a package only src holds, or for one whose install tree is not sourced) is
+  still read there, because that is what `ros2 launch` runs, and the package names the tree
+  in `share_read_from`. A parameters file read that way is cited at the same package
+  relative path in the workspace, at that file's own line. `missing` is the file id of a
+  workspace file a walk step did not find.
+
 One observed key was renamed in `1.17` without a major bump. The process table wrote the
 whole command line of a node under `argv`, the key under which the declared layer states only
 the arguments a launch file passes, so every launched node with arguments disagreed with
@@ -917,7 +931,22 @@ built again with the missing package answered, so a file that catches the miss i
 its own decision and records no `PackageNotFoundError`. No release had shipped, so no stored
 id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.20` file: `Atlas.from_json` compares the major
+Inside `1.21` several things moved without a new key. A tool message names a path inside a
+root by its package (`bot/config/x.yaml`) rather than by the label of the root it is mounted
+under (`@src/ws/bot/config/x.yaml`), which moved the ids of blind spots whose expression
+quotes such a message and the discriminators of `launch.raised` findings over one. A file the
+launch sandbox did not find outside `/tmp` is reported by name instead of as a sandbox
+refusal, and a launch failure on a share file only a build puts in place is left to
+`build.unbuilt`. A robot model a launch line expands from such a file is the blind spot
+`file_after_build` rather than `xacro_failed`. A node a free function creates from a node
+type with a literal name (`rclcpp::Node::make_shared("talker")`) names its launch site, so
+those synthetic node ids resolved and moved. Finding prose states file ids and root labels as
+paths, which moved the fingerprints of findings whose detail held one. A parameter key that
+no declaration names while a declaration built at run time could is no longer `effective`,
+and `param.set_undeclared` decides per key, so a file holding one such declaration no longer
+silences every key of its node. No release had shipped, so no stored id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.21` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -963,7 +992,7 @@ time.frozen                 time.zero                     time.gap
 time.drift
 rmw.mixed                   zenoh.router_unreachable      qos.incompatible
 param.sim_time_mixed        launch.file_not_installed     model.mesh_missing
-build.unbuilt
+build.unbuilt               build.underlay
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -992,6 +1021,14 @@ is an install rule a build has not applied. It names each package, each file and
 source holds it, its subject is the first such package by name, and the fix is `colcon build`
 and the install tree as a root. A missing file the source holds nowhere stays
 `extract.input_refused`, because a wrong path and a generated file read alike.
+
+`build.underlay` is `warn`. It fires once per package the roots hold whose share directory a
+launch walk looked up and the ament index answered from another tree: the release a sourced
+setup file provides, for a package only a src root holds, or for one an install root holds
+whose setup file is not sourced. The walk keeps reading that copy, because it is what
+`ros2 launch` runs, and the finding names the package, the tree read and the profiles, and
+says an edit in the workspace takes effect only once it is built and sourced. Its fix names an
+install tree beside src that no root names when there is one.
 
 `param.sim_time_mixed` is `warn`. It fires once per profile whose nodes state both values of
 `use_sim_time` in their winning candidates, names the minority side and the line that sets

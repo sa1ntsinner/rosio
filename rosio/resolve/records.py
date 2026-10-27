@@ -243,6 +243,10 @@ class LaunchWalk:
     loadable: bool = True
     strategy: str = "executed"
     notes: list[str] = field(default_factory=list)
+    underlay: dict[str, str] = field(default_factory=dict)
+    """Packages a source root holds whose share lookup the ament index answered from another
+    tree, with the share directory it answered. That copy is what `ros2 launch` reads before
+    a build, so the walk reads it too, and the reader is told."""
     sandboxed: bool = field(default=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:

@@ -807,7 +807,7 @@ def _looked_up_not_in_urdf(
                     f"publishes, so the lookup never succeeds{hint}."
                 ),
                 discriminator=_disc(frame, LOOKED_UP),
-                profiles=[],
+                profiles=sorted({fact.profile for _node, fact in rows} - {model.ANY_PROFILE}),
                 layers=sorted({fact.layer for _node, fact in rows}),
                 where=rules.sources([row for _node, fact in rows for row in fact.evidence]),
             )

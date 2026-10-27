@@ -394,7 +394,7 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
     """
     out: list[model.Finding] = []
     declared = join.declared_names(atlas)
-    blind = rules.blind_files(atlas, model.Want.PARAM_NAME.value)
+    blind = join.blind_names(atlas, model.Want.PARAM_NAME.value)
     for node in _params(atlas):
         owner_id = ids.parse_param(node.id).owner
         name = ids.parse_param(node.id).name

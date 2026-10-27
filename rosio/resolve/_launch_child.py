@@ -147,9 +147,11 @@ class _SourceShares:
     from that directory then fails on its own, as one blind spot.
     """
 
-    def __init__(self, shares: dict[str, str]) -> None:
+    def __init__(self, shares: dict[str, str], installed: dict[str, str] | None = None) -> None:
         self.shares = dict(shares)
+        self.installed = dict(installed or {})
         self.used: set[str] = set()
+        self.underlay: dict[str, str] = {}
         self.lenient = False
         self.missing: dict[str, BaseException] = {}
         self._saved: list[tuple[Any, str, Any]] = []
@@ -166,7 +168,7 @@ class _SourceShares:
 
         def lookup(package_name, *rest, **kwargs):
             try:
-                return original(package_name, *rest, **kwargs)
+                found = original(package_name, *rest, **kwargs)
             except packages.PackageNotFoundError as exc:
                 if package_name in self.shares:
                     self.used.add(package_name)
@@ -175,6 +177,13 @@ class _SourceShares:
                 if not self.lenient:
                     raise
                 return f"{launch_exec.MISSING_SHARE}/{package_name}"
+            installed = self.installed.get(package_name)
+            if package_name in self.shares or (
+                installed is not None
+                and not _under(os.path.realpath(found), os.path.realpath(installed))
+            ):
+                self.underlay.setdefault(package_name, str(found))
+            return found
 
         for owner in (packages, ament_index_python, find_package):
             self._saved.append((owner, "get_package_share_directory", original))
@@ -624,7 +633,9 @@ class Walker:
         self.env = [(str(k), str(v)) for k, v in request.get("env", ())]
         self.roots = [str(path) for path in request.get("roots", ())]
         self.probes = _Probes(self.roots, sandbox=bool(request.get("sandbox")))
-        self.shares = _SourceShares(request.get("source_shares") or {})
+        self.shares = _SourceShares(
+            request.get("source_shares") or {}, request.get("installed_shares") or {}
+        )
         self.guard = _NoProcesses(sandbox=bool(request.get("sandbox")))
         self.sites = _ConstructionSites()
         self.commands = _Commands()
@@ -688,6 +699,7 @@ class Walker:
             self.shares.restore()
             self.probes.restore()
             self.result.notes.extend(self.shares.notes())
+            self.result.underlay = dict(sorted(self.shares.underlay.items()))
             self.result.predicates = dict(sorted(self.probes.seen.items()))
             if self.guard.blocked:
                 blocked = ", ".join(sorted(set(self.guard.blocked)))
@@ -1563,6 +1575,18 @@ class Walker:
                 ),
             )
 
+    def _really_missing(self, filename: Any) -> bool:
+        """Whether a file the walk did not find is missing outside the sandbox too. The
+        sandbox mounts the whole tree read only and hides only `/tmp`, so a path anywhere
+        else, or under a root kept there, names a file that is not on this machine, and the
+        name is the useful half of the message."""
+        if not filename:
+            return False
+        path = Path(str(filename))
+        if not path.is_relative_to("/tmp"):
+            return True
+        return any(path.is_relative_to(root) for root in self.roots)
+
     def _raised(
         self, phase: str, exc: BaseException, path: str, locator: str = "", kept: str = ""
     ) -> None:
@@ -1579,6 +1603,7 @@ class Walker:
                 errno.ENETUNREACH,
                 errno.ECONNREFUSED,
             )
+            and not (exc.errno == errno.ENOENT and self._really_missing(exc.filename))
         ):
             message = f"{exc.strerror or type(exc).__name__}. {launch_exec.SANDBOX_REFUSED}"
         if isinstance(exc, OSError) and exc.filename:

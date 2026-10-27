@@ -922,6 +922,21 @@ def _inline_dict(
         return None
     wanted = tuple(sorted(str(name) for name, _value in values))
     found = [node for node in ast.walk(tree) if _dict_keys(node) == wanted]
+    if site.line_hint is not None:
+        # The site names the line of the action the dict sits in, so a dict inside that call
+        # is the one, and two equal dicts of one file are told apart by it.
+        inside = {
+            id(node): node
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call) and call.lineno == site.line_hint
+            for node in ast.walk(call)
+            if node in found
+        }
+        found = (
+            list(inside.values())
+            or [node for node in found if node.lineno == site.line_hint]
+            or found
+        )
     return found[0] if len(found) == 1 else None
 
 
@@ -930,10 +945,9 @@ def _inline_lines(
 ) -> dict[str, int]:
     """Where each key of an inline parameters dict is written in the launch file.
 
-    The chain stopped at the file while the dict is written on a line an engineer can open.
+    The chain stopped at the file, or at the line of the action, while each key is written on
+    a line an engineer can open.
     """
-    if site.line_hint is not None:
-        return {}
     found = _inline_dict(site, values, ws)
     if found is None:
         return {}
@@ -1469,6 +1483,7 @@ def _orphan_block_rows(
         else "a node of this walk has no name that a block key can be compared against"
     )
     cited, locator_prefix = _provenance(source, path, ws=ws, walk=walk)
+    document = _lines_of(document, cited, path, ws)
     block_site = _cited_site(
         document, _on_disk_path(block.key_path[:-1], root_key), cited, locator_prefix, ws
     )
@@ -1897,6 +1912,10 @@ def _file_inputs(
     reshaped, root_key = _reshape(source, document)
     applied_by = _applied_by(source)
     cited, locator_prefix = _provenance(source, path, ws=ws, walk=walk)
+    lines = _lines_of(document, cited, path, ws)
+    note = _clean_note(source.note)
+    if lines is not document:
+        note = "; ".join(item for item in (note, UNDERLAY_NOTE) if item)
     unresolved_root, unresolved_keys = _unresolved_wrapping(source.note)
     out: list[_Input] = []
     for block in yaml_lines.param_blocks(reshaped):
@@ -1908,7 +1927,7 @@ def _file_inputs(
         specificity = _specificity(block.selector)
         for leaf in yaml_lines.leaves(block.values):
             source_path = _on_disk_path((*block.key_path, *leaf.key_path), root_key)
-            site = _cited_site(document, source_path, cited, locator_prefix, ws)
+            site = _cited_site(lines, source_path, cited, locator_prefix, ws)
             table = dict(source.rewrites)
             mark = _mark_inside(source.root_key) or _mark_inside(
                 table.get(".".join(source_path), table.get(leaf.name.split(".")[-1]))
@@ -1929,7 +1948,7 @@ def _file_inputs(
                     block_order=block.order,
                     key_order=leaf.order,
                     applied_by=applied_by,
-                    note=_clean_note(source.note),
+                    note=note,
                     blind=Blind(
                         expr=substitutions.command_text(mark[0], ws.token),
                         reason=mark[1],
@@ -2063,6 +2082,9 @@ def _provenance(
     """
     if _citable(source, path, ws=ws):
         return ws.localise(path), ""
+    twin = ws.underlay_twin(path)
+    if twin is not None:
+        return twin, ""
     writer = _applied_by(source)
     if writer is not None:
         parsed = ids.parse(writer)
@@ -2073,6 +2095,22 @@ def _provenance(
         if parsed.kind == "file":
             return ws.abspath(writer), ""
     return walk.entry_path, "external params file:"
+
+
+UNDERLAY_NOTE = (
+    "launch read the released copy of this file, and the workspace file cited here takes "
+    "effect once the workspace is built and its setup file sourced"
+)
+
+
+def _lines_of(
+    document: yaml_lines.Document, cited: str, path: str, ws: Workspace
+) -> yaml_lines.Document:
+    """The document whose lines a citation states. A released copy cited as the source file
+    that stands for it takes the lines of that file, where a key may sit elsewhere."""
+    if cited != ws.underlay_twin(path):
+        return document
+    return _load(cited) or document
 
 
 def _citable(source: records.ParamSource, path: str, *, ws: Workspace) -> bool:

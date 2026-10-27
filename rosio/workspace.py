@@ -397,9 +397,22 @@ class Workspace:
         """Text a tool said, with every absolute path in it stated by `stated_path`.
 
         A ROS name starts with a slash too, so `_names_a_file` decides which tokens are paths.
-        `/cmd_vel` stays, `/somewhere/else/x.yaml` becomes `@outside/x.yaml`.
+        `/cmd_vel` stays, `/somewhere/else/x.yaml` becomes `@outside/x.yaml`. A path inside a
+        root is named by its package first, `bot/config/x.yaml`, because the root label of
+        its mount point (`@src/ws/bot/config/x.yaml`) reads as a file nobody can open.
         """
-        text = self.stated_value(text, ros_setup)
+
+        def packaged(match: re.Match[str]) -> str:
+            token = match.group(0).rstrip(".")
+            try:
+                package, relative = self.rel(token)
+            except ContractError:
+                return match.group(0)
+            if not package:
+                return match.group(0)
+            return f"{package}/{relative}" + match.group(0)[len(token) :]
+
+        text = self.stated_value(_ABSOLUTE.sub(packaged, text), ros_setup)
 
         def stated(match: re.Match[str]) -> str:
             token = match.group(0).rstrip(".")
@@ -611,6 +624,42 @@ class Workspace:
     def share_reads(self) -> list[ShareRead]:
         """Every file cited so far that was reached through the package share, sorted."""
         return [self._share_reads[key] for key in sorted(self._share_reads)]
+
+    def install_unnamed(self) -> bool:
+        """Whether a colcon install tree sits beside a src root and no root names it, so a
+        build the person ran is not what this run reads."""
+        named = {Path(spec.path).resolve() for spec in self.roots}
+        index = Path("share", "ament_index", "resource_index", "packages")
+        for spec in self.roots:
+            if spec.kind != records.ROOTS[0]:
+                continue
+            install = Path(spec.path).resolve().parent / "install"
+            if install in named or not install.is_dir():
+                continue
+            if (install / index).is_dir() or any(
+                (child / index).is_dir() for child in install.iterdir() if child.is_dir()
+            ):
+                return True
+        return False
+
+    def underlay_twin(self, path: str) -> str | None:
+        """The workspace file a share file outside every root stands for: the same package
+        relative path in the share the install root holds, else in the package source.
+        `ros2 launch` reads the released copy until the workspace is built and sourced, and
+        the workspace file is the one to edit."""
+        if self.inside(path):
+            return None
+        parts = Path(path).parts
+        for index in range(len(parts) - 2, 0, -1):
+            if parts[index] != "share":
+                continue
+            package = self.packages.get(parts[index + 1])
+            base = package and (package.share_path or package.src_path)
+            if not base:
+                return None
+            twin = Path(base, *parts[index + 2 :])
+            return str(twin) if twin.is_file() else None
+        return None
 
     def share(self, pkg: str) -> str | None:
         """Share directory, install first then src, because get_package_share_directory
@@ -1026,31 +1075,32 @@ def _console_scripts(text: str) -> set[str]:
     return out
 
 
+_CMAKE_SET = re.compile(r"\bset\(\s*(\w+)\s+\"?([\w.-]+)\"?\s*\)", re.IGNORECASE)
+_CMAKE_PROJECT = re.compile(r"\bproject\(\s*([\w.-]+)", re.IGNORECASE)
+_CMAKE_VARIABLE = re.compile(r"\$\{(\w+)\}")
+
+
 def _cmake_executables(text: str) -> set[str]:
-    out: set[str] = set()
-    lowered = text
-    for token in ("add_executable(",):
-        position = 0
-        while True:
-            position = lowered.find(token, position)
-            if position < 0:
-                break
-            position += len(token)
-            tail = lowered[position : position + 200].strip()
-            name = tail.split()[0].strip("()") if tail.split() else ""
-            if name and not name.startswith("$"):
-                out.add(name)
-    position = 0
-    while True:
-        position = lowered.find("EXECUTABLE", position)
-        if position < 0:
-            break
-        position += len("EXECUTABLE")
-        tail = lowered[position : position + 200].strip()
-        name = tail.split()[0].strip("()") if tail.split() else ""
-        if name and not name.startswith("$"):
-            out.add(name)
-    return out
+    """Target names, with a variable the same file sets to one word expanded:
+    `set(EXECUTABLE_NAME "turtlebot3_ros")` before `add_executable(${EXECUTABLE_NAME} ...)`."""
+    variables = dict(_CMAKE_SET.findall(text))
+    project = _CMAKE_PROJECT.search(text)
+    if project is not None:
+        variables.setdefault("PROJECT_NAME", project.group(1))
+    out = {
+        _CMAKE_VARIABLE.sub(lambda hit: variables.get(hit.group(1), hit.group(0)), name)
+        for name in _cmake_names(text)
+    }
+    return {name for name in out if name and "$" not in name}
+
+
+_CMAKE_TARGET = re.compile(r"\badd_executable\(\s*([^\s()]+)|\bEXECUTABLE\s+([^\s()]+)")
+
+
+def _cmake_names(text: str) -> set[str]:
+    """`add_executable` targets and the `EXECUTABLE` clause of a component registration, as
+    written. `EXECUTABLE_NAME` is a variable and not the clause."""
+    return {first or second for first, second in _CMAKE_TARGET.findall(text)}
 
 
 # ---------------------------------------------------------------------------

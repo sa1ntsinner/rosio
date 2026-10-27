@@ -23,11 +23,12 @@ so that the collector and this rule can never word one case two ways.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from rosio import ids, model
-from rosio.collect import launch_declared
+from rosio.collect import cpp_code, launch_declared
 from rosio.collect import params as params_collector
 from rosio.collect.bag import BAG_PKG
 from rosio.drift import rules
@@ -91,6 +92,7 @@ class _Row:
         "kept",
         "label",
         "message",
+        "missing",
         "phase",
         "profile",
         "subject",
@@ -106,6 +108,7 @@ class _Row:
         self.because = str(row.get("refused_because", ""))
         self.kept = str(row.get("kept", ""))
         self.env = str(row.get("env", ""))
+        self.missing = str(row.get("missing", ""))
 
     def key(self, rule: str) -> tuple[str, str]:
         if rule == RULE_UNLOADABLE:
@@ -244,6 +247,10 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
     for key in sorted(grouped):
         rows = sorted(grouped[key], key=lambda item: (item.profile, item.phase))
         first = rows[0]
+        missing = atlas.entities.get(first.missing)
+        if missing is not None and missing.attrs.get(REFUSED_KEY) == params_collector.BUILT_ONLY:
+            # A share file only the install rules put in place: build.unbuilt names it.
+            continue
         sandboxed = launch_exec.SANDBOX_REFUSED in first.message
         fix = (
             "extract again with --launch-sandbox off: the sandbox refused a file access, and "
@@ -262,7 +269,19 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
             if first.exc_type == "ModuleNotFoundError"
             else None
         )
-        if first.env and not first.kept and slugs:
+        argument = _REQUIRED_ARGUMENT.search(first.message)
+        if argument and slugs:
+            name = argument.group(1)
+            fix = (
+                f"state {name} under args of the entry point of profile {slugs} in rosio.yaml "
+                f"(args: {{{name}: <value>}}), or delete that profile when another launch file "
+                f"includes {first.label} and passes it"
+            )
+            say = (
+                f"{first.label} needs the launch argument {name}, which profile {slugs} does "
+                f"not state, so the nodes it starts are missing from this atlas: {fix}."
+            )
+        elif first.env and not first.kept and slugs:
             names = _and(first.env.split())
             variables = "variables" if " " in first.env else "variable"
             fix = (
@@ -306,6 +325,9 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
             )
         )
     return findings
+
+
+_REQUIRED_ARGUMENT = re.compile(r"required launch argument '([^']+)' was not provided")
 
 
 def _package_fix(package: str, distro: str) -> str:
@@ -354,8 +376,9 @@ def _raised_say(label: str, exc_type: str, phase: str, message: str, kept: str =
     where = " inside the launch sandbox" if launch_exec.SANDBOX_REFUSED in message else ""
     if kept:
         return (
-            f"{label} raised {exc_type} in the {phase} phase{where} while expanding {kept}, "
-            f"so this atlas holds {kept} without the values that failed to expand."
+            f"{label} raised {exc_type} in the {phase} phase{where} while expanding {kept} "
+            f"({_clip(message).rstrip('.')}), so this atlas holds {kept} without the values that "
+            "failed to expand."
         )
     return (
         f"{label} raised {exc_type} in the {phase} phase{where}, so the nodes it starts are "
@@ -694,11 +717,7 @@ def build_unbuilt(atlas: Atlas) -> list[Finding]:
         },
         key=lambda row: (row.file, row.locator, row.line_hint or 0, row.root),
     )
-    target = f" --packages-up-to {packages[0]}" if len(packages) == 1 else ""
-    fix = (
-        f"build the workspace (colcon build{target}) and add its install tree as a root in "
-        "rosio.yaml, then extract again"
-    )
+    fix = _build_fix(atlas, packages[0] if len(packages) == 1 else "")
     return [
         Finding(
             rule=RULE_UNBUILT,
@@ -722,6 +741,91 @@ def build_unbuilt(atlas: Atlas) -> list[Finding]:
             where=readers,
         )
     ]
+
+
+def _predicate_profiles(atlas: Atlas, key: str) -> list[str]:
+    """The profiles whose run recorded one predicate as true."""
+    return sorted(
+        _profile_id(str(run.attrs.get("profile")))
+        for run in atlas.by_kind(model.NodeKind.RUN.value)
+        if run.attrs.get("profile") and (run.attrs.get("predicates") or {}).get(key)
+    )
+
+
+def _build_fix(atlas: Atlas, package: str = "") -> str:
+    """How the build a reader ran becomes what rosio reads."""
+    if _predicate_profiles(atlas, launch_declared.INSTALL_UNNAMED):
+        return (
+            "an install tree already sits beside src and rosio.yaml names no install root: "
+            "add it under roots (kind: install, path: install) or delete roots and ros_setup "
+            "from rosio.yaml so the defaults read it, then extract again"
+        )
+    target = f" --packages-up-to {package}" if package else ""
+    return (
+        f"build the workspace (colcon build{target}) and add its install tree as a root in "
+        "rosio.yaml, then extract again"
+    )
+
+
+RULE_UNDERLAY = "build.underlay"
+
+
+@rules.register(RULE_UNDERLAY)
+def build_underlay(atlas: Atlas) -> list[Finding]:
+    """A package the roots hold that the launch walk read from another tree.
+
+    A share lookup goes to the ament index, which answers from the sourced trees. For a
+    package only a src root holds, that is the released copy before the source tree is
+    asked, which is what `ros2 launch` runs before a build, so the walk keeps reading it. For
+    a package an install root holds whose setup file nobody sourced, it is the release again.
+    Either way every value of that package comes from a copy nobody in this workspace edits,
+    and an edit that changes nothing reads as a tool that is wrong, so one finding per
+    package says so.
+    """
+    findings: list[Finding] = []
+    for node in atlas.by_kind(model.NodeKind.PKG.value):
+        tree = str(node.attrs.get("share_read_from") or "")
+        if not tree:
+            continue
+        package = ids.parse(node.id).segments[0]
+        if node.attrs.get("install_not_sourced"):
+            held = "an install root holds it and its setup file is not sourced"
+            fix = (
+                f"source the setup.bash of the install tree that holds {package}: list it "
+                "under ros_setup in rosio.yaml, or delete ros_setup so the default sources "
+                "it, then extract again"
+            )
+            say = (
+                f"{package} is built but its install tree is not sourced, so its launch files "
+                f"read the copy in {tree}: source that install tree's setup.bash."
+            )
+        else:
+            held = "only a source root holds it, which is what ros2 launch reads before a build"
+            fix = _build_fix(atlas, package)
+            say = (
+                f"{package} in src is not built, so its launch files read the copy in {tree}: "
+                "edits in src take effect only after colcon build and sourcing the overlay."
+            )
+        findings.append(
+            Finding(
+                rule=RULE_UNDERLAY,
+                severity=rules.severity_of(RULE_UNDERLAY),
+                subject=node.id,
+                title=f"{package} is read from {tree}, not from the workspace",
+                detail=(
+                    f"The launch files looked up the share directory of {package} and the "
+                    f"ament index answered with the copy in {tree}, because {held}. The files "
+                    f"and values of {package} in this atlas come from that copy."
+                ),
+                fix=fix,
+                say=say,
+                profiles=_predicate_profiles(
+                    atlas, f"{launch_declared.UNDERLAY_PREDICATE}{package}"
+                ),
+                layers=[model.Layer.DECLARED.value],
+            )
+        )
+    return findings
 
 
 def _built_only(node: model.Node) -> str:
@@ -914,6 +1018,15 @@ def extract_pass_incomplete(atlas: Atlas) -> list[Finding]:
         missing = str(row.get("missing") or f"whatever the {collector} collector reads")
         where = f"the {layer} layer" if layer else "its layer"
         scope = f" of {rules.slug_of(profile)}" if profile else ""
+        fix = (
+            "repair the input the collector named and extract again, or take that "
+            "input out of the roots so the atlas stops claiming to cover it"
+        )
+        if cpp_code.INSTALL_HINT in str(row.get("reason") or ""):
+            fix = (
+                f"install the C++ extra with {cpp_code.INSTALL_HINT} into the environment "
+                "rosio runs from, then extract again"
+            )
         findings.append(
             Finding(
                 rule=RULE_INCOMPLETE,
@@ -926,10 +1039,7 @@ def extract_pass_incomplete(atlas: Atlas) -> list[Finding]:
                     "resolution rate cannot show it: a pass that stopped takes its own "
                     "denominator with it, so the rate stays where it was or better."
                 ),
-                fix=(
-                    "repair the input the collector named and extract again, or take that "
-                    "input out of the roots so the atlas stops claiming to cover it"
-                ),
+                fix=fix,
                 say=(
                     f"the {collector} collector stopped in {where}{scope} with {reason}, so "
                     f"{missing} are missing from this atlas."
@@ -1092,6 +1202,7 @@ def _refused_where(atlas: Atlas, node: model.Node) -> list[Source]:
 RULES: dict[str, Callable[[Atlas], list[Finding]]] = {
     "build.stale": build_stale,
     "build.unbuilt": build_unbuilt,
+    "build.underlay": build_underlay,
     "extract.input_refused": extract_input_refused,
     "extract.pass_incomplete": extract_pass_incomplete,
     "launch.file_not_installed": launch_file_not_installed,
@@ -1128,6 +1239,7 @@ __all__ = [
     "UNKNOWN_COST",
     "build_stale",
     "build_unbuilt",
+    "build_underlay",
     "collect",
     "extract_input_refused",
     "extract_pass_incomplete",

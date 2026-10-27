@@ -1942,3 +1942,13 @@ def test_guard_evaluation_reads_the_same_twice():
     assert first.atlas.canonical_bytes() == second.atlas.canonical_bytes()
     join.join(first)
     assert first.atlas.canonical_bytes() == second.atlas.canonical_bytes()
+
+
+def test_a_class_a_source_brings_in_with_using_finds_its_methods():
+    """turtlebot3.cpp says `using robotis::turtlebot3::TurtleBot3;` and defines
+    `TurtleBot3::TurtleBot3`, so the construction in main never reached its node name."""
+    table = {"TurtleBot3": ["ctor"], "other::Twin": ["a"], "Twin": ["b"]}
+    classes = {"robotis::turtlebot3::TurtleBot3", "other::Twin", "more::Twin"}
+    assert join._methods_of(table, "robotis::turtlebot3::TurtleBot3", classes) == ["ctor"]
+    assert join._methods_of(table, "other::Twin", classes) == ["a"]
+    assert join._methods_of(table, "more::Twin", classes) == []

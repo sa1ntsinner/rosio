@@ -453,6 +453,18 @@ and `nav2_amcl` were checked the same way and hold no costmap literal, so they g
 """
 
 
+INTERFACE_CONSTANTS: dict[str, str] = {
+    # string DISABLE_HEARTBEAT_TIMEOUT_PARAM=/bond_disable_heartbeat_timeout
+    "bond::msg::Constants::DISABLE_HEARTBEAT_TIMEOUT_PARAM": "/bond_disable_heartbeat_timeout",
+}
+"""String constants of interfaces no workspace holds, which sources pass as a parameter name.
+
+Checked against `/opt/ros/jazzy/share/bond/msg/Constants.msg`. Every node built on a bond
+declares this one, and without the row its declaration is a blind spot that hides every
+undeclared key the node is configured with. A constant of an interface the workspace holds
+is read from its definition instead, and wins over this table."""
+
+
 INDEX: dict[tuple[str, str], KnownName] = {row.key: row for row in TABLE}
 
 CHILD_INDEX: dict[tuple[str, str], tuple[ChildNode, ...]] = {
@@ -534,6 +546,7 @@ __all__ = [
     "CHILD_TABLE",
     "DISTRO_ROOT",
     "INDEX",
+    "INTERFACE_CONSTANTS",
     "TABLE",
     "ChildNode",
     "KnownName",

@@ -440,6 +440,49 @@ def test_a_profile_naming_a_missing_launch_file_fails_the_gate(ws: Workspace) ->
     assert [item.id for item in again] == [found.id]
 
 
+def test_a_file_a_walk_did_not_find_names_that_file_and_no_missing_entry_point(
+    tmp_path: Path,
+) -> None:
+    """The file id of one missing yaml was read as the list of missing entry points, one
+    blind spot per character."""
+    package = tmp_path / "src" / "bot"
+    (package / "launch").mkdir(parents=True)
+    (package / "package.xml").write_text(
+        "<package format='3'><name>bot</name><version>0.0.0</version>"
+        "<description>d</description><maintainer email='a@b.c'>a</maintainer>"
+        "<license>Apache-2.0</license></package>",
+        encoding="utf-8",
+    )
+    entry = package / "launch" / "bringup.launch.py"
+    entry.write_text("def generate_launch_description():\n    pass\n", encoding="utf-8")
+    roots = (RootSpec("src", str(tmp_path / "src")),)
+    failure = records.WalkException(
+        path=str(entry),
+        phase="visit",
+        exc_type="FileNotFoundError",
+        message="[Errno 2] No such file or directory: 'bot/config/gone.yaml'",
+    )
+    cfg = Config(
+        roots=roots,
+        profiles=(
+            ProfileSpec(
+                slug="bot",
+                entrypoints=(Entrypoint(verb="launch", pkg="bot", target="bringup.launch.py"),),
+            ),
+        ),
+    )
+    builder = model.AtlasBuilder()
+    ctx = CollectContext(ws=Workspace.discover(list(roots)), cfg=cfg, builder=builder)
+    ctx.declared.walks.append(
+        records.LaunchWalk(entry_path=str(entry), profile="bot", exceptions=[failure])
+    )
+    get(launch_declared.NAME).collect(ctx)
+    atlas = builder.build()
+    (row,) = atlas.by_kind("run")[0].attrs["exceptions"]
+    assert row["missing"] == ids.build_file("bot", "config/gone.yaml")
+    assert not [item for item in atlas.unresolved if item.reason == launch_declared.REFUSED_MISSING]
+
+
 def test_one_missing_launch_file_named_twice_is_one_finding(ws: Workspace) -> None:
     """A launch file started once per robot made two identical findings, and the duplicate id
     dropped every launch.unloadable finding of the atlas, the real one with it."""
@@ -1491,7 +1534,8 @@ def test_a_run_entry_point_with_no_name_in_argv_says_so(ws: Workspace) -> None:
     assert ids.is_synthetic(entity.id)
     assert entity.name_source == "unknown"
     assert [item.reason for item in atlas.unresolved] == [
-        "the argv states no name and the executable default is not in the name table"
+        "the argv states no name, and no source of lx_sensors that rosio read states a node "
+        "name for it"
     ]
 
 

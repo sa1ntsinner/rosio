@@ -21,6 +21,7 @@ from rosio.config import (
     Config,
     Entrypoint,
     ProfileSpec,
+    _default_roots,
     _slug_for,
     default_config,
 )
@@ -48,12 +49,58 @@ ROS_DISTRO is not asking the person who writes the profile."""
 
 def offered(cfg: Config) -> Config:
     """The fallback configuration less the launch files init does not offer as profiles."""
+    included = _included(cfg.profiles)
     kept = [
         profile
         for profile in cfg.profiles
-        if not any(_not_offered(item, cfg.ros_setup) for item in profile.entrypoints)
+        if not any(
+            _not_offered(item, cfg.ros_setup) or _include_only(item, included)
+            for item in profile.entrypoints
+        )
     ]
     return replace(cfg, profiles=tuple(_one_slug_rule(kept)))
+
+
+def _included(profiles: Sequence[ProfileSpec]) -> set[str]:
+    """The file names one launch file of the tree names inside another, which is how an
+    include reads: `PythonLaunchDescriptionSource([..., "rrbot_base.launch.py"])`."""
+    texts: dict[str, str] = {}
+    for profile in profiles:
+        for item in profile.entrypoints:
+            if item.verb == "launch" and item.origin is not None:
+                try:
+                    texts[item.origin.path] = Path(item.origin.path).read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                except OSError:
+                    continue
+    names = {Path(path).name for path in texts}
+    return {
+        name
+        for name in names
+        if any(name in text for path, text in texts.items() if Path(path).name != name)
+    }
+
+
+def _include_only(entry: Entrypoint, included: set[str]) -> bool:
+    """A launch file another launch file includes and that cannot start without arguments
+    nobody states: `ros2 launch` refuses it on its own, so as a profile it only raises."""
+    if entry.verb != "launch" or entry.origin is None:
+        return False
+    return Path(entry.origin.path).name in included and bool(_required_arguments(entry))
+
+
+def _required_arguments(entry: Entrypoint) -> tuple[str, ...]:
+    from rosio.resolve.launch_exec import required_arguments
+
+    if entry.verb != "launch" or entry.origin is None or entry.origin.path[-3:] != ".py":
+        return ()
+    try:
+        source = Path(entry.origin.path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ()
+    stated = {key for key, _value in entry.args}
+    return tuple(name for name in required_arguments(source) if name not in stated)
 
 
 def _one_slug_rule(profiles: Sequence[ProfileSpec]) -> list[ProfileSpec]:
@@ -90,12 +137,38 @@ def render(cfg: Config, base: Path) -> str:
         "ros_setup": list(cfg.ros_setup),
         "launch_timeout": int(DEFAULT_LAUNCH_TIMEOUT),
     }
+    defaults = ""
+    if _defaults_hold(cfg, base):
+        # Left out, each extract takes the defaults again, so a later colcon build is read.
+        shown = {key: payload.pop(key) for key in ("roots", "ros_setup") if payload[key]}
+        payload.pop("ros_setup", None)
+        defaults = DEFAULTS_NOTE + "".join(
+            f"#   {line}\n" for line in yaml.safe_dump(shown, sort_keys=False).splitlines()
+        )
     for key in ("ignore", "ros_setup"):
-        if not payload[key]:
+        if key in payload and not payload[key]:
             del payload[key]
     body = yaml.safe_dump(payload, sort_keys=False, default_flow_style=False)
     profiles = "".join(_profile(profile) for profile in cfg.profiles)
-    return f"{HEADER}\n{body}profiles:" + (f"\n{profiles}" if profiles else " []\n")
+    return f"{HEADER}\n{defaults}{body}profiles:" + (f"\n{profiles}" if profiles else " []\n")
+
+
+DEFAULTS_NOTE = """\
+# roots and ros_setup are left out, so every extract takes the defaults: src, the install
+# tree beside it once colcon build has made one, and the setup files of the sourced ROS
+# release and of that install tree. Here and now they are:
+"""
+
+
+def _defaults_hold(cfg: Config, base: Path) -> bool:
+    """Whether an extract run where this file sits finds the same roots on its own."""
+    try:
+        found = _default_roots(str(base))
+    except UsageError:
+        return False
+    return [(spec.kind, spec.path) for spec in found] == [
+        (spec.kind, spec.path) for spec in cfg.roots
+    ]
 
 
 def _profile(profile: ProfileSpec) -> str:
@@ -105,6 +178,16 @@ def _profile(profile: ProfileSpec) -> str:
         "entrypoints": [{item.verb: f"{item.pkg} {item.target}"} for item in profile.entrypoints],
     }
     text = yaml.safe_dump([entry], sort_keys=False, default_flow_style=False)
+    for item in profile.entrypoints:
+        required = _required_arguments(item)
+        if required:
+            lines = [
+                f"{Path(item.target).name} declares these with no default, "
+                "state them under its entry point:",
+                "  args:",
+                *(f"    {name}: ''" for name in required),
+            ]
+            text += "".join(f"  # {line}\n" for line in lines)
     for item in profile.entrypoints:
         names = _unset_environment(item)
         if not names:

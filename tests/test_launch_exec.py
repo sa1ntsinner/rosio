@@ -1796,3 +1796,15 @@ def test_environment_reads_name_every_variable_read_without_a_default():
 
 def test_environment_reads_of_a_file_that_does_not_parse_are_empty():
     assert launch_exec.environment_reads("def broken(:") == ()
+
+
+def test_required_arguments_are_the_ones_declared_with_no_default():
+    """rrbot_base.launch.py declares description_file with no default and is only included."""
+    source = (
+        "DeclareLaunchArgument('description_file', description='the model')\n"
+        "DeclareLaunchArgument('prefix', default_value='')\n"
+        "DeclareLaunchArgument(name='namespace')\n"
+        "DeclareLaunchArgument('gui', 'true')\n"
+    )
+    assert launch_exec.required_arguments(source) == ("description_file", "namespace")
+    assert launch_exec.required_arguments("def broken(:") == ()

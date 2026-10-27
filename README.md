@@ -186,7 +186,7 @@ MCP server. `Ctrl+Alt+R` finds any node, topic, parameter or frame.
 | --- | --- |
 | **Effective parameter values** | The full candidate chain behind one parameter, winner first, every shadowed value with its file and line, and the mechanism that decided it. It follows a value through a group `SetParameter`, a launch time rewrite, an overlay merge and a Python script that assembles a parameters file, and provenance never terminates at a temp path. |
 | **Real topic names** | A code literal plus a launch remap plus a namespace is the topic that actually exists. Neither half states it alone. |
-| **Drift between layers** | Forty seven rules with a committed vocabulary and stable waiver keys. Each finding carries a sentence to quote, the line to edit, why it is true and a fix. |
+| **Drift between layers** | Forty eight rules with a committed vocabulary and stable waiver keys. Each finding carries a sentence to quote, the line to edit, why it is true and a fix. |
 | **Middleware** | Which `RMW_IMPLEMENTATION` every running process was started under, Fast DDS, Cyclone DDS or Zenoh, and whether a Zenoh router is there. Two middlewares in one system, or Zenoh nodes with no router, are errors with the process to fix. |
 | **Clocks and stamps** | Backward stamps, frozen and zero stamps, gaps, drift between clocks and offsets that match a known fault (TAI, GPS leap, an unset clock), in a recording and in a live system. |
 | **Honest blind spots** | A name built from a variable, a parameter read at runtime, a plugin loaded from a table: all recorded as unresolved with the raw expression, never invented. The resolution rate is a CI gate. |

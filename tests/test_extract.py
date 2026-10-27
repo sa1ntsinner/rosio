@@ -481,7 +481,7 @@ def test_a_model_xacro_wrote_into_a_parameter_is_one_file_at_two_paths(tmp_path:
 
     assert written[0] == written[1]
     assert str(tmp_path).encode("utf-8") not in written[0]
-    assert b"cannot use @src/bot/launch/broken.launch.py" in written[0]
+    assert b"cannot use bot/launch/broken.launch.py" in written[0]
 
 
 def test_a_non_deterministic_run_stamps_the_time_outside_the_comparison(

@@ -3036,6 +3036,34 @@ def test_an_inline_dict_cites_the_line_it_is_written_on(tmp_path: Path):
     )
 
 
+def test_an_inline_dict_inside_an_action_with_a_line_cites_its_own_keys(tmp_path: Path):
+    """rover cited `bringup.launch.py:28`, the `Node(` line, for `{"max_range": 10.0}` on 32,
+    and two equal dicts of one file are told apart by the action they sit in."""
+    twice = CHILD_LAUNCH.replace(
+        "    )]\n",
+        "    ), Node(package='lx_disp', executable='lx_other', parameters=[{\n"
+        "        'in_topic': 'a',\n"
+        "        'out_topic': 'b',\n"
+        "    }])]\n",
+        1,
+    )
+    disp, pkg = disp_ws(tmp_path, {"launch/child.launch.py": twice})
+    path = str(pkg / "launch" / "child.launch.py")
+    site = records.Site(path=path, locator="parameters", line_hint=line_of(twice, "), Node("))
+    source = records.ParamSource(
+        order=0, kind="inline_dict", values=(("in_topic", "a"), ("out_topic", "b")), site=site
+    )
+    walk = records.LaunchWalk(
+        entry_path=path,
+        profile="disp_zoo",
+        entry_pkg="lx_disp",
+        nodes=[relay_node(pkg, (source,))],
+    )
+    assert chain_rows(walk, disp)["in_topic"].candidates[0].site.line_hint == line_of(
+        twice, "'in_topic': 'a'"
+    )
+
+
 def test_two_inline_dicts_with_one_key_set_cite_no_line(tmp_path: Path):
     """Two dicts a key set cannot tell apart state nothing rather than the wrong line."""
     twice = CHILD_LAUNCH.replace(

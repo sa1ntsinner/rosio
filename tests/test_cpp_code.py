@@ -83,6 +83,42 @@ def test_a_node_built_to_take_undeclared_parameters_says_so(options, stated):
     assert row.get("auto_declare") == stated
 
 
+@pytest.mark.parametrize(
+    "created",
+    [
+        'auto node = rclcpp::Node::make_shared("add_two_ints_client");',
+        'auto node = std::make_shared<rclcpp::Node>("add_two_ints_client", options);',
+        'rclcpp::Node node("add_two_ints_client");',
+        'auto node = rclcpp_lifecycle::LifecycleNode::make_shared("add_two_ints_client");',
+    ],
+)
+def test_a_node_a_free_function_creates_from_a_node_type_is_named_by_its_literal(created):
+    """demo_nodes_cpp add_two_ints_client stayed unnamed by launch while main named it."""
+    unit = cpp.parse_text(f"int main(int argc, char ** argv) {{\n  {created}\n}}\n", path="c.cpp")
+    cpp.analyse([unit])
+    (row,) = cpp.file_report(unit)["nodes"]
+    assert (row["name"], row["name_source"], row["symbol"]) == (
+        "add_two_ints_client",
+        "literal",
+        "main",
+    )
+
+
+def test_a_node_type_inside_a_class_or_named_at_run_time_states_no_literal():
+    unit = cpp.parse_text(
+        'void Host::helper() { auto node = rclcpp::Node::make_shared("helper"); }\n'
+        "int main() { auto node = rclcpp::Node::make_shared(name); }\n",
+        path="c.cpp",
+    )
+    cpp.analyse([unit])
+    report = cpp.file_report(unit)
+    (row,) = report["nodes"]
+    assert (row["symbol"], row["name"], row["name_source"]) == ("main", None, "unknown")
+    assert [item["reason"] for item in report["unresolved"] if item["want"] == "node_name"] == [
+        "not_stated_in_source"
+    ]
+
+
 def test_a_main_that_builds_the_options_marks_its_construction():
     unit = cpp.parse_text(
         "int main(int argc, char ** argv) {\n"

@@ -92,3 +92,50 @@ def test_interface_constant_resolution_preserves_truly_undeclared_findings():
     before = atlas.canonical_bytes()
     join.join(builder)
     assert atlas.canonical_bytes() == before
+
+
+def test_a_bond_constant_no_workspace_defines_is_read_from_the_committed_table():
+    """slam_toolbox declares bond::msg::Constants::DISABLE_HEARTBEAT_TIMEOUT_PARAM, and that one
+    blind declaration hid every undeclared key the node was configured with."""
+    builder = model.AtlasBuilder()
+    profile = builder.add_profile("configured")
+    file = ids.build_file("p", "host.cpp")
+    symbol = ids.build_sym("p", "host.cpp", "p::Host::Host")
+    node = ids.build_node("/host")
+    executable = ids.build_exe("p", "host")
+    expr = "bond::msg::Constants::DISABLE_HEARTBEAT_TIMEOUT_PARAM"
+    builder.node(file, attrs={"language": "cpp"})
+    builder.fact(
+        symbol,
+        "coded",
+        values={
+            "parameters": [
+                {
+                    "name": None,
+                    "name_expr": expr,
+                    "name_state": "unresolved",
+                    "default": True,
+                    "has_default": True,
+                    "owner_symbol": "p::Host::Host",
+                }
+            ]
+        },
+    )
+    builder.node(executable)
+    builder.edge("runs", executable, symbol, layer="declared")
+    builder.node(node, name_source="literal")
+    builder.fact(
+        node,
+        "declared",
+        profile=profile,
+        values={"pkg": "p", "executable": "host", "name": "host", "namespace": "/"},
+    )
+    builder.unresolved(
+        model.Unresolved(
+            "param_name", symbol, expr, "not_stated_in_source", evidence=[model.Source(file)]
+        )
+    )
+    join.join(builder)
+    assert builder.atlas.unresolved == []
+    declared = ids.build_param(node, "/bond_disable_heartbeat_timeout")
+    assert builder.atlas.entities[declared].fact("coded", profile).values["declared_in_code"]

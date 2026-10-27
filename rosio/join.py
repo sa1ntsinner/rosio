@@ -58,7 +58,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -582,7 +582,7 @@ def _constructed_carriers(
                 for carrier in [
                     item
                     for selected_name in sorted(selected)
-                    for item in table.get(selected_name, [])
+                    for item in _methods_of(table, selected_name, classes.get(pkg, set()))
                 ]:
                     if carrier.file not in sources and carrier.file != row.get("definition_file"):
                         continue
@@ -601,6 +601,18 @@ def _constructed_carriers(
                         )
                     rows.append(replace(carrier, construction_sources=evidence))
                     bound.add(carrier.owner)
+
+
+def _methods_of(table: dict[str, list[Carrier]], name: str, classes: set[str]) -> list[Carrier]:
+    """The methods of one class. A source that brings the class in with
+    `using robotis::turtlebot3::TurtleBot3;` defines `TurtleBot3::TurtleBot3` outside its
+    namespace, so the bare name stands for the class when the package has one of that name."""
+    if name in table:
+        return table[name]
+    short = name.rpartition("::")[2]
+    if short == name or sum(1 for item in classes if item.rpartition("::")[2] == short) != 1:
+        return []
+    return table.get(short, [])
 
 
 def _declaring_executables(
@@ -838,23 +850,53 @@ def auto_declared(name: str) -> bool:
     return name in AUTO_DECLARED or name.startswith(AUTO_DECLARED_PREFIXES)
 
 
-def blind_files(atlas: model.Atlas, want: str) -> set[str]:
-    """Files holding a site whose `want` could not be read.
+def blind_names(atlas: model.Atlas, want: str) -> dict[str, list[str]]:
+    """Files holding a site whose `want` could not be read, with the expression of each site.
 
     A claim that something is absent from a node's code cannot be made when that code holds
-    such a site: the missing name may be the one it built at run time.
+    such a site and its expression could build the missing name at run time.
     """
-    out: set[str] = set()
+    out: dict[str, list[str]] = {}
     for entry in atlas.unresolved:
         if entry.want != want:
             continue
         kind = ids.kind_of(entry.owner)
         if kind == "file":
-            out.add(entry.owner)
+            out.setdefault(entry.owner, []).append(entry.expr)
         elif kind == "sym":
             parsed = ids.parse_sym(entry.owner)
-            out.add(ids.build_file(parsed.package, parsed.relpath))
+            out.setdefault(ids.build_file(parsed.package, parsed.relpath), []).append(entry.expr)
     return out
+
+
+def blind_files(atlas: model.Atlas, want: str) -> set[str]:
+    return set(blind_names(atlas, want))
+
+
+_STRING = re.compile(r"\"((?:[^\"\\]|\\.)*)\"|'((?:[^'\\]|\\.)*)'")
+_PLACEHOLDER = re.compile(r"\{[^{}]*\}|%[-+ #0-9.]*[a-z]")
+
+
+def could_name(expr: str, name: str) -> bool:
+    """Whether a name built at run time from `expr` can be `name`.
+
+    The text the expression spells as string literals has to appear in the name in that
+    order: `"sensor." + id` builds `sensor.front` and never `min_range`. An expression with
+    no literal, a constant or a variable, could build any name.
+    """
+    pieces = [
+        piece
+        for found in _STRING.finditer(expr)
+        for piece in _PLACEHOLDER.split(found.group(1) or found.group(2) or "")
+        if piece
+    ]
+    position = 0
+    for piece in pieces:
+        found = name.find(piece, position)
+        if found < 0:
+            return False
+        position = found + len(piece)
+    return True
 
 
 def declared_names(atlas: model.Atlas) -> dict[str, set[str]]:
@@ -875,25 +917,35 @@ def declared_names(atlas: model.Atlas) -> dict[str, set[str]]:
     return out
 
 
-def ignored(
+DECLARED_STATE = "declared"
+UNDECLARED_STATE = "undeclared"
+UNKNOWN_STATE = "unknown"
+
+
+def reading(
     atlas: model.Atlas,
     node: model.Node,
     profile: str,
-    blind: set[str],
+    blind: Mapping[str, Sequence[str]],
     declared: dict[str, set[str]],
-) -> bool:
-    """Whether the node a parameter belongs to runs code, in this profile, that never declares
-    it. A node ignores a parameter it never declares, so the value a file sets is not live.
+) -> str:
+    """Whether the node a parameter belongs to declares it in this profile, decided per key.
 
-    Only a node whose code the join bound and read whole can say so: a source holding a
-    parameter name built at run time may declare this one, and a `main` that only constructs
+    `undeclared` when the node runs code, in this profile, that never declares it, so the
+    value a file sets is not live. `unknown` when the only declarations that could carry the
+    name build it at run time. `declared` when the code names it, and an empty string when
+    the code cannot answer at all.
+
+    Only a node whose code the join bound and read can say so: a `main` that only constructs
     a class defined in another file, with no declaration bound, read none of them. A node
-    built to take undeclared parameters, or one whose value it cannot tell, uses them.
+    built to take undeclared parameters, or one whose value it cannot tell, uses them. A
+    declaration whose name is built at run time hides only the keys its literal text allows,
+    so one such line no longer exempts every key of the file.
     """
     parsed = ids.parse_param(node.id)
     owner = atlas.entities.get(parsed.owner)
     if owner is None or auto_declared(parsed.name):
-        return False
+        return ""
     coded = owner.fact(CODED, profile)
     if (
         coded is None
@@ -901,16 +953,29 @@ def ignored(
         or coded.values.get("via_known_wrapper")
         or coded.values.get("auto_declare")
     ):
-        return False
+        return ""
     sources = set(coded.values.get("coded_sources") or [])
-    if sources & blind:
-        return False
     if parsed.owner not in declared and not any(_states_node(atlas, s) for s in sources):
-        return False
-    if parsed.name in declared.get(parsed.owner, ()):
-        return False
+        return ""
     own = node.fact(CODED, profile)
-    return not (own is not None and own.values.get("declared_in_code"))
+    if parsed.name in declared.get(parsed.owner, ()) or (
+        own is not None and own.values.get("declared_in_code")
+    ):
+        return DECLARED_STATE
+    if any(could_name(expr, parsed.name) for item in sources for expr in blind.get(item, ())):
+        return UNKNOWN_STATE
+    return UNDECLARED_STATE
+
+
+def ignored(
+    atlas: model.Atlas,
+    node: model.Node,
+    profile: str,
+    blind: Mapping[str, Sequence[str]],
+    declared: dict[str, set[str]],
+) -> bool:
+    """Whether the node never declares the parameter in this profile, so it ignores it."""
+    return reading(atlas, node, profile, blind, declared) == UNDECLARED_STATE
 
 
 def _states_node(atlas: model.Atlas, source: str) -> bool:
@@ -924,6 +989,10 @@ def _states_node(atlas: model.Atlas, source: str) -> bool:
 
 
 IGNORED_NOTE = "the node never declares this parameter, so it ignores the value"
+BLIND_NOTE = (
+    "the node declares a parameter whose name it builds at run time, so whether it reads "
+    "this one is unknown"
+)
 
 
 def _ignore_undeclared(builder: model.AtlasBuilder) -> None:
@@ -931,29 +1000,37 @@ def _ignore_undeclared(builder: model.AtlasBuilder) -> None:
 
     The chain still states which line would win, and nothing does: the profile's candidates
     lose their win, and a parameter that wins in no profile any more is `undeclared` with no
-    effective value (AGENTS section 7), which is what the drift rule says of it.
+    effective value (AGENTS section 7), which is what the drift rule says of it. A key only a
+    declaration built at run time could carry wins nothing either, because calling it
+    effective claims the node reads it, and the parameter is `other` with the note saying why.
     """
     atlas = builder.atlas
-    blind = blind_files(atlas, model.Want.PARAM_NAME.value)
+    blind = blind_names(atlas, model.Want.PARAM_NAME.value)
     declared = declared_names(atlas)
     for node in atlas.by_kind(model.NodeKind.PARAM.value):
         if node.state != model.ParamState.EFFECTIVE.value:
             continue
         dropped = {
-            row.profile
+            row.profile: reading(atlas, node, row.profile, blind, declared)
             for row in node.candidates
-            if row.wins and ignored(atlas, node, row.profile, blind, declared)
+            if row.wins
         }
+        notes = {UNDECLARED_STATE: IGNORED_NOTE, UNKNOWN_STATE: BLIND_NOTE}
+        dropped = {profile: state for profile, state in dropped.items() if state in notes}
         if not dropped:
             continue
         node.candidates = [
-            replace(row, wins=False, note=IGNORED_NOTE)
+            replace(row, wins=False, note=notes[dropped[row.profile]])
             if row.profile in dropped and row.wins
             else row
             for row in node.candidates
         ]
         if not any(row.wins for row in node.candidates):
-            node.state = model.ParamState.UNDECLARED.value
+            node.state = (
+                model.ParamState.UNDECLARED.value
+                if set(dropped.values()) == {UNDECLARED_STATE}
+                else model.ParamState.OTHER.value
+            )
 
 
 def _resolve_interface_constants(builder: model.AtlasBuilder) -> None:
@@ -977,7 +1054,8 @@ def _resolve_interface_constants(builder: model.AtlasBuilder) -> None:
                 continue
             for row in fact.values.get("parameters", []):
                 expr = str(row.get("name_expr") or "")
-                values = constants.get(expr.removeprefix("::"), set())
+                known = known_names.INTERFACE_CONSTANTS.get(expr.removeprefix("::"))
+                values = constants.get(expr.removeprefix("::"), {known} if known else set())
                 if row.get("name") is not None or len(values) != 1:
                     continue
                 row.update(name=next(iter(values)), name_state="interface_constant")
@@ -1262,6 +1340,7 @@ def _supersede(
             row.get("construction_ambiguous") for carrier in found for row in carrier.nodes
         ):
             _ambiguous(builder, item, names, report, reason="constructions")
+            _starts_several(builder, item, names)
             continue
         if not names:
             continue
@@ -1275,6 +1354,7 @@ def _supersede(
             continue
         if len(names) > 1:
             _ambiguous(builder, item, names, report)
+            _starts_several(builder, item, names)
             continue
         new_id = _target_id(item, names[0])
         if new_id and new_id != item.node_id:
@@ -1312,6 +1392,19 @@ def _supersede(
                 remaining.append(entry)
         atlas.unresolved = remaining
         report.superseded += 1
+
+
+def _starts_several(builder: model.AtlasBuilder, item: Instance, names: list[str]) -> None:
+    """The name blind spot of an unnamed launch site whose executable starts several nodes
+    says so, rather than blaming a table the name was never going to come from."""
+    if len(names) < 2:
+        return
+    for entry in builder.atlas.unresolved:
+        if entry.owner == item.node_id and entry.want == model.Want.NODE_NAME.value:
+            entry.reason = (
+                f"{item.pkg}/{item.executable} starts the nodes {', '.join(names)} and "
+                "launch names none of them"
+            )
 
 
 def _target_id(item: Instance, name: str) -> str:

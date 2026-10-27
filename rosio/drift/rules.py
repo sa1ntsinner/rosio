@@ -16,12 +16,13 @@ engineer edits" is how one family starts reporting what another family suppresse
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Sequence
 from importlib import import_module
 from typing import Any
 
 from rosio import ids, model
-from rosio.errors import ContractError, UsageError
+from rosio.errors import ContractError, RosioError, UsageError
 
 COMMITTED = (
     "param.shadowed",
@@ -71,6 +72,7 @@ COMMITTED = (
     "launch.file_not_installed",
     "model.mesh_missing",
     "build.unbuilt",
+    "build.underlay",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -130,6 +132,7 @@ SEVERITY: dict[str, str] = {
     "launch.file_not_installed": ERROR,
     "model.mesh_missing": ERROR,
     "build.unbuilt": WARN,
+    "build.underlay": WARN,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {
@@ -238,7 +241,7 @@ def findings_for(atlas: model.Atlas, only: Iterable[str] = ()) -> list[model.Fin
                 raise ContractError(f"duplicate finding id {finding.id}")
             seen[finding.id] = name
             finding.where = [row for row in finding.where if row.file not in TOOL_FILES]
-            out.append(finding)
+            out.append(plain_finding(finding))
     return sorted(out, key=model.Finding.sort_key)
 
 
@@ -344,6 +347,40 @@ def path_of(file_id: str) -> str:
     return f"{parsed.package}/{parsed.relpath}"
 
 
+_FILE_TOKEN = re.compile(r"file:[^\s|'\"]+\|[^\s'\",;)]+")
+_ROOT_TOKEN = re.compile(r"@([A-Za-z][\w.-]*)/")
+_DROPPED_LABELS = frozenset({"outside", "checkout"})
+
+
+def plain(text: str) -> str:
+    """Prose without the spellings compared data uses for a path.
+
+    A file id becomes the package relative path an engineer types, a root label the name of
+    that tree, and a path outside every root or under the checkout the path alone. A reader
+    met `@src/...` and `file:pkg|path` in a sentence and took them for files rosio opened.
+    """
+
+    def file_path(match: re.Match[str]) -> str:
+        try:
+            return path_of(match.group(0))
+        except RosioError:
+            return match.group(0)
+
+    text = _FILE_TOKEN.sub(file_path, text)
+    return _ROOT_TOKEN.sub(
+        lambda hit: "" if hit.group(1) in _DROPPED_LABELS else f"{hit.group(1)}/", text
+    )
+
+
+def plain_finding(finding: model.Finding) -> model.Finding:
+    """The finding with every sentence in `plain` words. Ids and evidence stay as they are."""
+    finding.title = plain(finding.title)
+    finding.detail = plain(finding.detail)
+    finding.fix = plain(finding.fix)
+    finding.say = plain(finding.say)
+    return finding
+
+
 def where(source: model.Source | None) -> str:
     if source is None:
         return "an unrecorded site"
@@ -393,6 +430,8 @@ __all__ = [
     "load",
     "node_text",
     "path_of",
+    "plain",
+    "plain_finding",
     "profiles_of",
     "register",
     "registered",

@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from rosio import ids, model
-from rosio.collect import CollectContext, register, urdf
+from rosio.collect import BUILT_ONLY, CollectContext, register, same_name_in_package, urdf
 from rosio.config import Entrypoint, ProfileSpec
 from rosio.errors import CollectorError, ContractError
 from rosio.resolve import identity, records, ros_args, substitutions
@@ -323,6 +323,9 @@ class LaunchDeclaredCollector:
                     row["kept"] = failure.kept
                 if failure.env:
                     row["env"] = _unset_variables(failure, spec, ctx.cfg.ros_setup)
+                absent = _missing_file(ctx.ws, failure)
+                if absent:
+                    row["missing"] = absent
                 if _unrun(failure):
                     # A file only a process writes is the walk's blind spot, stated by the
                     # unresolved entry of this file, and nothing the launch file can repair.
@@ -384,6 +387,15 @@ class LaunchDeclaredCollector:
         )
         ctx.builder.declare_layer(LAYER, present=True, run=run)
         late = ctx.builder.atlas.entities[run].attrs["exceptions"]
+        for walk in walks:
+            for package, share in sorted(walk.underlay.items()):
+                held = ctx.ws.packages.get(package)
+                attrs: dict[str, Any] = {
+                    "share_read_from": share_tree(ctx.ws, share, ctx.cfg.ros_setup)
+                }
+                if held is not None and held.share_path:
+                    attrs["install_not_sourced"] = True
+                ctx.builder.node(ids.build_pkg(package), attrs=attrs)
 
         ctx.builder.add_profile(
             spec.slug,
@@ -514,6 +526,9 @@ class LaunchDeclaredCollector:
                     }
                 )
                 # the frames this profile runs are unknown, and the blind spot says so
+                after_build = (
+                    not Path(path).exists() and bool(same_name_in_package(ctx.ws, path))
+                ) or bool(urdf.after_build(ctx.ws, str(exc)))
                 ctx.builder.unresolved(
                     model.Unresolved(
                         want=model.Want.FRAME_ID.value,
@@ -522,9 +537,13 @@ class LaunchDeclaredCollector:
                             " ".join(["xacro", file_id, *(f"{k}:={v}" for k, v in args)]),
                             ctx.cfg.ros_setup,
                         ),
-                        reason="xacro_failed",
+                        reason=BUILT_ONLY if after_build else "xacro_failed",
                         role="xacro",
-                        resolvable_by=["fix what the xacro tool refused"],
+                        resolvable_by=[
+                            "build the workspace and add its install tree as a root"
+                            if after_build
+                            else "fix what the xacro tool refused"
+                        ],
                         evidence=[source],
                     )
                 )
@@ -987,7 +1006,7 @@ class LaunchDeclaredCollector:
                     want=model.Want.NODE_NAME.value,
                     owner=identity.node_id,
                     expr=f"{node.pkg or UNKNOWN_SEGMENT}/{node.executable or node.plugin_class}",
-                    reason=_name_reason(node, identity),
+                    reason=_name_reason(node, identity, ctx.ws),
                     role=node.form,
                     resolvable_by=["probe the running system", "name the node in the launch file"],
                     evidence=[row.source],
@@ -1090,7 +1109,7 @@ class LaunchDeclaredCollector:
                 want=model.Want.NODE_NAME.value,
                 owner=identity.node_id,
                 expr=row.entry,
-                reason=_name_reason(node, identity),
+                reason=_name_reason(node, identity, ctx.ws),
                 role=node.form,
                 resolvable_by=["probe the running system", "name the node with __node in argv"],
                 evidence=evidence,
@@ -1720,6 +1739,25 @@ def _confidence(walk: records.LaunchWalk) -> str:
     )
 
 
+def _missing_file(ws: Workspace, failure: records.WalkException) -> str:
+    """The file id of a workspace file a walk step did not find, or an empty string. The
+    message names it by package once stated, and `build.unbuilt` owns the ones only a build
+    puts in place."""
+    if failure.exc_type != "FileNotFoundError":
+        return ""
+    found = _NO_SUCH_FILE.search(failure.message)
+    package, _, relative = (found.group(1) if found else "").partition("/")
+    if package not in ws.packages or not relative:
+        return ""
+    try:
+        return ids.build_file(package, relative)
+    except ContractError:
+        return ""
+
+
+_NO_SUCH_FILE = re.compile(r"No such file or directory: '([^']+)'")
+
+
 def _unrun(failure: records.WalkException) -> bool:
     return failure.exc_type == _launch_exec().UNRUN_OUTPUT
 
@@ -1738,13 +1776,20 @@ def _refusal_reason(walk: records.LaunchWalk) -> str:
     return "the entry point produced no launch description"
 
 
-def _name_reason(node: records.ResolvedNode, identity: _Identity) -> str:
+def _name_reason(node: records.ResolvedNode, identity: _Identity, ws: Workspace) -> str:
+    """Why the name is unknown, naming the cause a reader can act on. The name table only
+    answers for an executable whose source is not in the roots."""
     if identity.name_source == model.NameSource.RUNTIME_RANDOMISED.value:
         return "the runtime appends or randomises this executable's node name"
+    package = ws.packages.get(node.pkg or "")
+    if package is not None and package.src_path:
+        unnamed = f"no source of {node.pkg} that rosio read states a node name for it"
+    else:
+        unnamed = f"{node.pkg or 'its package'} is not in the roots and not in the name table"
     if node.form == "process" and not identity.name:
-        return "the argv states no name and the executable default is not in the name table"
+        return f"the argv states no name, and {unnamed}"
     if not node.name:
-        return "launch states no name and the executable default is not in the name table"
+        return f"launch states no name, and {unnamed}"
     return "launch states no namespace, so the fully qualified name cannot be formed"
 
 
@@ -2259,7 +2304,27 @@ def _predicates(ws: Workspace, walks: list[records.LaunchWalk]) -> dict[str, boo
         prefix = _rel_or_path(ws, walk.entry_path)
         for key in sorted(walk.predicates):
             out[f"{prefix}:{key}"] = bool(walk.predicates[key])
+        for package in walk.underlay:
+            out[f"{UNDERLAY_PREDICATE}{package}"] = True
+    if ws.install_unnamed():
+        out[INSTALL_UNNAMED] = True
     return dict(sorted(out.items()))
+
+
+UNDERLAY_PREDICATE = "underlay:"
+"""A package a src root holds whose share the ament index answered from another tree in this
+profile, so the walk read the released copy and not the source."""
+
+INSTALL_UNNAMED = "workspace:install_unnamed"
+"""An install tree a build made sits beside a src root and no root names it."""
+
+
+def share_tree(ws: Workspace, share: str, ros_setup: Sequence[str] = ()) -> str:
+    """The tree a share directory sits in, as a reader names it: `ROS jazzy` for a release
+    under `/opt/ros`, else the prefix as compared data may state it."""
+    prefix = str(Path(share).parent.parent)
+    found = _DISTRO_PREFIX.fullmatch(prefix)
+    return f"ROS {found.group(1)}" if found else ws.stated_path(prefix, ros_setup)
 
 
 def _input_digest(

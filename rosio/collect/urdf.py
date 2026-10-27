@@ -925,7 +925,7 @@ _SEARCHING = re.compile(r", searching: \[[^\]]*\]")
 _NO_SUCH_FILE = re.compile(r"No such file or directory: '?([^'\s]+)")
 
 
-def _after_build(ws: Any, message: str) -> dict[str, Any]:
+def after_build(ws: Any, message: str) -> dict[str, Any]:
     """The include a model reads from an unbuilt package and the source holds elsewhere, as
     the attributes its refusal carries, or nothing. The tool stops at the first one."""
     found = _NO_SUCH_FILE.search(message)
@@ -1019,7 +1019,7 @@ class UrdfCollector:
                 )
             except CollectorError as exc:
                 exceptions.append(_exception_row(ctx, path, exc))
-                moved = _after_build(ws, str(exc))
+                moved = after_build(ws, str(exc))
                 if moved:
                     refusals.append((path, BUILT_ONLY, str(exc)))
                     self._moved[path] = moved
@@ -1515,6 +1515,7 @@ __all__ = [
     "UrdfModel",
     "XacroFile",
     "XacroInclude",
+    "after_build",
     "diff_models",
     "emit_loaded",
     "expand_xacro",

@@ -1483,7 +1483,7 @@ def test_launch_raised_points_at_the_sandbox_when_the_sandbox_refused_the_access
 
 def test_launch_raised_keeps_the_argument_fix_when_no_sandbox_was_involved():
     (found,) = build_rules.launch_raised(_refusal_atlas([_RAISED_ROW]).build())
-    assert "supply the argument" in found.fix
+    assert "state params_file under args of the entry point of profile nx_navigation" in found.fix
     assert "sandbox" not in found.say
 
 
@@ -1756,6 +1756,7 @@ def test_every_rule_id_is_committed_and_implemented_once():
         "launch.file_not_installed",
         "model.mesh_missing",
         "build.unbuilt",
+        "build.underlay",
     }
     assert set(frame_rules.RULES) | set(build_rules.RULES) == committed
     assert not set(frame_rules.RULES) & set(build_rules.RULES)
@@ -2087,7 +2088,7 @@ def test_extract_input_refused_cites_the_tree_the_file_was_read_from():
     assert [(row.file, row.root) for row in found[0].where] == [(torn, "install")]
 
 
-def _lookup_atlas(frame: str) -> AtlasBuilder:
+def _lookup_atlas(frame: str, profile: str = model.ANY_PROFILE) -> AtlasBuilder:
     builder = _builder()
     robot = _model_file(builder, "fx_robot.urdf")
     for link in ("base_link", "laser_link"):
@@ -2106,6 +2107,7 @@ def _lookup_atlas(frame: str) -> AtlasBuilder:
         ids.build_frame(frame),
         key=ids.edge_key(sym="sym:fx_perception|src/scan_filter.cpp|on_scan", frame=frame),
         layer=CODED,
+        profile=profile,
         values={"api": "canTransform", "role": "source", "source": frame, "target": "base_link"},
         confidence=CERTAIN,
         evidence=[source],
@@ -2119,6 +2121,14 @@ def test_a_frame_the_code_looks_up_and_no_model_has_is_a_warning_with_the_near_l
     assert found[0].severity == "warn"
     assert "the model has laser_link" in found[0].say
     assert "scan_filter.cpp:34" in found[0].say
+
+
+def test_a_frame_the_code_looks_up_names_the_profiles_it_was_looked_up_in():
+    """`frame.not_in_urdf` carried `"profiles": []` unlike every other finding of rover."""
+    (found,) = frame_rules.frame_not_in_urdf(_lookup_atlas("laser_frame", NAV).build())
+    assert found.profiles == [NAV]
+    (again,) = frame_rules.frame_not_in_urdf(_lookup_atlas("laser_frame").build())
+    assert again.id == found.id
 
 
 def test_a_frame_the_code_looks_up_that_the_model_has_is_silent():

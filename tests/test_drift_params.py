@@ -126,7 +126,7 @@ def _ids(atlas: model.Atlas, rule: str) -> list[str]:
 
 
 def test_the_committed_vocabulary_is_the_one_in_the_contract():
-    assert len(rules.COMMITTED) == len(set(rules.COMMITTED)) == 47
+    assert len(rules.COMMITTED) == len(set(rules.COMMITTED)) == 48
     assert rules.COMMITTED[0] == "param.shadowed"
     assert set(rules.SEVERITY) == set(rules.COMMITTED)
 
@@ -686,6 +686,53 @@ def test_param_set_undeclared_is_silent_when_the_code_builds_a_name_at_run_time(
         )
     )
     assert _run(atlas, "param.set_undeclared") == []
+
+
+def _with_blind(atlas: model.Atlas, expr: str) -> model.Atlas:
+    owner = ids.build_sym("demo_pkg", "src/demo_server.cpp", "DemoServer::DemoServer")
+    atlas.entities[owner] = model.Node(id=owner, kind="sym", label=owner)
+    atlas.unresolved.append(
+        model.Unresolved(
+            want=model.Want.PARAM_NAME.value,
+            owner=owner,
+            expr=expr,
+            reason="not_stated_in_source",
+        )
+    )
+    return atlas
+
+
+def test_param_set_undeclared_decides_per_key_when_a_name_is_built_at_run_time():
+    """One blind declaration in slam_toolbox_common.cpp silenced min_laser_range, which no
+    source names. A name built from `"sensor." + id` can never be max_speed."""
+    atlas = _with_blind(_undeclared_atlas(), '"sensor." + sensor_id')
+    found = _run(atlas, "param.set_undeclared")
+    assert [item.subject for item in found] == [ids.build_param(NODE, "max_speed")]
+    again = _run(_with_blind(_undeclared_atlas(), '"sensor." + sensor_id'), "param.set_undeclared")
+    assert [item.id for item in again] == [item.id for item in found]
+
+
+def test_a_key_only_a_name_built_at_run_time_could_carry_is_not_effective():
+    """A constant with no literal text may name any key, so whether the node reads it is
+    unknown, and calling it effective claimed the node reads it."""
+    from rosio import join
+
+    atlas = _with_blind(_undeclared_atlas(), "dep::msg::Constants::FLAG")
+    assert _run(atlas, "param.set_undeclared") == []
+    entity = _joined(atlas).get(ids.build_param(NODE, "max_speed"))
+    assert entity.state == model.ParamState.OTHER.value
+    assert not entity.effective
+    assert [row.note for row in entity.candidates] == [join.BLIND_NOTE]
+
+
+def test_a_name_built_at_run_time_matches_only_what_its_literal_text_allows():
+    from rosio import join
+
+    assert join.could_name('topic_name + "_config"', "odom0_config")
+    assert join.could_name("prefix_ + name", "anything")
+    assert join.could_name('f"{plugin}.inflation_radius"', "inflation.inflation_radius")
+    assert not join.could_name('"sensor." + sensor_id', "max_speed")
+    assert not join.could_name('"%s_rate" % name', "rate_limit")
 
 
 def test_param_set_undeclared_is_silent_when_the_bound_source_only_runs_a_class():

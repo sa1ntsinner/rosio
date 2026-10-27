@@ -95,6 +95,11 @@ NODE_BASES = {
     "nav2::LifecycleNode": "lifecycle_node",
 }
 
+PLAIN_NODE_TYPES = {name: form for name, form in NODE_BASES.items() if "::" in name}
+"""The node types a free function creates by value: `rclcpp::Node::make_shared("talker")`,
+`std::make_shared<rclcpp::Node>("talker")` or `rclcpp::Node node("talker")`. Only the
+qualified spellings, because a bare `Node` there is as likely a class of the package."""
+
 MACROS = frozenset(
     {
         "PLUGINLIB_EXPORT_CLASS",
@@ -452,6 +457,8 @@ class Unit:
     missing_tokens: int = 0
     hidden_regions: int = 0
     classes: list[NodeClass] = field(default_factory=list)
+    plain_nodes: list[NodeClass] = field(default_factory=list)
+    """Nodes a free function creates from a node type itself, named by the type."""
     members: dict[tuple[str, str], Ref] = field(default_factory=dict)
     endpoints: list[Endpoint] = field(default_factory=list)
     params: list[ParamSite] = field(default_factory=list)
@@ -501,6 +508,7 @@ class Unit:
         found.update(item.sym for item in self.broadcasts)
         found.update(item.sym for item in self.lookups)
         found.update(item.symbol for item in self.classes if item.symbol)
+        found.update(item.symbol for item in self.plain_nodes)
         if self.constructions:
             found.add("main")
         return sorted(item for item in found if item)
@@ -1284,6 +1292,9 @@ class _Reader:
                 # `rclcpp::QoS latched_qos(1);` declares a variable, and the type is half of
                 # what the variable holds.
                 self.exprs[name] = (f"{type_text}{_flat(value, self.src)}", False)
+                self._plain_node(
+                    type_text, [item for item in value.named_children if item.type != "comment"]
+                )
                 self._track_wrapper(name, type_text, value)
                 self.walk(value)
                 continue
@@ -1458,6 +1469,9 @@ class _Reader:
             return
         arguments = _args(node)
         self._node_helper(name, receiver, template, arguments)
+        if name in ("make_shared", "make_unique"):
+            types = _template_types(template, self.src)
+            self._plain_node(types[0] if types else _scope_text(node, self.src), arguments)
         if name in MACROS:
             self._macro(name, arguments, node)
             return
@@ -1525,6 +1539,29 @@ class _Reader:
                 self.unit.helper_types[key].add("")
             if key in self.unit.helper_plugins:
                 self.unit.helper_plugins[key].add("")
+
+    def _plain_node(self, created: str, arguments: Sequence[Any]) -> None:
+        """A node a free function creates from a node type, named by its first argument."""
+        form = PLAIN_NODE_TYPES.get(created.removeprefix("::"))
+        if form is None or not arguments or self.klass or not self.functions:
+            return
+        ref = self.resolve(arguments[0])
+        literal = ref.status == LITERAL
+        self.unit.plain_nodes.append(
+            NodeClass(
+                qualname=created.removeprefix("::"),
+                base=created.removeprefix("::"),
+                form=form,
+                stated_name=ref.value if literal else "",
+                name_source=(
+                    model.NameSource.LITERAL.value if literal else model.NameSource.UNKNOWN.value
+                ),
+                name_expr=ref.expr,
+                symbol=self.sym,
+                name_line=_line(arguments[0]),
+                name_reason="" if literal else "not_stated_in_source",
+            )
+        )
 
     def _node_helper(
         self, name: str, receiver: Any, template: Any, arguments: Sequence[Any]
@@ -3950,6 +3987,33 @@ def file_report(
                 }
             )
         row["line_hint"] = item.name_line
+        nodes.append(row)
+    for item in sorted(unit.plain_nodes, key=lambda row: (row.symbol, row.name_line or 0)):
+        row = {
+            "name": item.stated_name or None,
+            "name_source": item.name_source,
+            "node_id": None,
+            "form": item.form,
+            "base": item.base,
+            "class": item.qualname,
+            "symbol": item.symbol,
+            "symbol_id": ids.build_sym(
+                unit.pkg or ids.REPO_PKG, unit.relpath or Path(unit.path).name, item.symbol
+            ),
+            "line_hint": item.name_line,
+        }
+        if not item.stated_name:
+            row["unresolved_ref"] = f"node_name:{item.name_expr}"
+            unresolved.append(
+                {
+                    "want": model.Want.NODE_NAME.value,
+                    "expr": item.name_expr,
+                    "reason": item.name_reason,
+                    "resolvable_by": UNRESOLVED_REASONS[item.name_reason][0],
+                    "owner_symbol": item.symbol,
+                    "line_hint": item.name_line,
+                }
+            )
         nodes.append(row)
 
     endpoints = [_endpoint_view(item) for item in unit.endpoints]

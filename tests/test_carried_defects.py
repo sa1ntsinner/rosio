@@ -333,3 +333,13 @@ def test_a_read_only_file_is_a_rosio_error_and_the_exit_code_is_usage(tmp_path, 
         managed.chmod(stat.S_IRUSR | stat.S_IWUSR)
     assert code == 2
     assert "could not be written" in capsys.readouterr().err
+
+
+def test_a_file_the_sandbox_did_not_find_outside_tmp_is_missing_on_this_machine():
+    """A spawner's share file that only a build installs read as a sandbox refusal, and the
+    message dropped the file it named."""
+    walker = _walker(("/tmp/ws/src",))
+    assert walker._really_missing("/ws/src/demo/config/rrbot_controllers.yaml")
+    assert walker._really_missing("/tmp/ws/src/demo/config/x.yaml")
+    assert not walker._really_missing("/tmp/merged_params.yaml")
+    assert not walker._really_missing(None)

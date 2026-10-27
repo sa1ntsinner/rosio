@@ -240,7 +240,7 @@ def run(
             if problem is not None:
                 failures.append(problem)
                 continue
-            produced.append(item)
+            produced.append(registry.plain_finding(item))
 
     scoped = _scope(produced, profiles)
     ordered = sorted(scoped, key=Finding.sort_key)

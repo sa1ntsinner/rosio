@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import shutil
 from pathlib import Path
@@ -10,7 +11,7 @@ import pytest
 import yaml
 
 from rosio import cli, scaffold
-from rosio.config import CONFIG_NAME, default_config, load_config
+from rosio.config import CONFIG_NAME, RootSpec, default_config, load_config
 from rosio.errors import UsageError
 
 WS = Path(__file__).parent / "fixtures" / "ws_launch"
@@ -36,11 +37,47 @@ def test_the_written_file_reads_back_as_the_same_configuration(workspace: Path) 
 
 
 def test_paths_inside_the_workspace_are_written_relative(workspace: Path) -> None:
-    text = scaffold.render(default_config(str(workspace)), workspace)
+    cfg = default_config(str(workspace))
+    extra = RootSpec(kind="install", path=str(workspace / "install"))
+    text = scaffold.render(dataclasses.replace(cfg, roots=(*cfg.roots, extra)), workspace)
     payload = yaml.safe_load(text)
     assert all(not Path(root["path"]).is_absolute() for root in payload["roots"])
     assert str(workspace) not in text
     assert text.startswith("# rosio configuration, written by `rosio init`.")
+
+
+def test_the_default_roots_are_left_out_so_a_later_build_is_read(workspace: Path) -> None:
+    """init wrote `roots: [src]`, and after colcon build the install tree stayed unread."""
+    _target, _written = scaffold.write(workspace)
+    text = (workspace / CONFIG_NAME).read_text(encoding="utf-8")
+    payload = yaml.safe_load(text)
+    assert "roots" not in payload and "ros_setup" not in payload
+    assert "#   - kind: src" in text and "#     path: src" in text
+    _installed(workspace / "install", "bot_bringup")
+    read = load_config(str(workspace / CONFIG_NAME), workspace=str(workspace))
+    assert [spec.kind for spec in read.roots] == ["src", "install"]
+
+
+def test_an_included_launch_file_that_needs_arguments_is_not_offered(workspace: Path) -> None:
+    launch = next((workspace / "src").rglob("*.launch.py"))
+    base = launch.with_name("needs_args.launch.py")
+    base.write_text(
+        "from launch import LaunchDescription\n"
+        "from launch.actions import DeclareLaunchArgument\n"
+        "def generate_launch_description():\n"
+        "    return LaunchDescription([DeclareLaunchArgument('description_file')])\n",
+        encoding="utf-8",
+    )
+    alone = launch.with_name("alone.launch.py")
+    alone.write_text(base.read_text(encoding="utf-8"), encoding="utf-8")
+    launch.write_text(
+        launch.read_text(encoding="utf-8") + "\n# includes needs_args.launch.py\n",
+        encoding="utf-8",
+    )
+    text = scaffold.render(default_config(str(workspace)), workspace)
+    assert "needs_args.launch.py" not in text
+    assert "alone.launch.py declares these with no default" in text
+    assert "  #     description_file: ''" in text
 
 
 def test_an_existing_file_is_kept_unless_asked(workspace: Path) -> None:
@@ -94,8 +131,10 @@ def test_a_merged_install_tree_is_one_install_root(merged: Path) -> None:
     cfg = default_config(str(merged))
     assert [(spec.kind, spec.path) for spec in cfg.roots] == [("install", str(merged))]
     assert _profiles(cfg) == {"bringup": "alpha bringup.launch.py", "beta": "beta beta_launch.py"}
-    payload = yaml.safe_load(scaffold.render(cfg, merged))
-    assert payload["roots"] == [{"kind": "install", "path": "."}]
+    text = scaffold.render(cfg, merged)
+    payload = yaml.safe_load(text)
+    assert "roots" not in payload
+    assert "#   - kind: install\n#     path: .\n" in text
     assert [profile["slug"] for profile in payload["profiles"]] == ["beta", "bringup"]
     assert payload["profiles"][1]["entrypoints"] == [{"launch": "alpha bringup.launch.py"}]
 

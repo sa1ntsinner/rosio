@@ -690,7 +690,7 @@ def test_a_message_states_every_path_it_names_and_no_ros_name(bench: Path, tmp_p
     assert ws.stated_message(text, (str(ros / "setup.bash"),)) == (
         "remapping /cmd_vel to /robot/cmd_vel failed in '@outside/x.yaml', "
         "@outside/x_node, @outside/share/nav2_bringup/launch/nav.py:12, "
-        "@src/demo_pkg/config/demo.yaml, package://demo_pkg/meshes/base.stl, "
+        "demo_pkg/config/demo.yaml, package://demo_pkg/meshes/base.stl, "
         "file://@outside/base.dae and @outside/robot."
     )
 
@@ -859,3 +859,41 @@ def test_a_missing_file_is_looked_for_in_the_index_and_not_in_a_tree_walk(
     missing = str(package / "urdf" / "base.stl")
     assert same_name_in_package(ws, missing) == ["meshes/base.stl", "old/base.stl"]
     assert same_name_in_package(ws, str(package / "meshes" / "base.stl")) == ["old/base.stl"]
+
+
+def test_an_install_tree_beside_src_that_no_root_names_is_noticed(bench: Path) -> None:
+    """init wrote src alone, colcon build made install beside it, and nothing said so."""
+    index = bench / "install" / "demo_pkg" / "share" / "ament_index" / "resource_index"
+    _write(index / "packages" / "demo_pkg", "")
+    assert Workspace.discover([RootSpec("src", str(bench / "src"))]).install_unnamed()
+    assert not _discover(bench).install_unnamed()
+
+
+def test_a_released_share_file_stands_for_the_same_file_in_the_package_source(
+    bench: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """slam_toolbox in src read its yaml from /opt/ros and cited no line of any file."""
+    ws = Workspace.discover([RootSpec("src", str(bench / "src"))])
+    share = tmp_path_factory.mktemp("opt") / "ros" / "jazzy" / "share"
+    released = share / "demo_pkg" / "config" / "demo.yaml"
+    _write(released, PARAM_YAML)
+    twin = bench / "src" / "demo_pkg" / "config" / "demo.yaml"
+    assert ws.underlay_twin(str(released)) == str(twin)
+    assert ws.underlay_twin(str(released.with_name("absent.yaml"))) is None
+    assert ws.underlay_twin(str(share / "nav2_bringup" / "params.yaml")) is None
+    assert ws.underlay_twin(str(twin)) is None
+
+
+def test_cmake_executables_expand_a_variable_the_same_file_sets() -> None:
+    """turtlebot3 names its executable `${EXECUTABLE_NAME}` after `set(EXECUTABLE_NAME ...)`."""
+    from rosio.workspace import _cmake_executables
+
+    text = (
+        "project(turtlebot3_node)\n"
+        'set(EXECUTABLE_NAME "turtlebot3_ros")\n'
+        "add_executable(${EXECUTABLE_NAME} src/node_main.cpp)\n"
+        "add_executable(${PROJECT_NAME}_tool src/tool.cpp)\n"
+        "add_executable(${UNSET} src/other.cpp)\n"
+        'rclcpp_components_register_node(lib PLUGIN "demo::Talker" EXECUTABLE talker)\n'
+    )
+    assert _cmake_executables(text) == {"turtlebot3_ros", "turtlebot3_node_tool", "talker"}
