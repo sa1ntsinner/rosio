@@ -412,7 +412,10 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             at = rules.where(winner.source)
             owner_text = rules.node_text(owner_id)
             sources = sorted(owner.fact(CODED, profile).values.get("coded_sources") or [])
-            read = ", ".join(rules.path_of(item) for item in sources) or "its source"
+            shown = [rules.path_of(item) for item in sources[:3]]
+            if len(sources) > 3:
+                shown.append(f"{len(sources) - 3} more files")
+            read = ", ".join(shown) or "its source"
             near = _nearest_name(name, declared.get(owner_id, set()))
             meant = (
                 f" {owner_text} declares {near}, which is likely what was meant." if near else ""
@@ -451,11 +454,27 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
 
 
 def _nearest_name(name: str, declared: set[str]) -> str:
-    """The declared name a mistyped key most likely meant, or nothing when none is close."""
-    import difflib
+    """The declared name a mistyped key most likely meant, or nothing when none is close.
 
-    match = difflib.get_close_matches(name, sorted(declared - {name}), n=1, cutoff=0.8)
-    return match[0] if match else ""
+    Close means one slip of the hand: a letter missing, added, wrong or swapped with its
+    neighbour. `min_laser_range` beside `max_laser_range` differs by a word, and naming one
+    the misspelling of the other sends an engineer to rename a parameter that is merely
+    undeclared.
+    """
+    return next((item for item in sorted(declared - {name}) if _one_slip(name, item)), "")
+
+
+def _one_slip(a: str, b: str) -> bool:
+    if abs(len(a) - len(b)) > 1:
+        return False
+    start = 0
+    while start < min(len(a), len(b)) and a[start] == b[start]:
+        start += 1
+    a, b = a[start:], b[start:]
+    if len(a) == len(b):
+        return a[1:] == b[1:] or (a[2:] == b[2:] and a[:2] == b[1::-1])
+    shorter, longer = sorted((a, b), key=len)
+    return longer[1:] == shorter
 
 
 @rules.register("param.declared_unread")

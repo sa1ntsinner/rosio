@@ -2131,3 +2131,21 @@ def test_param_sim_time_mixed_names_the_include_that_brought_the_value_in():
     )
     assert "passing use_sim_time at demo_bringup/launch/multi.launch.py:158" in found.fix
     assert site in found.where
+
+
+def test_param_set_undeclared_offers_no_name_a_whole_word_away():
+    """`min_laser_range` beside a declared `max_laser_range` is a different parameter, not a
+    typo: the two differ in a word, and calling one the misspelling of the other misleads."""
+    found = _run(
+        _undeclared_atlas("min_laser_range", declared=("max_laser_range",)),
+        "param.set_undeclared",
+    )
+    assert len(found) == 1
+    assert "likely what was meant" not in found[0].say
+    assert found[0].fix.startswith("Declare min_laser_range")
+
+
+def test_param_set_undeclared_offers_a_name_one_slip_away():
+    for typo, meant in (("stop_distnce", "stop_distance"), ("max_spede", "max_speed")):
+        found = _run(_undeclared_atlas(typo, declared=(meant,)), "param.set_undeclared")
+        assert f"declares {meant}, which is likely what was meant" in found[0].say
