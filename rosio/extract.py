@@ -47,6 +47,7 @@ pass that happened to write last.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -60,6 +61,10 @@ from rosio.errors import ContractError, UsageError
 from rosio.workspace import Workspace
 
 ATLAS_NAME = "atlas.json"
+
+STRICT_JOIN_ENV = "ROSIO_STRICT_JOIN"
+"""When it is set, a join that raises ends the extract instead of becoming a refused pass, so a test
+suite meets a join bug as a failure and not as a thinner atlas."""
 
 PROBE_VERB = "rosio probe"
 """The verb that owns attaching to a live system, named in the refusal so the reader is not
@@ -573,6 +578,8 @@ def _join(builder: model.AtlasBuilder) -> None:
     try:
         join(builder)
     except ContractError as exc:
+        if os.environ.get(STRICT_JOIN_ENV):
+            raise
         # A site the join cannot place ends the join and not the extract. What it already
         # bound stays, and the pass row is what makes the gate say the rest is missing.
         run_id = next(

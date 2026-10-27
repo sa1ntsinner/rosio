@@ -61,7 +61,13 @@ def test_two_mappings_under_one_key_are_one_mapping():
     }
 
 
-def _split_atlas(nodes: list[dict]) -> model.AtlasBuilder:
+def _split_atlas(
+    nodes: list[dict],
+    *,
+    node_id: str = "node:~p|pipe|/|0000aaaa",
+    name_source: str = "executable_default",
+    declared: dict | None = None,
+) -> model.AtlasBuilder:
     builder = model.AtlasBuilder()
     source = ids.build_file("p", "main.cpp")
     main = ids.build_sym("p", "main.cpp", "main")
@@ -69,12 +75,12 @@ def _split_atlas(nodes: list[dict]) -> model.AtlasBuilder:
     builder.node(main)
     builder.edge("defines", source, main, layer="coded")
     builder.node("profile:p")
-    builder.node("node:~p|pipe|/|0000aaaa", name_source="executable_default")
+    builder.node(node_id, name_source=name_source)
     builder.fact(
-        "node:~p|pipe|/|0000aaaa",
+        node_id,
         "declared",
         profile="profile:p",
-        values={"pkg": "p", "executable": "pipe", "namespace": "/"},
+        values={"pkg": "p", "executable": "pipe", "namespace": "/", **(declared or {})},
     )
     builder.fact(
         main,
@@ -131,6 +137,67 @@ def test_a_name_built_at_run_time_keeps_the_process_one_identity():
     join.join(builder)
     assert "node:~p|pipe|/|0000aaaa" in builder.atlas.entities
     assert "node:/first" not in builder.atlas.entities
+
+
+def _rate(builder: model.AtlasBuilder, node_id: str) -> None:
+    source = ids.build_file("p", "config/p.yaml")
+    builder.node(source)
+    builder.set_param(
+        ids.build_param(node_id, "rate"),
+        state=model.ParamState.EFFECTIVE.value,
+        candidates=[
+            model.Candidate(
+                value=20,
+                value_type="int",
+                mechanism=model.Mechanism.LAUNCH_PARAMS_FILE.value,
+                source=model.Source(file=source, locator="/**.ros__parameters.rate"),
+                rank=0,
+                wins=True,
+                profile="profile:p",
+            )
+        ],
+    )
+
+
+PIPES = [
+    {"name": "first", "construction": "a", "class": "Pipe", "name_source": "literal"},
+    {
+        "name": "second",
+        "construction": "b",
+        "class": "Pipe",
+        "name_source": "literal",
+        "use_global_arguments": False,
+    },
+]
+
+
+def test_a_node_that_reads_no_global_argument_takes_nothing_from_the_site():
+    """rcl measured on jazzy: a node built with use_global_arguments false ignores the
+    `__node` and `__ns` rules, `-p` and `--params-file` its process was started with."""
+    builder = _split_atlas(PIPES, declared={"namespace": "/ns", "remaps": [["two", "/moved"]]})
+    _rate(builder, "node:~p|pipe|/|0000aaaa")
+    join.join(builder)
+    atlas = builder.atlas
+    assert _edges(atlas, "node:/ns/first", "publishes") == {"topic:/ns/one"}
+    assert _edges(atlas, "node:/second", "publishes") == {"topic:/two"}
+    assert atlas.entities["param:/ns/first|rate"].state == model.ParamState.EFFECTIVE.value
+    assert "param:/second|rate" not in atlas.entities
+    assert schema.validate(builder.build().to_json()) == []
+    before = atlas.canonical_bytes()
+    join.join(builder)
+    assert builder.build().canonical_bytes() == before
+
+
+def test_a_launch_name_renames_only_the_nodes_that_read_global_arguments():
+    third = {"name": "third", "construction": "c", "class": "Pipe", "name_source": "literal"}
+    builder = _split_atlas([*PIPES, third], node_id="node:/pair", name_source="literal")
+    join.join(builder)
+    found = [item for item in builder.atlas.findings if item.rule == "node.ambiguous_identity"]
+    assert len(found) == 1
+    assert "first, third all run as /pair" in found[0].detail
+    builder = _split_atlas(PIPES, node_id="node:/pair", name_source="literal")
+    join.join(builder)
+    assert not [item for item in builder.atlas.findings if item.rule == "node.ambiguous_identity"]
 
 
 @pytest.mark.ros

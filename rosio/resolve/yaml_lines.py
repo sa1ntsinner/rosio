@@ -260,17 +260,49 @@ def _build(
             # Two mappings under one key are one mapping to rcl, the later key winning inside
             # it: measured on jazzy with two `/**` keys in one parameters file.
             lines[path] = key_node.start_mark.line + 1
-            out[text] = _merged(out.get(text), _build(value_node, loader, path, lines))
+            _put(out, text, _build(value_node, loader, path, lines), prefix, lines)
         return out
     return loader.construct_object(node, deep=True)
 
 
-def _merged(held: Any, value: Any) -> Any:
-    if not isinstance(held, dict) or not isinstance(value, dict):
-        return value
-    out = dict(held)
-    for key, item in value.items():
-        out[key] = _merged(out.get(key), item)
+def _put(
+    out: dict[Any, Any],
+    key: str,
+    value: Any,
+    prefix: tuple[str, ...],
+    lines: dict[tuple[str, ...], int],
+) -> None:
+    """Set one key the way rcl reads a key spelled twice, by flat parameter name.
+
+    A mapping after a scalar drops the scalar, while a scalar after a mapping keeps every
+    parameter the mapping set beside it, so those move to dotted keys of their own.
+    """
+    held = out.get(key)
+    if isinstance(held, dict) and isinstance(value, dict):
+        merged = dict(held)
+        for name, item in value.items():
+            _put(merged, name, item, (*prefix, key), lines)
+        out[key] = merged
+        return
+    if isinstance(held, dict):
+        for parts, item in _flat_items(held, ()):
+            nested = (*prefix, key, *parts)
+            dotted = ".".join((key, *parts))
+            if nested in lines:
+                lines[(*prefix, dotted)] = lines[nested]
+            _put(out, dotted, item, prefix, lines)
+    out[key] = value
+
+
+def _flat_items(
+    values: dict[Any, Any], parts: tuple[str, ...]
+) -> list[tuple[tuple[str, ...], Any]]:
+    out: list[tuple[tuple[str, ...], Any]] = []
+    for key, item in values.items():
+        if isinstance(item, dict) and item:
+            out.extend(_flat_items(item, (*parts, key)))
+        else:
+            out.append(((*parts, key), item))
     return out
 
 

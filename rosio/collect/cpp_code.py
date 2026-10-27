@@ -523,6 +523,8 @@ class Unit:
     map_mutations: set[str] = field(default_factory=set)
     auto_declare: bool | str = False
     auto_declare_classes: dict[str, bool | str] = field(default_factory=dict)
+    local_arguments: bool | str = False
+    local_arguments_classes: dict[str, bool | str] = field(default_factory=dict)
 
     @property
     def syntax(self) -> Any:
@@ -2553,10 +2555,11 @@ def _stronger(left: bool | str, right: bool | str) -> bool | str:
 
 
 def _auto_declare(
-    root: Any, src: bytes
+    root: Any, src: bytes, options: frozenset[str] = AUTO_DECLARE_OPTIONS, literal: str = "true"
 ) -> tuple[bool | str, dict[int, bool | str], dict[str, bool | str]]:
     """Which node a `NodeOptions` chain lets take parameters it never declares: True for a
-    literal `true`, `unknown` when the value is not a literal.
+    literal `true`, `unknown` when the value is not a literal. With `use_global_arguments`
+    and the literal `false` it is the node that reads no launch argument instead.
 
     A chain is decided per node construction where the code allows: the construction in
     `main` whose arguments hold it, directly or through the options variable it sets, or the
@@ -2578,13 +2581,13 @@ def _auto_declare(
         if node.type != "call_expression":
             continue
         name, receiver, _template = _call_parts(node, src)
-        if name not in AUTO_DECLARE_OPTIONS or receiver is None:
+        if name not in options or receiver is None:
             continue
         arguments = _args(node)
         flat = _flat(arguments[0], src) if len(arguments) == 1 else ""
-        if flat == "false":
+        if flat in ("true", "false") and flat != literal:
             continue
-        value: bool | str = True if flat == "true" else "unknown"
+        value: bool | str = True if flat == literal else "unknown"
         holders = [
             site
             for _name, _arguments, site in constructions
@@ -2661,13 +2664,27 @@ def _options_variable(node: Any, src: bytes) -> str:
     return _text(base, src) if base is not None and base.type == "identifier" else ""
 
 
+GLOBAL_ARGUMENTS_OPTIONS = frozenset({"use_global_arguments"})
+
+
+def _global_arguments(local: bool | str) -> dict[str, Any]:
+    """`use_global_arguments` as a record states it: False for a literal false only."""
+    return {"use_global_arguments": False if local is True else local} if local else {}
+
+
 def _constructions(unit: Unit, rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    if not unit.auto_declare:
-        return list(rows)
-    return [
-        {**row, "auto_declare": _stronger(row.get("auto_declare", False), unit.auto_declare)}
-        for row in rows
-    ]
+    out = []
+    for row in rows:
+        if unit.auto_declare:
+            row = {
+                **row,
+                "auto_declare": _stronger(row.get("auto_declare", False), unit.auto_declare),
+            }
+        if unit.local_arguments:
+            literal = row.get("use_global_arguments") is False or unit.local_arguments is True
+            row = {**row, "use_global_arguments": False if literal else "unknown"}
+        out.append(row)
+    return out
 
 
 def _declares_with(body: Any, src: bytes, parameter: str) -> bool:
@@ -2728,6 +2745,11 @@ def parse_text(
     reader.walk(root)
     unit.type_aliases = _type_aliases(root, src)
     unit.auto_declare, auto_sites, unit.auto_declare_classes = _auto_declare(root, src)
+    unit.local_arguments, local_sites, unit.local_arguments_classes = (
+        _auto_declare(root, src, GLOBAL_ARGUMENTS_OPTIONS, "false")
+        if b"use_global_arguments" in src
+        else (False, {}, {})
+    )
     # the mutations are a second, whole tree walk that only a map default ever asks for
     unit.string_maps = _string_map_records(root, src, mutations_wanted=False)[0]
     for name, values, site in sites:
@@ -2735,6 +2757,7 @@ def parse_text(
         row = {"class": name, "owner_symbol": "main", "line_hint": _line(site)}
         if auto_sites.get(site.start_byte):
             row["auto_declare"] = auto_sites[site.start_byte]
+        row.update(_global_arguments(local_sites.get(site.start_byte, False)))
         if site.type == "call_expression" and _call_parts(site, src)[0] not in {
             "make_shared",
             "make_unique",
@@ -4393,6 +4416,14 @@ def file_report(
         )
         if auto:
             row["auto_declare"] = auto
+        row.update(
+            _global_arguments(
+                _stronger(
+                    unit.local_arguments,
+                    unit.local_arguments_classes.get(item.qualname.rpartition("::")[2], False),
+                )
+            )
+        )
         if not item.stated_name:
             row["unresolved_ref"] = f"node_name:{item.name_expr}"
             unresolved.append(

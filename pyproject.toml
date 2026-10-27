@@ -97,4 +97,5 @@ markers = [
   "ros: needs a sourced ROS 2 environment",
   "cpp: needs the cpp extra (tree-sitter)",
   "slow: takes more than a second",
+  "join_refused: expects the extract to record a refused join pass",
 ]

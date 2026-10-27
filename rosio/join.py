@@ -846,7 +846,7 @@ def join(builder: model.AtlasBuilder) -> JoinReport:
     for item in instances(atlas):
         found, via = index.of(item)
         if found:
-            rows.append((item, found, via))
+            rows.append((_own_arguments(atlas, item, found), found, via))
     report.instances = len(rows)
     report.executables_bound = len({_exe_id(item) for item, _, via in rows if via == "executable"})
     report.components_joined = len(
@@ -1425,10 +1425,23 @@ def auto_declare_of(name: str, found: tuple[Carrier, ...]) -> bool | str | None:
     the instance pick its classes when the code names several, and every row counts when it
     names none of them.
     """
+    auto = {row.get("auto_declare") for row in _option_rows(name, found) if row.get("auto_declare")}
+    if not auto:
+        return None
+    return True if True in auto else "unknown"
+
+
+def ignores_global_arguments(name: str, found: tuple[Carrier, ...]) -> bool:
+    """Whether the node is built with `use_global_arguments(false)`, a literal, so it takes no
+    launch name, namespace, remap or parameter file."""
+    return any(row.get("use_global_arguments") is False for row in _option_rows(name, found))
+
+
+def _option_rows(name: str, found: tuple[Carrier, ...]) -> list[dict[str, Any]]:
     nodes = [row for carrier in found for row in carrier.nodes]
     mine = [row for row in nodes if name and row.get("name") == name] or nodes
     classes = {str(row.get("class") or "").rpartition("::")[2] for row in mine}
-    rows = [
+    return [
         *mine,
         *(
             row
@@ -1437,10 +1450,6 @@ def auto_declare_of(name: str, found: tuple[Carrier, ...]) -> bool | str | None:
             if not mine or str(row.get("class") or "").rpartition("::")[2] in classes
         ),
     ]
-    auto = {row.get("auto_declare") for row in rows if row.get("auto_declare")}
-    if not auto:
-        return None
-    return True if True in auto else "unknown"
 
 
 def _code_names(found: tuple[Carrier, ...]) -> list[str]:
@@ -1487,7 +1496,7 @@ def _supersede(
 ) -> None:
     atlas = builder.atlas
     rows: list[tuple[Instance, list[str], str]] = []
-    splits: dict[str, tuple[Instance, dict[str, dict[str, Any]]]] = {}
+    splits: dict[str, tuple[Instance, dict[str, dict[str, Any]], tuple[Carrier, ...]]] = {}
     for item in instances(atlas):
         found, _ = index.of(item)
         if not found or item.node_id not in atlas.entities:
@@ -1497,10 +1506,11 @@ def _supersede(
         if nodes:
             if atlas.entities[item.node_id].attrs.get("name_from_code"):
                 continue
+            taking = sorted(name for name in nodes if not ignores_global_arguments(name, found))
             if item.name_source in UNNAMED:
-                splits.setdefault(item.node_id, (item, nodes))
-            else:
-                _collision(builder, item, sorted(nodes), report)
+                splits.setdefault(item.node_id, (item, nodes, found))
+            elif len(taking) > 1:
+                _collision(builder, item, taking, report)
             continue
         contexts = {
             row["construction"]
@@ -1528,8 +1538,8 @@ def _supersede(
         new_id = _target_id(item, names[0])
         if new_id and new_id != item.node_id:
             rows.append((item, names, new_id))
-    for item, nodes in splits.values():
-        _split(builder, item, nodes, report)
+    for item, nodes, found in splits.values():
+        _split(builder, item, nodes, found, report)
     # One profile launching this executable twice states two runtime nodes for one code name,
     # so neither of them may take it.
     crowded = {
@@ -1565,6 +1575,17 @@ def _supersede(
                 remaining.append(entry)
         atlas.unresolved = remaining
         report.superseded += 1
+
+
+def _own_arguments(atlas: model.Atlas, item: Instance, found: tuple[Carrier, ...]) -> Instance:
+    """A node a split made that reads no global argument binds without the site's remaps and
+    namespace."""
+    entity = atlas.entities.get(item.node_id)
+    name = str(entity.attrs.get("name_from_code") or "") if entity is not None else ""
+    fqn = ids.parse_node(item.node_id).fqn
+    if not fqn or name not in _split_names(found) or not ignores_global_arguments(name, found):
+        return item
+    return replace(item, remaps=(), namespace=ids.split_ros_name(fqn)[0])
 
 
 UNNAMED = (model.NameSource.EXECUTABLE_DEFAULT.value, model.NameSource.UNKNOWN.value)
@@ -1607,6 +1628,7 @@ def _split(
     builder: model.AtlasBuilder,
     item: Instance,
     nodes: dict[str, dict[str, Any]],
+    found: tuple[Carrier, ...],
     report: JoinReport,
 ) -> None:
     """One process a launch site starts unnamed, whose source names each node it runs.
@@ -1615,12 +1637,20 @@ def _split(
     one node per name, in the namespace the site gives unless the source states one. Each
     takes the launch site, its arguments, its remaps and the parameter files, which reach
     every node of the process, and the bind keeps for each the records of its own
-    construction.
+    construction. A node built with `use_global_arguments(false)` reads none of those
+    arguments, so it keeps its own namespace and no parameter the site hands it.
     """
     atlas = builder.atlas
     names = sorted(nodes)
+    local = {name for name in names if ignores_global_arguments(name, found)}
     targets = {
-        name: _target_id(_placed(item, _row_namespace(row)), name) for name, row in nodes.items()
+        name: _target_id(
+            replace(item, namespace=_row_namespace(row) or "/")
+            if name in local
+            else _placed(item, _row_namespace(row)),
+            name,
+        )
+        for name, row in nodes.items()
     }
     profiles = {fact.profile for fact in atlas.entities[item.node_id].facts}
     held = [atlas.entities.get(target) for target in targets.values()]
@@ -1642,6 +1672,8 @@ def _split(
         node.name_source = model.NameSource.LITERAL.value
         node.attrs.setdefault("name_from_code", name)
         _settle_params(builder, targets[name])
+        if name in local:
+            _drop_launch_params(builder, targets[name])
     remaining = []
     for entry in atlas.unresolved:
         if (
@@ -1720,6 +1752,38 @@ def _settle_params(builder: model.AtlasBuilder, node_id: str) -> None:
             entity.state = model.ParamState.EFFECTIVE.value
         if not entity.candidates and not entity.facts:
             _drop(builder, entity.id)
+
+
+LAUNCH_MECHANISMS = YAML_MECHANISMS | {
+    model.Mechanism.LAUNCH_INLINE_DICT.value,
+    model.Mechanism.ROS_ARGS_P.value,
+    model.Mechanism.PYTHON_OVERRIDE.value,
+}
+"""The candidates a process receives as its global `--ros-args`."""
+
+
+def _drop_launch_params(builder: model.AtlasBuilder, node_id: str) -> None:
+    """The candidates a split copied from the launch site, off a node that reads none of them."""
+    atlas = builder.atlas
+    for entity in list(atlas.by_kind(model.NodeKind.PARAM.value)):
+        if ids.parse_param(entity.id).owner != node_id:
+            continue
+        kept = [row for row in entity.candidates if row.mechanism not in LAUNCH_MECHANISMS]
+        if len(kept) == len(entity.candidates):
+            continue
+        gone = {row.profile for row in entity.candidates} - {row.profile for row in kept}
+        entity.facts = [
+            fact for fact in entity.facts if not (fact.layer == DECLARED and fact.profile in gone)
+        ]
+        rows: list[model.Candidate] = []
+        for profile in sorted({row.profile for row in kept}):
+            chain = [row for row in kept if row.profile == profile]
+            rows.extend(_ranked(chain, wins=any(row.wins for row in chain)))
+        entity.candidates = rows
+        if not rows and not entity.facts:
+            _drop(builder, entity.id)
+        elif not any(row.wins for row in rows):
+            entity.state = model.ParamState.OTHER.value
 
 
 def _yield_to_named(builder: model.AtlasBuilder, old_id: str, new_id: str) -> None:

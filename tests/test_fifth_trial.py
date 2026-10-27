@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from rosio import extract, schema
 from rosio.config import Config, Entrypoint, ProfileSpec, RootSpec
 from rosio.workspace import Workspace
@@ -74,6 +76,7 @@ def test_two_sites_of_one_symbol_fold_into_one_edge_and_the_extract_finishes(tmp
     assert again.canonical_bytes() == atlas.canonical_bytes()
 
 
+@pytest.mark.join_refused
 def test_a_join_that_cannot_place_a_site_is_a_refused_pass_and_not_an_empty_run(
     tmp_path: Path, monkeypatch
 ):
@@ -89,6 +92,20 @@ def test_a_join_that_cannot_place_a_site_is_a_refused_pass_and_not_an_empty_run(
     assert extract.model.completeness(atlas)["refused_collectors"] == ["join"]
     assert "extract.pass_incomplete" in {finding.rule for finding in atlas.findings}
     assert (tmp_path / "out" / "atlas.json").exists()
+
+
+def test_a_strict_run_meets_the_join_error_instead_of_a_refused_pass(tmp_path: Path, monkeypatch):
+    from rosio import join
+    from rosio.errors import ContractError
+
+    def refuse(builder):
+        raise ContractError("a site the join cannot place")
+
+    monkeypatch.setattr(join, "join", refuse)
+    monkeypatch.setenv(extract.STRICT_JOIN_ENV, "1")
+    config = cpp_workspace(tmp_path, TWO_SITES)
+    with pytest.raises(ContractError, match="cannot place"):
+        extract.run(config, Workspace.discover(config.roots))
 
 
 FILTER = """#include <rclcpp/rclcpp.hpp>

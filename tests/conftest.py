@@ -32,6 +32,15 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
             item.add_marker(skip_ros)
 
 
+@pytest.fixture(autouse=True)
+def strict_join(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A join that raises fails the test, unless the test expects the refused join pass."""
+    if request.node.get_closest_marker("join_refused") is None:
+        monkeypatch.setenv("ROSIO_STRICT_JOIN", "1")
+    else:
+        monkeypatch.delenv("ROSIO_STRICT_JOIN", raising=False)
+
+
 @pytest.fixture(scope="session")
 def fixtures_dir() -> Path:
     return FIXTURES

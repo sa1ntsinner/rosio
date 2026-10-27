@@ -145,3 +145,26 @@ def test_a_syntax_error_names_its_line_and_column_and_not_the_parser_input():
     assert str(caught.value) == (
         "teleop.yaml is not readable as yaml: line 3, column 5: mapping values are not allowed here"
     )
+
+
+def test_a_key_spelled_twice_with_two_shapes_reads_by_flat_name_as_rcl_does():
+    """Measured on jazzy with two `/**` keys in one file: `a: 1` then `a: {b: 2}` starts the
+    node with `a.b` alone, and `c: {d: 5}` then `c: 7` starts it with both `c` and `c.d`."""
+    doc = yaml_lines.load(
+        "/**:\n"
+        "  ros__parameters:\n"
+        "    a: 1\n"
+        "    c:\n"
+        "      d: 5\n"
+        "/**:\n"
+        "  ros__parameters:\n"
+        "    a:\n"
+        "      b: 2\n"
+        "    c: 7\n"
+    )
+    (block,) = yaml_lines.param_blocks(doc)
+    found = {
+        leaf.name: (leaf.value, doc.line((*block.key_path, *leaf.key_path)))
+        for leaf in yaml_lines.leaves(block.values)
+    }
+    assert found == {"a.b": (2, 9), "c": (7, 10), "c.d": (5, 5)}

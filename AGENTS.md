@@ -112,10 +112,10 @@ record and is not read.
 
 | key | one row |
 | --- | --- |
-| `nodes` | `{name, name_source, namespace, namespace_source, form, symbol, class, auto_declare}` |
+| `nodes` | `{name, name_source, namespace, namespace_source, form, symbol, class, auto_declare, use_global_arguments}` |
 | `classes` | `{name}`, a qualified C++ class or struct declaration, including classes with no ROS records |
 | `class_templates` | `{name, definitions, specialized}`, the count of class template bodies in one file and whether a class or member specialization exists; explicit instantiations and forward declarations contribute no definition |
-| `constructions` | `{class, owner_symbol, line_hint, definition_file, auto_declare}`, the literal type constructed in `main`, as written, with an optional file id for a unique class in an included header of the same package |
+| `constructions` | `{class, owner_symbol, line_hint, definition_file, auto_declare, use_global_arguments}`, the literal type constructed in `main`, as written, with an optional file id for a unique class in an included header of the same package |
 | `type_aliases` | `{name, target, namespace, line_hint}`, a namespace scope using or typedef alias with its qualified name and target spelling |
 | `endpoints` | `{kind, raw, name, name_state, type, type_id, qos, owner_symbol, via_known_wrapper, condition, guard_parameters, line_hint}` |
 | `parameters` | `{name, type, default, has_default, default_state, reads, owner_symbol}` |
@@ -141,6 +141,14 @@ record and is not read.
   base initializer takes it. Only a call that cannot be traced to one construction marks every
   row of the file, and the join reads the construction rows of the node's own classes, so a
   helper node built to take any parameter speaks for itself alone.
+* `use_global_arguments` on a C++ `nodes` or `constructions` row is `false` when the node is
+  built with `NodeOptions().use_global_arguments(false)`, a literal, and `unknown` when the
+  value is not a literal, traced per construction the way `auto_declare` is. Such a node reads
+  none of the arguments its process was started with: measured on jazzy with an rclpy node,
+  which reads the same rcl arguments, it ignored the `__node` and `__ns` rules, `-p` and
+  `--params-file`. A launch name over a process that runs
+  several nodes renames only the others, so the collision of section 3.5 leaves it out, and a
+  split gives it its own namespace, no remap and no parameter the launch site hands the process.
 * `parameters` and `plugin_parameters` are two record kinds and not one list: a row carrying
   a base class or a suffix is a suffix only declaration bound to a plugin and never becomes a
   node parameter. The join reads both at one call site, `Carrier.declarations`, because the
@@ -568,7 +576,9 @@ with per candidate provenance.
   the source names that node, lets its first row win, and drops from a chain copied off the
   process every row of a block keyed on another name. Two mappings under one key in one
   parameters file are one mapping, the later key winning inside it, which is what rcl does:
-  measured on jazzy with two `/**` keys in one file.
+  measured on jazzy with two `/**` keys in one file. The same measurement with two shapes
+  under one key reads by flat parameter name: `a: 1` then `a: {b: 2}` starts the node with
+  `a.b` alone, and `c: {d: 5}` then `c: 7` starts it with both `c` and `c.d`.
 * A key the node's bound code does not declare is not called undeclared when the package
   declares it in code the join bound to no node, such as a helper class handed the node.
 
@@ -745,7 +755,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.22`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.23`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -883,6 +893,9 @@ What was added, in the order it arrived:
   is the build of the src package, and `build.underlay` says so instead of calling the
   package unbuilt; `symlinked` means a `--symlink-install` build links files back to src, so
   an edit to those files takes effect without a build.
+
+* in `1.23`, `use_global_arguments` on C++ `nodes` and `constructions` record rows, `false`
+  for a node built to read no global argument and `unknown` when the value is not a literal.
 
 One observed key was renamed in `1.17` without a major bump. The process table wrote the
 whole command line of a node under `argv`, the key under which the declared layer states only
@@ -1087,7 +1100,7 @@ there: a load into an existing container beside a new container, under a conditi
 false, minted a second node that published what the first did. No id form moved, so no
 stored id or waiver stopped matching; the endpoints, parameters and rates of such stacks did.
 
-A reader pinned to `1.0` still loads a `1.22` file: `Atlas.from_json` compares the major
+A reader pinned to `1.0` still loads a `1.23` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

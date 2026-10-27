@@ -119,6 +119,41 @@ def test_a_node_type_inside_a_class_or_named_at_run_time_states_no_literal():
     ]
 
 
+@pytest.mark.parametrize(
+    ("options", "stated"),
+    [
+        ("rclcpp::NodeOptions().use_global_arguments(false)", False),
+        ("rclcpp::NodeOptions().use_global_arguments(flag)", "unknown"),
+        ("rclcpp::NodeOptions().use_global_arguments(true)", None),
+        ("options", None),
+    ],
+)
+def test_a_node_that_reads_no_global_argument_says_so(options, stated):
+    unit = cpp.parse_text(
+        f'Stop::Stop(bool flag) : rclcpp::Node("safety_stop", {options}) {{}}',
+        path="stop.cpp",
+    )
+    cpp.analyse([unit])
+    (row,) = cpp.file_report(unit)["nodes"]
+    assert row.get("use_global_arguments") == stated
+
+
+def test_global_arguments_are_decided_per_construction_in_main():
+    unit = cpp.parse_text(
+        "int main(int argc, char ** argv) {\n"
+        "  auto options = rclcpp::NodeOptions();\n"
+        "  options.use_global_arguments(false);\n"
+        "  auto own = std::make_shared<Own>(options);\n"
+        "  auto shared = std::make_shared<Shared>();\n"
+        "}\n",
+        path="main.cpp",
+    )
+    cpp.analyse([unit])
+    report = cpp.file_report(unit)
+    rows = {row["class"]: row.get("use_global_arguments") for row in report["constructions"]}
+    assert rows == {"Own": False, "Shared": None}
+
+
 def test_a_main_that_builds_the_options_marks_its_construction():
     unit = cpp.parse_text(
         "int main(int argc, char ** argv) {\n"
