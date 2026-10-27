@@ -370,6 +370,7 @@ EDGE_DOMAINS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     ),
     EdgeKind.BROADCASTS_TF.value: (frozenset({_N.NODE.value}), frozenset({_N.FRAME.value})),
     EdgeKind.LISTENS_TF.value: (frozenset({_N.NODE.value}), frozenset({_N.FRAME.value})),
+    # child to parent, the same in every layer, so one pair is one (src, dst) everywhere
     EdgeKind.TF_PARENT.value: (frozenset({_N.FRAME.value}), frozenset({_N.FRAME.value})),
     EdgeKind.PROVIDES_PLUGIN.value: (frozenset({_N.PKG.value}), frozenset({_N.PLUGIN.value})),
     EdgeKind.LOADS_PLUGIN.value: (

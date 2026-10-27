@@ -444,6 +444,11 @@ Notes on specific kinds:
 * `tf_parent` must record which model or profile produced the geometry in its key and its
   values. A single valued origin publishes a wrong number as fact for two profiles out of
   three.
+* `tf_parent` runs from the child to the parent in every layer: a urdf joint, a broadcast
+  the code sends, a transform the probe observed. The edge says the parent of `src` is
+  `dst`, so a tree holds one parent per child, and one pair stated by two layers is one
+  source and one destination with a key per site: the layers meet on the pair and are
+  compared there. A reader never reads the direction off the source of a fact.
 
 ## 6. Facts, and how disagreement is represented
 
@@ -1340,6 +1345,26 @@ python node is its script, a Zenoh router process is never a profile command, an
 probe` counts the frames observed `tf_parent` edges name. `build.underlay` titles say the
 count is of the packages the walk looked up. No release had shipped, so no stored id or waiver
 existed.
+
+Later inside `1.28` the meaning of one edge direction changed with no new key, which would be
+a major bump once a release has shipped. A `tf_parent` edge the C++ collector or the join
+writes from a broadcast ran from the parent to the child while a urdf joint and an observed
+transform ran from the child to the parent, so one pair stated by two layers was two pairs and
+no layer could be compared with another. Every `tf_parent` edge now runs from the child to the
+parent (section 5), which moved the id of every coded `tf_parent` edge, and a reader takes the
+child from `src` instead of from the source of the fact. A xacro model's joints count as model
+joints for `frame.parent_differs` and the published frame set, where only a `.urdf` did.
+`frame.not_in_urdf` reports, at `warn`, a frame the code broadcasts by a literal name under a
+link of a model a profile loads when no model declares it and that model places a child of the
+same link under a close name, naming both frames, both lines and the profiles. `rosio path`
+between two frames walks the transform tree first and states `tree_route`. The wrapper table
+holds `nav2::TransformBroadcaster`, `nav2::StaticTransformBroadcaster` and
+`nav2::TransformListener`, also when nav2's `create_*` factories build them. A C++ string local
+that `append` extends is extended the way `+=` extends it, and a local whose last value was
+written inside a branch the read is outside of is a blind spot spelled by its name rather than
+the last literal, so a name two branches assign declares neither. A name built by extending a
+literal states the literal in its blind spot expression (`"sensor." + id`), which moved those
+entry ids. No release had shipped, so no stored id or waiver existed.
 
 A reader pinned to `1.0` still loads a `1.28` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re

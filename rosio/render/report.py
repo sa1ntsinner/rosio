@@ -20,10 +20,6 @@ from rosio.render import clip, heading, joined, plural, rendered_from, share, ta
 
 ENDPOINT_KINDS = ("publishes", "subscribes", "serves", "calls")
 YAML_MECHANISMS = ("yaml_base", "yaml_overlay_merge", "yaml_wildcard")
-PARENT_FIRST = ("cpp_broadcast", "py_broadcast")
-"""tf_parent sources whose edge runs from the parent to the child. The collectors do not
-share one direction, so it is read from the fact that states the source, the same way
-`rosio.drift.frames` reads it, and never assumed from the edge."""
 TOP = 10
 EXAMPLES = 3
 
@@ -480,23 +476,12 @@ _STATE_TEXT = {
 # frames
 
 
-def _link(edge: Edge) -> tuple[str, str]:
-    """The child and the parent one tf_parent edge states, in that order."""
-    for fact in sorted(edge.facts, key=lambda row: row.sort_key()):
-        source = str(fact.values.get("strategy") or fact.values.get("source") or "")
-        if source in PARENT_FIRST:
-            return edge.dst, edge.src
-        if source:
-            break
-    return edge.src, edge.dst
-
-
 def _frames(atlas: Atlas) -> list[str]:
     edges = _edges_of_kind(atlas, "tf_parent")
     parents: dict[str, set[str]] = {}
     children: dict[str, set[str]] = {}
     for edge in edges:
-        child, parent = _link(edge)
+        child, parent = edge.src, edge.dst
         parents.setdefault(child, set()).add(parent)
         children.setdefault(parent, set()).add(child)
     frames = atlas.by_kind("frame")

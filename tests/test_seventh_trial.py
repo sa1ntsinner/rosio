@@ -684,3 +684,254 @@ def test_a_remap_a_helper_somewhere_could_match_is_not_dead(tmp_path: Path):
     )
     atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
     assert findings(atlas, "remap.matches_nothing") == []
+
+
+# ---------------------------------------------------------------------------
+# N4, one direction for tf_parent, and a frame the code and the model name two ways
+
+MODEL = """<?xml version="1.0"?>
+<robot name="bot">
+  <link name="base_link"/>
+  <link name="CHILD"/>
+  <joint name="laser_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="CHILD"/>
+    <origin xyz="0.12 0 0.18" rpy="0 0 0"/>
+  </joint>
+</robot>
+"""
+
+LIDAR = """#include <rclcpp/rclcpp.hpp>
+#include "tf2_ros/static_transform_broadcaster.h"
+class Lidar : public rclcpp::Node {
+public:
+  Lidar() : Node("lidar") {
+    br_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+    geometry_msgs::msg::TransformStamped t;
+    t.header.frame_id = "base_link";
+    t.child_frame_id = "CHILD";
+    br_->sendTransform(t);
+  }
+  std::shared_ptr<tf2_ros::StaticTransformBroadcaster> br_;
+};
+int main(int argc, char ** argv) {
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<Lidar>());
+}
+"""
+
+BOT_LAUNCH = launch(
+    'Node(package="robot_state_publisher", executable="robot_state_publisher", '
+    "parameters=[{'robot_description': open(os.path.join(os.path.dirname(__file__), "
+    "'bot.urdf')).read()}])",
+    'Node(package="p", executable="lidar", name="lidar")',
+    imports="import os\n",
+)
+
+
+def _bot(tmp_path: Path, model_child: str, code_child: str) -> model.Atlas:
+    package(
+        tmp_path,
+        "p",
+        {
+            "CMakeLists.txt": "project(p)\nadd_executable(lidar src/lidar.cpp)\n",
+            "src/lidar.cpp": LIDAR.replace("CHILD", code_child),
+            "bot.urdf": MODEL.replace("CHILD", model_child),
+            "run.launch.py": BOT_LAUNCH,
+        },
+    )
+    return run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
+
+
+@pytest.mark.cpp
+def test_one_pair_two_layers_state_runs_from_the_child_to_the_parent(tmp_path: Path):
+    atlas = _bot(tmp_path, "laser_link", "laser_link")
+    pairs = {
+        (edge.src, edge.dst, fact.layer)
+        for edge in atlas.edges.values()
+        if edge.kind == model.EdgeKind.TF_PARENT.value
+        for fact in edge.facts
+    }
+    assert pairs == {
+        ("frame:laser_link", "frame:base_link", "declared"),
+        ("frame:laser_link", "frame:base_link", "coded"),
+    }
+
+
+def _renamed(atlas: model.Atlas) -> list[model.Finding]:
+    return [
+        item for item in findings(atlas, "frame.not_in_urdf") if item.subject == "frame:laser_frame"
+    ]
+
+
+@pytest.mark.cpp
+def test_a_frame_the_code_broadcasts_under_a_close_model_name_is_reported(tmp_path: Path):
+    """Trial 7 D4: the lidar broadcasts base_link to laser_frame and the model calls the same
+    part laser_link, which no rule said because a broadcast frame counts as tied."""
+    found = _renamed(_bot(tmp_path, "laser_link", "laser_frame"))
+    assert len(found) == 1
+    item = found[0]
+    assert item.severity == "warn"
+    assert item.profiles == ["profile:p"]
+    assert "laser_link" in item.say and "p/src/lidar.cpp:" in item.say
+    assert "p/bot.urdf:" in item.say and "profile p" in item.say
+    assert sorted(row.file for row in item.where) == ["file:p|bot.urdf", "file:p|src/lidar.cpp"]
+
+
+@pytest.mark.cpp
+def test_a_frame_the_code_broadcasts_beside_an_unrelated_link_is_not(tmp_path: Path):
+    assert _renamed(_bot(tmp_path, "camera_mount", "laser_frame")) == []
+
+
+def test_a_path_between_two_frames_walks_the_tree_the_transform_tool_walks():
+    from rosio.serve import tools
+
+    builder = model.AtlasBuilder()
+    builder.declare_layer("declared", present=True)
+    builder.declare_layer("coded", present=True)
+    urdf = ids.build_file("p", "bot.urdf")
+    builder.node(urdf)
+    node = ids.build_node("/odometry")
+    builder.node(node, name_source="literal")
+    for frame in ("laser", "base_link", "odom"):
+        builder.node(ids.build_frame(frame))
+    builder.edge(
+        "tf_parent",
+        ids.build_frame("laser"),
+        ids.build_frame("base_link"),
+        key=ids.edge_key(model=urdf, joint="laser_joint"),
+        layer="declared",
+        values={
+            "model": urdf,
+            "joint": "laser_joint",
+            "joint_type": "fixed",
+            "strategy": "urdf",
+            "xyz": [0.1, 0.0, 0.2],
+            "rpy": [0.0, 0.0, 0.0],
+        },
+        confidence="certain",
+    )
+    # one node broadcasting both frames is a two hop data route between them
+    for frame, parent in (("base_link", "odom"), ("laser", "base_link")):
+        builder.edge(
+            "broadcasts_tf",
+            node,
+            ids.build_frame(frame),
+            key=ids.edge_key(symbol="odometry", child=frame),
+            layer="coded",
+            values={"parent": parent, "child": frame, "static": False},
+        )
+    builder.edge(
+        "tf_parent",
+        ids.build_frame("base_link"),
+        ids.build_frame("odom"),
+        key=ids.edge_key(symbol="odometry"),
+        layer="coded",
+        values={"source": "cpp_broadcast", "node": node},
+    )
+    atlas = builder.build()
+    answer = query.path(atlas, "frame:laser", "frame:odom")
+    assert answer.data["tree_route"] is True
+    assert [(hop["kind"], hop["to"], hop["forward"]) for hop in answer.data["hops"]] == [
+        ("tf_parent", "frame:base_link", True),
+        ("tf_parent", "frame:odom", True),
+    ]
+    text = tools.transform(atlas, "laser", "odom")
+    assert "joint laser_joint" in text and "base_link -> laser" in text
+
+
+NAV2_BROADCASTER = """#include <rclcpp/rclcpp.hpp>
+#include "nav2_ros_common/tf2_factories.hpp"
+class Sim : public rclcpp::Node {
+public:
+  Sim() : Node("sim") {
+    tf_broadcaster_ = nav2::create_transform_broadcaster(this);
+    tf_listener_ = nav2::create_transform_listener(*buffer_, this);
+  }
+  void tick() {
+    geometry_msgs::msg::TransformStamped t;
+    t.header.frame_id = "odom";
+    t.child_frame_id = "base_footprint";
+    tf_broadcaster_->sendTransform(t);
+  }
+  nav2::TransformBroadcaster::SharedPtr tf_broadcaster_;
+  nav2::TransformListener::SharedPtr tf_listener_;
+};
+int main(int argc, char ** argv) {
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<Sim>());
+}
+"""
+
+
+@pytest.mark.cpp
+def test_a_nav2_transform_broadcaster_broadcasts_and_publishes_tf(tmp_path: Path):
+    """The nav2 loopback simulator broadcasts through nav2::TransformBroadcaster, which the
+    reader did not know, so its transforms carried no broadcaster and no /tf publisher."""
+    package(
+        tmp_path,
+        "p",
+        {
+            "CMakeLists.txt": "project(p)\nadd_executable(sim sim.cpp)\n",
+            "sim.cpp": NAV2_BROADCASTER,
+            "run.launch.py": launch('Node(package="p", executable="sim", name="sim")'),
+        },
+    )
+    atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
+    edges = {(edge.kind, edge.dst): edge for edge in atlas.out_edges("node:/sim")}
+    assert ("publishes", "topic:/tf") in edges
+    assert ("subscribes", "topic:/tf_static") in edges
+    broadcast = edges[("broadcasts_tf", "frame:base_footprint")]
+    assert broadcast.facts[0].values["broadcaster"] == "nav2::TransformBroadcaster"
+
+
+# ---------------------------------------------------------------------------
+# r12fix leftovers, the names a string local builds
+
+APPENDED = """class N : public rclcpp::Node {
+  N() : Node("n") {
+    std::string key = "sensor.";
+    key.append(id_);
+    declare_parameter(key, 1.0);
+    std::string known = "lidar.";
+    known.append("rate");
+    declare_parameter(known, 2.0);
+  }
+};
+"""
+
+BRANCHED_LITERALS = """class N : public rclcpp::Node {
+  N() : Node("n") {
+    std::string name;
+    if (front_) { name = "alpha"; } else { name = "beta"; }
+    declare_parameter(name, 1.0);
+    std::string same = "gamma";
+    declare_parameter(same, 2.0);
+    same = "delta";
+    declare_parameter(same, 3.0);
+  }
+};
+"""
+
+
+def _names(text: str) -> tuple[list[str], list[str]]:
+    from rosio.collect import cpp_code as cpp
+
+    unit = cpp.parse_text(text, path="n.cpp")
+    cpp.analyse([unit])
+    report = cpp.file_report(unit)
+    declared = sorted(row["name"] for row in report.get("parameters", []))
+    blind = [row["expr"] for row in report.get("unresolved", []) if row["want"] == "param_name"]
+    return declared, blind
+
+
+@pytest.mark.cpp
+def test_an_appended_name_is_the_built_name_or_a_blind_spot():
+    assert _names(APPENDED) == (["lidar.rate"], ['"sensor." + id_'])
+
+
+@pytest.mark.cpp
+def test_a_name_two_branches_assign_literals_is_neither_literal():
+    """Section 7: a condition choosing between names could build any of them, so the
+    declaration is a blind spot and declares neither. A straight reassignment is read in order."""
+    assert _names(BRANCHED_LITERALS) == (["delta", "gamma"], ["name"])

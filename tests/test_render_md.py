@@ -150,11 +150,11 @@ def build() -> model.Atlas:
         values={"strategy": "urdf", "joint": "camera_joint", "xyz": [3.61, 0.0, 0.36]},
         confidence="certain",
     )
-    # The code side states the pair the other way round, parent first.
+    # A code broadcast states the pair child first, as a urdf joint does.
     builder.edge(
         "tf_parent",
-        ODOM,
         BASE_LINK,
+        ODOM,
         key=ids.edge_key(symbol=SYM, frames="odom>base_link"),
         layer="coded",
         values={"source": "py_broadcast", "symbol": SYM, "static": False},
@@ -322,9 +322,8 @@ def test_a_topic_counts_the_nodes_on_it_and_a_node_counts_its_own_call_sites(atl
     assert "| /cmd_vel_safe | 1 | 1 |" in section
 
 
-def test_the_frame_tree_reads_the_direction_each_transform_states(atlas):
-    """A urdf joint states the child first and a code broadcast states the parent first.
-    Assuming the edge direction hangs odom under base_link, which is the tree upside down."""
+def test_the_frame_tree_hangs_every_child_under_the_end_of_its_edge(atlas):
+    """A urdf joint and a code broadcast both state the child first, so one tree holds both."""
     text = render_report(atlas)
 
     tree = text[text.index("## Frames") : text.index("## Plugins")]

@@ -790,8 +790,14 @@ def _tf_builder(namespace: str = "/", node_id: str = "node:/io_bridge") -> model
     return other
 
 
-def _tf_edge(atlas: model.Atlas, kind: str, dst: str):
-    return next(edge for edge in atlas.in_edges(dst) if edge.kind == kind)
+def _tf_edges(atlas: model.Atlas, frame: str) -> list[model.Edge]:
+    """The broadcasts into a frame and the tf_parent edges out of it, which is where a child
+    states its parent."""
+    return atlas.in_edges(frame) + atlas.out_edges(frame)
+
+
+def _tf_edge(atlas: model.Atlas, kind: str, frame: str):
+    return next(edge for edge in _tf_edges(atlas, frame) if edge.kind == kind)
 
 
 def test_a_broadcast_becomes_a_node_to_frame_edge():
@@ -810,7 +816,7 @@ def test_a_broadcast_also_states_the_parent_of_the_child():
     other = _tf_builder()
     join.join(other)
     edge = _tf_edge(other.atlas, model.EdgeKind.TF_PARENT.value, "frame:base_footprint")
-    assert edge.src == "frame:odom"
+    assert (edge.src, edge.dst) == ("frame:base_footprint", "frame:odom")
     assert edge.fact(join.CODED, REAL).values["source"] == "coded_broadcast"
     assert edge.fact(join.CODED, REAL).values["node"] == "node:/io_bridge"
     assert edge.profiles == [REAL]
@@ -1356,14 +1362,14 @@ def _python_file(builder: model.AtlasBuilder) -> None:
 
 
 def test_the_tf_parent_edge_names_the_language_of_the_broadcast():
-    """The frame rules read the direction of the pair off this value, so it names the
-    statement the geometry came from and not the pass that wrote the edge."""
+    """It names the statement the geometry came from and not the pass that wrote the edge,
+    and the edge runs from the child to the parent like a urdf joint."""
     other = _tf_builder()
     _python_file(other)
     join.join(other)
     edge = _tf_edge(other.atlas, model.EdgeKind.TF_PARENT.value, "frame:base_footprint")
     values = edge.fact(join.CODED, REAL).values
-    assert edge.src == "frame:odom"
+    assert (edge.src, edge.dst) == ("frame:base_footprint", "frame:odom")
     assert values["source"] == "py_broadcast"
     assert values["symbol"] == OWNER
     assert edge.profiles == [REAL]
@@ -1384,7 +1390,7 @@ def test_one_frame_pair_carries_one_coded_edge_per_profile():
     join.join(other)
     edges = [
         edge
-        for edge in other.atlas.in_edges("frame:base_footprint")
+        for edge in other.atlas.out_edges("frame:base_footprint")
         if edge.kind == model.EdgeKind.TF_PARENT.value
     ]
     assert len(edges) == 2
@@ -1957,7 +1963,7 @@ def test_a_broadcast_whose_parameter_guard_is_false_is_not_bound():
     join.join(other)
     edges = [
         edge
-        for edge in other.atlas.in_edges("frame:base_footprint")
+        for edge in _tf_edges(other.atlas, "frame:base_footprint")
         if edge.kind in (model.EdgeKind.BROADCASTS_TF.value, model.EdgeKind.TF_PARENT.value)
     ]
     assert len(edges) == 2

@@ -1229,7 +1229,8 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
     by a subscribes edge read backwards, and a reader wants that path. The direction of each
     hop is stated, so nothing here claims a flow that does not exist. The walk keeps to data
     edges first, and a route through lifecycle management, launch or parameters is shown only
-    when no data route exists, and says so.
+    when no data route exists, and says so. Between two frames the transform tree comes
+    first, the chain a lookup and the `transform` tool walk.
     """
     start, start_matches, start_how = _one(atlas, source)
     if start is None:
@@ -1248,8 +1249,14 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
             data={"from": start, "to": end, "hops": [], "found": True, "data_route": True},
             lines=[f"{label(start)} is the entity asked for on both ends, no hops"],
         )
-    hops = _shortest(atlas, start, end, max_hops, DATA_EDGE_KINDS)
-    data_route = bool(hops)
+    tree_route = start.startswith("frame:") and end.startswith("frame:")
+    if tree_route:
+        # Between two frames the question is the transform tree, which is what a lookup walks.
+        hops = _shortest(atlas, start, end, max_hops, TREE_EDGE_KINDS)
+        tree_route = bool(hops)
+    if not tree_route:
+        hops = _shortest(atlas, start, end, max_hops, DATA_EDGE_KINDS)
+    data_route = bool(hops) and not tree_route
     if not hops:
         hops = _shortest(atlas, start, end, max_hops)
     data: dict[str, Any] = {
@@ -1258,6 +1265,7 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
         "hops": hops or [],
         "found": bool(hops),
         "data_route": data_route,
+        "tree_route": tree_route,
         "data_direction": _data_direction(hops) if data_route else "",
     }
     if not hops:
@@ -1272,7 +1280,9 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
             ],
         )
     lines = [f"{plural(len(hops), 'hop')} from {label(start)} to {label(end)}", *notes]
-    if not data_route:
+    if tree_route:
+        lines.append("  through the transform tree, -> tf_parent goes up to a parent")
+    elif not data_route:
         other = sorted({hop["kind"] for hop in hops} - DATA_EDGE_KINDS)
         lines.append(
             f"  no data route connects them, this one runs through {', '.join(other)}, "
@@ -1293,6 +1303,9 @@ DATA_EDGE_KINDS = frozenset(
     {"publishes", "subscribes", "serves", "calls", "remaps", "broadcasts_tf"}
 )
 """The edges data travels along. A path is looked for through these first."""
+
+TREE_EDGE_KINDS = frozenset({"tf_parent"})
+"""The edges a path between two frames takes first, each from a child up to its parent."""
 
 DATA_LEAVES_SOURCE = frozenset({"publishes", "calls", "broadcasts_tf"})
 """Data kinds whose message leaves the edge source. A subscription and a server receive."""

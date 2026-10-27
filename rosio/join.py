@@ -121,9 +121,9 @@ has no executable, so this registration is the only thing that ties the launched
 class to the file that implements it."""
 
 _BROADCAST_SOURCES = {"python": "py_broadcast", "cpp": "cpp_broadcast"}
-"""What a `tf_parent` edge names as the statement it came from. The frame rules read the
-direction of the pair off this value, so it has to name the language of the broadcast and
-not the pass that wrote the edge."""
+"""What a `tf_parent` edge names as the statement it came from: the language of the
+broadcast, not the pass that wrote the edge. Every `tf_parent` edge runs from the child to
+the parent, whatever states it."""
 
 WRAPPER_KEYS = ("via_known_wrapper", "wrapper", "via_wrapper")
 """Where a record states the library that created the endpoint. `via_known_wrapper` is the
@@ -3181,8 +3181,8 @@ def _bind_broadcast(
     _site_edge(
         builder,
         model.EdgeKind.TF_PARENT.value,
-        parent_id,
         child_id,
+        parent_id,
         # The geometry of one pair differs between profiles, so the profile and the node that
         # broadcasts it are both in the key.
         _tf_key(item.profile, symbol, parent_values),

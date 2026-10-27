@@ -120,9 +120,11 @@ def _anchors(atlas: Atlas) -> dict[str, str]:
             continue
         if edge.src not in atlas.entities or edge.dst not in atlas.entities:
             continue
-        current = best.get(edge.dst)
-        if current is None or (order, edge.src) < current:
-            best[edge.dst] = (order, edge.src)
+        # a tf_parent edge runs from the child up, and the parent owns the child
+        owner, owned = (edge.dst, edge.src) if edge.kind == "tf_parent" else (edge.src, edge.dst)
+        current = best.get(owned)
+        if current is None or (order, owner) < current:
+            best[owned] = (order, owner)
     return {dst: owner for dst, (_order, owner) in best.items()}
 
 

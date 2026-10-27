@@ -367,8 +367,8 @@ def _broadcast_tie(builder: AtlasBuilder, parent: str, child: str, guard: str = 
         values["condition"] = guard
     builder.edge(
         model.EdgeKind.TF_PARENT.value,
-        ids.build_frame(parent),
         ids.build_frame(child),
+        ids.build_frame(parent),
         key=ids.edge_key(sym=LIO_SYMBOL, guard=guard),
         layer=CODED,
         values=values,

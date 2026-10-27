@@ -522,7 +522,7 @@ const RELATION_TITLE: Record<string, [string, string]> = {
   instantiates: ["Instances", "Instance of"],
   broadcasts_tf: ["Broadcasts", "Broadcast by"],
   listens_tf: ["Looks up", "Looked up by"],
-  tf_parent: ["Child frames", "Parent frame"],
+  tf_parent: ["Parent frame", "Child frames"],
   remaps: ["Remaps", "Remapped by"],
   includes: ["Includes", "Included by"],
   contains: ["Contains", "Part of"],

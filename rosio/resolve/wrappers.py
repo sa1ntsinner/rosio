@@ -315,6 +315,42 @@ TABLE: tuple[Wrapper, ...] = (
         "reference stack comes from a launched static_transform_publisher or from the urdf.",
     ),
     Wrapper(
+        symbol="nav2::TransformBroadcaster",
+        library="nav2_ros_common",
+        language="cpp",
+        endpoints=(
+            WrapperEndpoint("publisher", "/tf", _TF, qos="DynamicBroadcasterQoS, depth 100"),
+        ),
+        evidence="nav2_ros_common/include/nav2_ros_common/tf2_factories.hpp:51 derives it "
+        "from tf2_ros::TransformBroadcaster, and create_transform_broadcaster at :104 builds it",
+    ),
+    Wrapper(
+        symbol="nav2::StaticTransformBroadcaster",
+        library="nav2_ros_common",
+        language="cpp",
+        endpoints=(
+            WrapperEndpoint(
+                "publisher", "/tf_static", _TF, qos="StaticBroadcasterQoS, depth 1 transient local"
+            ),
+        ),
+        evidence="nav2_ros_common/include/nav2_ros_common/tf2_factories.hpp:60 derives it "
+        "from tf2_ros::StaticTransformBroadcaster, and create_static_transform_broadcaster at "
+        ":120 builds it",
+    ),
+    Wrapper(
+        symbol="nav2::TransformListener",
+        library="nav2_ros_common",
+        language="cpp",
+        endpoints=(
+            WrapperEndpoint("subscriber", "/tf", _TF, qos="DynamicListenerQoS, depth 100"),
+            WrapperEndpoint(
+                "subscriber", "/tf_static", _TF, qos="StaticListenerQoS, depth 100 transient local"
+            ),
+        ),
+        evidence="nav2_ros_common/include/nav2_ros_common/tf2_factories.hpp:42 derives it "
+        "from tf2_ros::TransformListener, and create_transform_listener at :138 builds it",
+    ),
+    Wrapper(
         symbol="diagnostic_updater.Updater",
         library="diagnostic_updater",
         language="python",

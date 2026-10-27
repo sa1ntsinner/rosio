@@ -78,14 +78,6 @@ the name: the same key set false is the opposite statement."""
 _PARENT_FLAGS = ("--frame-id", "--frame_id")
 _CHILD_FLAGS = ("--child-frame-id", "--child_frame_id")
 
-_CHILD_FIRST = frozenset({"urdf"})
-"""tf_parent sources whose edge runs from the child to the parent."""
-
-_PARENT_FIRST = frozenset({"cpp_broadcast", "py_broadcast"})
-"""tf_parent sources whose edge runs from the parent to the child. The two collectors
-disagree about the direction on this stack, so direction is read from the fact that
-states the source and never assumed from the edge."""
-
 _ENDPOINT_KINDS = (
     model.EdgeKind.PUBLISHES.value,
     model.EdgeKind.SUBSCRIBES.value,
@@ -121,24 +113,16 @@ def _frame_name(value: object) -> str:
 
 
 class _Tf:
-    """One tf_parent statement, with the direction its own source states."""
+    """One tf_parent statement: the child is the source of the edge, the parent its end."""
 
     __slots__ = ("child", "edge", "fact", "model", "parent", "source")
 
     def __init__(self, edge: model.Edge, fact: LayerFact) -> None:
-        source = str(fact.values.get("strategy") or fact.values.get("source") or "")
         self.edge = edge
         self.fact = fact
-        self.source = source
+        self.source = str(fact.values.get("strategy") or fact.values.get("source") or "")
         self.model = str(fact.values.get("model") or "")
-        if source in _PARENT_FIRST:
-            self.parent, self.child = edge.src, edge.dst
-        else:
-            self.child, self.parent = edge.src, edge.dst
-
-    @property
-    def directed(self) -> bool:
-        return self.source in _CHILD_FIRST or self.source in _PARENT_FIRST
+        self.child, self.parent = edge.src, edge.dst
 
     @property
     def profile(self) -> str:
@@ -379,7 +363,7 @@ def frame_parent_differs(atlas: Atlas) -> list[Finding]:
         return []
     grouped: dict[tuple[str, str], list[_Tf]] = {}
     for row in _tf_rows(atlas):
-        if row.source not in _CHILD_FIRST or row.model not in loaded:
+        if not row.model or row.model not in loaded:
             continue
         grouped.setdefault((row.profile, row.child), []).append(row)
     findings: list[Finding] = []
@@ -508,9 +492,8 @@ def _differs_say(
 def frame_orphan_root(atlas: Atlas) -> list[Finding]:
     """A group of frames that no transform ties to the rest of the tree.
 
-    Connectivity is undirected on purpose, because a static publisher, a urdf joint and a
-    code broadcast are three sources with three conventions, and a lookup fails when the
-    pair is missing whichever way round it is stated. Only frames that some transform
+    Connectivity is undirected on purpose: a lookup fails when the pair is missing whichever
+    way round it is asked for. Only frames that some transform
     names are considered, so a frame that exists only in a yaml value is the business of
     frame.not_in_urdf and never of this rule.
     """
@@ -528,8 +511,7 @@ def frame_orphan_root(atlas: Atlas) -> list[Finding]:
             source = f"{row.model} {row.profile}"
         for frame in (row.child, row.parent):
             sources.setdefault(frame, set()).add(source)
-        if row.directed:
-            children.add(row.child)
+        children.add(row.child)
     for pair in _static_pairs(atlas):
         child, parent = ids.build_frame(pair.child), ids.build_frame(pair.parent)
         links.append((child, parent))
@@ -817,6 +799,82 @@ def _looked_up_not_in_urdf(
     return findings
 
 
+RENAMED = "renamed"
+"""The variant of `frame.not_in_urdf` for a frame the code broadcasts by a literal name under a
+link of the loaded model, while the model names a child of that link almost the same way."""
+
+
+def _renamed_in_model(atlas: Atlas, declared: Mapping[str, Any]) -> list[Finding]:
+    """A literal broadcast under a link of a loaded model, of a child no model declares, where
+    that model places a child of the same link under a close name: one part, two frame names.
+
+    The broadcast is in the tree, so the plain rule skips it as tied. No code collector states
+    the origin of a broadcast, so the name alone pairs the two."""
+    loaded = _loaded_models(atlas)
+    rows = [row for row in _tf_rows(atlas) if not _from_tests(row)]
+    joints: dict[tuple[str, str], dict[str, _Tf]] = {}
+    for row in rows:
+        if row.model:
+            joints.setdefault((row.model, row.parent), {}).setdefault(
+                ids.parse_frame(row.child), row
+            )
+    found: dict[tuple[str, str, str], list[tuple[str, _Tf, _Tf]]] = {}
+    for row in rows:
+        values = row.fact.values
+        if row.model or row.fact.layer != model.Layer.CODED.value or not row.fact.evidence:
+            continue
+        if values.get("child_from_parameter") or values.get("parent_from_parameter"):
+            continue
+        child = ids.parse_frame(row.child)
+        if child in declared:
+            continue
+        for model_id, profiles in loaded.items():
+            siblings = joints.get((model_id, row.parent), {})
+            near = _nearest(child, siblings) if row.profile in profiles else ""
+            if near:
+                hit = (row.profile, row, siblings[near])
+                found.setdefault((child, model_id, near), []).append(hit)
+    findings: list[Finding] = []
+    for (child, model_id, near), hits in sorted(found.items()):
+        _profile, code, joint = hits[0]
+        parent = ids.parse_frame(code.parent)
+        profiles = sorted({hit[0] for hit in hits})
+        code_site = rules.where(_guard_site(code.fact))
+        joint_site = rules.where(joint.fact.evidence[0] if joint.fact.evidence else None)
+        node = str(code.fact.values.get("node") or "")
+        who = rules.node_text(node) if node.startswith("node:") else "the code"
+        held = ", ".join(_profile_phrase(profile) for profile in profiles)
+        findings.append(
+            Finding(
+                rule="frame.not_in_urdf",
+                severity=rules.severity_of("frame.not_in_urdf", RENAMED),
+                subject=ids.build_frame(child),
+                title=f"{who} broadcasts {child} under {parent}, the robot model names it {near}",
+                detail=(
+                    f"{code_site} broadcasts {parent} to {child} with literal names. The robot "
+                    f"model {rules.path_of(model_id)}, which {held} loads, has no link {child} "
+                    f"and places {near} under {parent} at {joint_site}, so the robot has two "
+                    f"frames for one part and anything stamped {child} misses the geometry of "
+                    f"{near}."
+                ),
+                fix=(
+                    f"broadcast {near} instead of {child} at {code_site}, or name the link "
+                    f"{child} in {rules.path_of(model_id)}"
+                ),
+                say=(
+                    f"{code_site} broadcasts {parent} to {child}, while "
+                    f"{rules.path_of(model_id)} places {near} under {parent} at {joint_site}, "
+                    f"so in {held} the code and the robot model name one part two ways."
+                ),
+                discriminator=_disc(child, model_id, near, RENAMED),
+                profiles=profiles,
+                layers=[model.Layer.CODED.value, model.Layer.DECLARED.value],
+                where=rules.sources([_guard_site(code.fact), *joint.fact.evidence[:1]]),
+            )
+        )
+    return findings
+
+
 def _nearest(frame: str, declared: Mapping[str, Any]) -> str:
     """The declared link a mistyped frame most likely meant, or nothing when none is close."""
     import difflib
@@ -832,7 +890,9 @@ def frame_not_in_urdf(atlas: Atlas) -> list[Finding]:
     Grouped by owner and frame, so four septentrio keys naming one frame are one finding
     with four cited lines rather than four findings. A frame that any transform in the
     atlas names is skipped, and so is every REP 105 world frame, because neither is a link
-    the robot model is expected to own.
+    the robot model is expected to own. One tied frame is not skipped: a frame the code
+    broadcasts by name under a link of the loaded model, where the model names that child
+    almost the same way.
 
     Two more silences, both about the consequence the finding asserts rather than about the
     claim. A driver whose configuration says it broadcasts its own transforms publishes the
@@ -865,6 +925,7 @@ def frame_not_in_urdf(atlas: Atlas) -> list[Finding]:
             continue
         grouped.setdefault((ref.owner, ref.frame), []).append(ref)
     findings: list[Finding] = _looked_up_not_in_urdf(atlas, declared, tied)
+    findings += _renamed_in_model(atlas, declared)
     for key in sorted(grouped):
         owner, frame = key
         refs = sorted(grouped[key], key=lambda item: (item.param, item.profile))
@@ -999,7 +1060,7 @@ def _published_frames(atlas: Atlas, broadcast: dict[str, set[str]]) -> dict[str,
     loaded = _loaded_models(atlas)
     identified = {profile for profiles in loaded.values() for profile in profiles}
     for row in _tf_rows(atlas):
-        if row.source not in _CHILD_FIRST:
+        if not row.model:
             out.setdefault(row.profile, set()).add(row.child)
             continue
         if row.profile == model.ANY_PROFILE:

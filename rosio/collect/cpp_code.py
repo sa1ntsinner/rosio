@@ -172,6 +172,17 @@ KNOWN_WRAPPERS: dict[str, dict[str, str]] = {
     "tf2_ros::TransformListener": {
         "reason": "the profile is chosen inside tf2_ros, not in this source",
     },
+    "nav2::TransformBroadcaster": {
+        "reason": "the profile is chosen inside tf2_ros, not in this source",
+        "broadcaster": "dynamic",
+    },
+    "nav2::StaticTransformBroadcaster": {
+        "reason": "the profile is chosen inside tf2_ros, not in this source",
+        "broadcaster": "static",
+    },
+    "nav2::TransformListener": {
+        "reason": "the profile is chosen inside tf2_ros, not in this source",
+    },
     "diagnostic_updater::Updater": {
         "reason": "the profile is chosen inside diagnostic_updater, not in this source",
     },
@@ -897,6 +908,7 @@ class _Reader:
         self.node_selectors: dict[tuple[str, str], str] = {}
         self.constructor_arguments: dict[str, list[tuple[str | None, ...]]] = {}
         self.assigned: dict[tuple[str, str], int] = {}
+        self.bound_under: dict[tuple[str, str], tuple[Guard, ...]] = {}
 
     # scope ---------------------------------------------------------------
 
@@ -925,6 +937,7 @@ class _Reader:
             return
         key = (self.klass, name) if name.endswith("_") else (self.sym, name)
         self.assigned[key] = self.assigned.get(key, 0) + 1
+        self.bound_under[key] = tuple(self.conditions)
         if name.endswith("_") and self.klass:
             self.unit.members[(self.klass, name)] = ref
             return
@@ -949,9 +962,11 @@ class _Reader:
                 binding = found.binding or ("member" if expr.endswith("_") else "local")
                 built = found.built or (found.expr if found.status == UNRESOLVED else "")
                 key = (self.klass, expr) if expr.endswith("_") else (self.sym, expr)
-                if self.assigned.get(key, 0) > 1:
-                    # two assignments, an if and an else among them, build more than the last
-                    built = ""
+                under = self.bound_under.get(key, ())
+                if self.assigned.get(key, 0) > 1 and tuple(self.conditions[: len(under)]) != under:
+                    # the last value was written in a branch this read is outside of, an if
+                    # and an else among them, so the name is any of the values assigned
+                    return Ref(UNRESOLVED, "", expr, binding=binding)
                 return replace(found, expr=expr, binding=binding, built=built)
             if expr in self.defines:
                 return Ref(LITERAL, self.defines[expr], expr, origin="macro", source_name=expr)
@@ -1512,20 +1527,31 @@ class _Reader:
             expr = _flat(right, self.src)
             if operator is not None and _text(operator, self.src) != "=":
                 # `ns += ".speed_calculation"` extends ns, it does not replace it
-                held = self.resolve(left)
-                expr = f"{_flat(left, self.src)} + {expr}"
-                value = (
-                    Ref(LITERAL, held.value + value.value, expr)
-                    if _text(operator, self.src) == "+="
-                    and held.status == LITERAL
-                    and value.status == LITERAL
-                    else Ref(UNRESOLVED, "", expr)
-                )
+                expr, value = self._extended(left, right, _text(operator, self.src) == "+=")
             self.bind(text, value)
             self.exprs[text] = (expr, False)
             self._track_number(text, right)
             self._track_wrapper(text, "", right)
         self.walk(right)
+
+    def _extended(self, left: Any, right: Any, appends: bool = True) -> tuple[str, Ref]:
+        """What `left += right` leaves in left. A literal head is spelled as the literal, so a
+        name built from it still says which keys it could be."""
+        held, value = self.resolve(left), self.resolve(right)
+        head = f'"{held.value}"' if held.status == LITERAL else _flat(left, self.src)
+        expr = f"{head} + {_flat(right, self.src)}"
+        if appends and held.status == LITERAL and value.status == LITERAL:
+            return expr, Ref(LITERAL, held.value + value.value, expr)
+        return expr, Ref(UNRESOLVED, "", expr)
+
+    def _append(self, receiver: Any, arguments: Sequence[Any]) -> None:
+        """`key.append(id)` extends key the way `key += id` does."""
+        if len(arguments) != 1 or self.resolve(receiver).status != LITERAL:
+            return
+        text = _flat(receiver, self.src)
+        expr, value = self._extended(receiver, arguments[0])
+        self.bind(text, value)
+        self.exprs[text] = (expr, False)
 
     def _track_number(self, name: str, value: Any) -> None:
         number, source = self._number(value)
@@ -1755,6 +1781,8 @@ class _Reader:
             return
         if self._endpoint(name, node, template, arguments):
             return
+        if name == "append" and receiver is not None and receiver.type == "identifier":
+            self._append(receiver, arguments)
         self._mutation(name, receiver)
         self._parameter(name, arguments, template, node)
 
@@ -2392,10 +2420,22 @@ def _template_head(text: str, symbol: str) -> str:
 _OWN_READERS = frozenset({"message_filters::Subscriber", "image_transport::SubscriberFilter"})
 
 
+WRAPPER_FACTORIES = {
+    "create_transform_broadcaster": "nav2::TransformBroadcaster",
+    "create_static_transform_broadcaster": "nav2::StaticTransformBroadcaster",
+    "create_transform_listener": "nav2::TransformListener",
+}
+"""Free functions that return a known wrapper (`nav2_ros_common/tf2_factories.hpp`), so
+`tf_broadcaster_ = nav2::create_transform_broadcaster(this)` builds one."""
+
+
 def _wrapper_of(text: str) -> str:
     for name in KNOWN_WRAPPERS:
         if name in text:
             return name
+    for name, wrapper in WRAPPER_FACTORIES.items():
+        if re.search(rf"\b{name}\s*\(", text):
+            return wrapper
     return ""
 
 
@@ -5988,8 +6028,8 @@ class CppCodeCollector:
         )
         builder.edge(
             model.EdgeKind.TF_PARENT.value,
-            parent,
             child,
+            parent,
             key=key,
             layer=LAYER,
             run=run,
