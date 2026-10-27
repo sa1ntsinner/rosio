@@ -1025,3 +1025,28 @@ def test_a_profile_expansion_is_the_same_twice(tmp_path: Path) -> None:
     first, _ = _loaded(tmp_path / "a", (("namespace", "tb3/"),))
     second, _ = _loaded(tmp_path / "b", (("namespace", "tb3/"),))
     assert first.canonical_bytes() == second.canonical_bytes()
+
+
+def _tool(directory: Path, name: str, text: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def test_a_xacro_behind_a_shell_wrapper_runs_under_the_python_beside_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pip writes `#!/bin/sh` and execs python from the second line when the interpreter path
+    is long, and running that line as `/bin/sh -c <python>` refused every model."""
+    tools = tmp_path / "bin"
+    wrapper = "#!/bin/sh\n'''exec' \"/a/very/long/venv/bin/python\" \"$0\" \"$@\"\n' '''\n"
+    _tool(tools, "xacro", wrapper)
+    python = _tool(tools, "python3", "#!/bin/sh\n")
+    monkeypatch.setenv("PATH", str(tools))
+    command = urdf_collect._xacro_command("robot.xacro", (), {"bot": "/src/bot"})
+    assert command[:2] == [str(python), "-c"]
+    _tool(tools, "xacro", "#!/usr/bin/env python3\n")
+    command = urdf_collect._xacro_command("robot.xacro", (), {"bot": "/src/bot"})
+    assert command[:3] == ["/usr/bin/env", "python3", "-c"]

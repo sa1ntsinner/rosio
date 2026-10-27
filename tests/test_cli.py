@@ -450,6 +450,26 @@ def test_the_gate_trips_at_every_severity_the_atlas_carries(
     assert main(["drift", "--atlas", str(atlas_file), "--fail-on", fail_on]) == want
 
 
+def test_a_rule_that_could_not_be_trusted_fails_the_gate_as_an_error(tmp_path: Path, capsys):
+    """A rule that raised left no finding, and `--fail-on warn` read that as a clean stack."""
+    atlas = _atlas()
+    atlas.findings = []
+    atlas.counters["drift"] = {"failed": ["launch.unloadable"]}
+    target = tmp_path / "atlas.json"
+    target.write_text(model.dumps(atlas.to_json()), encoding="utf-8", newline="\n")
+    for fail_on in ("error", "warn", "info"):
+        code = main(
+            ["drift", "--atlas", str(target), "--only", "launch.unloadable", "--fail-on", fail_on]
+        )
+        captured = capsys.readouterr()
+        assert code == EXIT_DRIFT
+        assert "could not be trusted" in captured.out
+        assert "launch.unloadable" in captured.err
+    assert main(["drift", "--atlas", str(target), "--fail-on", "never", "--quiet"]) == EXIT_OK
+    only = ["drift", "--atlas", str(target), "--only", "param.shadowed", "--fail-on", "error"]
+    assert main(only) == EXIT_OK, "the failed rule is outside the rule that was asked about"
+
+
 def test_only_scopes_the_report_and_the_gate_together(atlas_file: Path, capsys):
     code = main(
         ["drift", "--atlas", str(atlas_file), "--only", "param.shadowed", "--fail-on", "error"]
@@ -716,13 +736,23 @@ def test_extract_names_the_config_it_read_and_where_it_wrote(
     shutil.copytree(WS, workspace)
     here = tmp_path / "here"
     here.mkdir()
-    (here / "rosio.yaml").write_text("profiles:\n  - slug: only\n", encoding="utf-8")
+    (here / "rosio.yaml").write_text(
+        f"roots:\n  - {{kind: src, path: {workspace / 'src'}}}\n"
+        f"  - {{kind: install, path: {workspace / 'install'}}}\n"
+        "profiles:\n  - slug: only\n",
+        encoding="utf-8",
+    )
     monkeypatch.chdir(here)
     assert main(["extract", str(workspace)]) == EXIT_OK
     captured = capsys.readouterr()
     assert f"rosio extract: config {here / 'rosio.yaml'}" in captured.err
     assert f"rosio extract: {here / 'rosio-out' / 'atlas.json'} (" in captured.out
     assert "profiles 1: only" in captured.out
+
+    (here / "rosio.yaml").write_text("profiles:\n  - slug: only\n", encoding="utf-8")
+    assert main(["extract", str(workspace), "--quiet"]) == EXIT_OK
+    captured = capsys.readouterr()
+    assert f"rosio extract: ignored {here / 'rosio.yaml'}" in captured.err
 
 
 def test_a_configured_root_that_is_not_there_names_the_ways_out(tmp_path: Path, capsys):

@@ -322,7 +322,7 @@ class LaunchDeclaredCollector:
                 if failure.kept:
                     row["kept"] = failure.kept
                 if failure.env:
-                    row["env"] = _unset_variables(failure, spec)
+                    row["env"] = _unset_variables(failure, spec, ctx.cfg.ros_setup)
                 if _unrun(failure):
                     # A file only a process writes is the walk's blind spot, stated by the
                     # unresolved entry of this file, and nothing the launch file can repair.
@@ -1573,11 +1573,19 @@ def _under_path(path: str, root: str) -> bool:
     return (path.rstrip("/") + "/").startswith(root.rstrip("/") + "/")
 
 
-def _unset_variables(failure: records.WalkException, spec: ProfileSpec) -> str:
+def _unset_variables(
+    failure: records.WalkException, spec: ProfileSpec, ros_setup: Sequence[str]
+) -> str:
     """The variable the walk stopped at, then every other one the same file reads with no
-    default that neither the profile nor this environment sets, so one extract names them
-    all. TurtleBot3 needs LDS_MODEL as well as TURTLEBOT3_MODEL, and the second used to
-    surface only after a second extract with the first one set."""
+    default that neither the profile nor the sourced environment of the walk sets, so one
+    extract names them all. TurtleBot3 needs LDS_MODEL as well as TURTLEBOT3_MODEL, and the
+    second used to surface only after a second extract with the first one set.
+
+    The shell that ran extract is not the walk's environment, and the row is compared data,
+    so an environment that could not be read names the one variable the walk stopped at."""
+    environment = _launch_exec().sourced_environment(ros_setup)
+    if environment is None:
+        return failure.env
     try:
         source = Path(failure.path).read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -1586,7 +1594,7 @@ def _unset_variables(failure: records.WalkException, spec: ProfileSpec) -> str:
     others = [
         name
         for name in _launch_exec().environment_reads(source)
-        if name != failure.env and name not in stated and name not in os.environ
+        if name != failure.env and name not in stated and name not in environment
     ]
     return " ".join([failure.env, *others])
 

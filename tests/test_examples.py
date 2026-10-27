@@ -191,3 +191,45 @@ def test_an_unbuilt_workspace_reads_its_own_packages_from_source(
     assert not [f for f in atlas.findings if f.rule == "launch.file_not_installed"]
     assert not list((workspace / "src").rglob("__pycache__")), "extract wrote into the sources"
     assert str(workspace) not in atlas.canonical_bytes().decode("utf-8")
+
+
+@pytest.mark.ros
+@pytest.mark.slow
+def test_a_node_that_declares_from_overrides_keeps_every_value_a_file_sets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither node of the rover declares the key the file sets once it takes its parameters
+    from overrides, and each still runs with the value."""
+    workspace = tmp_path / "rover_ws"
+    shutil.copytree(EXAMPLES / "rover_ws", workspace)
+    stop = workspace / "src/rover_control/rover_control/safety_stop.py"
+    stop.write_text(
+        stop.read_text(encoding="utf-8").replace(
+            'super().__init__("safety_stop")',
+            'super().__init__("safety_stop", automatically_declare_parameters_from_overrides=True)',
+        ),
+        encoding="utf-8",
+    )
+    scan = workspace / "src/rover_perception/src/scan_filter.cpp"
+    scan.write_text(
+        scan.read_text(encoding="utf-8").replace(
+            ': Node("scan_filter"),',
+            ': Node("scan_filter", rclcpp::NodeOptions()'
+            ".automatically_declare_parameters_from_overrides(true)),",
+        ),
+        encoding="utf-8",
+    )
+    params = workspace / "src/rover_bringup/config/rover.yaml"
+    params.write_text(
+        params.read_text(encoding="utf-8").replace(
+            "    frame_id: laser_link\n", "    frame_id: laser_link\n    extra_gain: 2.0\n"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    atlas = _extract(workspace, tmp_path / "out")
+    for name in ("safety_stop|stop_distnce", "scan_filter|extra_gain"):
+        parameter = atlas.entities[f"param:/{name}"]
+        assert parameter.state == "effective", name
+        assert parameter.effective, name
+    assert not [f for f in atlas.findings if f.rule == "param.set_undeclared"]

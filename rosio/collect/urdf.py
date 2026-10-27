@@ -881,7 +881,13 @@ def _xacro_command(
         head = Path(tool).read_text(encoding="utf-8", errors="replace").split("\n", 1)[0]
     except OSError:
         head = ""
-    interpreter = head[2:].split() if head.startswith("#!") else [sys.executable]
+    interpreter = head[2:].split() if head.startswith("#!") else []
+    if not any(Path(part).name.startswith("python") for part in interpreter):
+        # A pip console script on a long interpreter path starts with `#!/bin/sh` and execs
+        # python from its second line, so the python beside the tool runs it instead.
+        beside = Path(tool).parent / "python3" if tool else None
+        found = str(beside) if beside is not None and beside.is_file() else None
+        interpreter = [found or shutil.which("python3") or sys.executable]
     return [*interpreter, "-c", _SOURCE_SHARES, model.dumps(dict(shares)), path, *mapped]
 
 

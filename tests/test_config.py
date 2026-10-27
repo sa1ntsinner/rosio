@@ -252,13 +252,40 @@ def test_a_config_in_the_working_directory_is_read_after_the_workspace_one(
     monkeypatch.chdir(here)
     monkeypatch.delenv(CONFIG_ENV, raising=False)
     assert locate_config(None, workspace=str(bench)) is None
-    _write(here / CONFIG_NAME, "profiles:\n  - slug: from_here\n")
+    _write(here / CONFIG_NAME, f"roots:\n  - {bench}\nprofiles:\n  - slug: from_here\n")
     assert locate_config(None, workspace=str(bench)) == here / CONFIG_NAME
     assert [p.slug for p in load_config(None, workspace=str(bench)).profiles] == ["from_here"]
     _write(bench / CONFIG_NAME, "profiles:\n  - slug: from_workspace\n")
     assert locate_config(None, workspace=str(bench)) == bench / CONFIG_NAME
     explicit = _write(here / "other.yaml", "profiles:\n  - slug: named\n")
     assert locate_config(str(explicit), workspace=str(bench)) == explicit
+
+
+def test_a_config_in_the_working_directory_written_for_another_tree_is_ignored(
+    bench: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One workspace gave two atlases, by the directory the shell stood in."""
+    here = tmp_path_factory.mktemp("elsewhere")
+    monkeypatch.chdir(here)
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    notes: list[str] = []
+    _write(here / CONFIG_NAME, "profiles:\n  - slug: elsewhere\n")
+    assert locate_config(None, workspace=str(bench), note=notes.append) is None
+    assert [p.slug for p in load_config(None, workspace=str(bench)).profiles] != ["elsewhere"]
+    (said,) = notes
+    assert str(here / CONFIG_NAME) in said and "--config" in said
+    _write(here / CONFIG_NAME, f"roots:\n  - {here}\nprofiles:\n  - slug: elsewhere\n")
+    assert locate_config(None, workspace=str(bench)) is None
+    _write(here / CONFIG_NAME, f"roots:\n  - {bench / 'src'}\nprofiles:\n  - slug: inside\n")
+    assert locate_config(None, workspace=str(bench)) == here / CONFIG_NAME
+
+
+def test_a_resolution_budget_key_that_names_no_rate_is_refused(bench: Path) -> None:
+    """`frame_ids` loaded, entered the fingerprint and never gated anything."""
+    _write(bench / CONFIG_NAME, "resolution_budget: {frame_ids: 0.99}\n")
+    with pytest.raises(UsageError, match="no rate called frame_ids") as refused:
+        load_config(None, workspace=str(bench))
+    assert "frame_id" in str(refused.value) and "overall" in str(refused.value)
 
 
 def test_the_resolution_budget_is_a_config_key_that_decides_the_atlas(bench: Path) -> None:

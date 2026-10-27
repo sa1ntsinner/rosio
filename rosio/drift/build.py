@@ -185,9 +185,11 @@ def _missing_entrypoints(atlas: Atlas) -> list[Finding]:
 
     There is no launch file entity to hang it on, so the profile is the subject, and one
     profile naming two missing files is two findings. A typo in rosio.yaml is the likeliest
-    mistake a configuration holds, and it used to pass the gate with a perfect rate.
+    mistake a configuration holds, and it used to pass the gate with a perfect rate. One
+    file named twice by one profile, a launch file started once per robot, is one finding.
     """
     out: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
     for run in atlas.by_kind(model.NodeKind.RUN.value):
         profile = str(run.attrs.get("profile") or "")
         for row in run.attrs.get("exceptions") or []:
@@ -199,6 +201,9 @@ def _missing_entrypoints(atlas: Atlas) -> list[Finding]:
             if subject not in atlas.entities:
                 continue
             label = str(row.get("path", ""))
+            if (subject, label) in seen:
+                continue
+            seen.add((subject, label))
             because = launch_declared.REFUSED_MISSING
             out.append(
                 Finding(
@@ -742,8 +747,8 @@ def resolution_below_budget(
     One finding for the run, because the rate is a property of the whole run: one per
     profile repeated the same rate fifty times over and blamed a profile holding one blind
     spot as loudly as the one holding forty. The profiles that hold the most blind spots are
-    named, worst first, and the worst one is the subject, so the finding opens on the profile
-    to repair.
+    named, worst first, in the text. The subject is the same for the whole run whichever
+    profile is worst, so repairing one profile never moves the id a waiver keys on.
     """
     overall, per_want = _budget(atlas, budget)
     rates = dict(atlas.counters.get("resolution_rate") or {})
@@ -769,7 +774,7 @@ def resolution_below_budget(
         ),
         key=lambda item: (-item[0], item[1]),
     )
-    subject = counts[0][1] if counts else _whole_run_subject(atlas)
+    subject = _whole_run_subject(atlas)
     if not subject:
         return []
     worst = ", ".join(f"{ids.parse_profile(profile)} ({count})" for count, profile in counts[:3])
@@ -799,7 +804,15 @@ def resolution_below_budget(
 
 
 def _whole_run_subject(atlas: Atlas) -> str:
-    """A run when there is one, else the first owner of a blind spot."""
+    """The first profile, else the first package, else the first run or owner of a blind spot.
+
+    A run id carries the digest of its inputs and changes with every edit, so it is the last
+    choice: a subject that moves when a blind spot is repaired un waives the finding.
+    """
+    for kind in (model.NodeKind.PROFILE.value, model.NodeKind.PKG.value):
+        found = sorted(node.id for node in atlas.by_kind(kind))
+        if found:
+            return found[0]
     runs = sorted(node.id for node in atlas.by_kind(model.NodeKind.RUN.value))
     owners = sorted(entry.owner for entry in atlas.unresolved if entry.owner in atlas.entities)
     return (runs or owners or [""])[0]

@@ -191,9 +191,9 @@ def same_name_in_package(ws: Workspace, path: str) -> list[str]:
     for base in (package.share_path, package.src_path):
         if base and target.is_relative_to(base):
             found = sorted(
-                item.relative_to(base).as_posix()
-                for item in Path(base).rglob(target.name)
-                if item.is_file() and item != target
+                Path(item).relative_to(base).as_posix()
+                for item in ws.named(target.name)
+                if Path(item).is_relative_to(base) and Path(item) != target
             )
             return found[:ELSEWHERE_LIMIT]
     return []

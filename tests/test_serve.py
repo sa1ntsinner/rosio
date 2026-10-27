@@ -526,6 +526,29 @@ def test_the_tool_set_is_twelve_named_tools_with_a_description_each(atlas_file: 
         assert function.__doc__ and len(function.__doc__.split()) >= 8
 
 
+def test_every_hint_names_an_argument_its_tool_takes(atlas_file: Path):
+    """Two hints sent a model to `drift rule=...` after the argument became `only`, and the
+    tool refuses an argument it does not take."""
+    import inspect
+    import re
+
+    functions = {item.__name__: item for item in server.bindings(tools.AtlasSource(atlas_file))}
+    pattern = re.compile(rf"\b({'|'.join(functions)}) (?:with )?([a-z_]+)=")
+    hints = [
+        (tool, argument)
+        for module in (tools, server)
+        for tool, argument in pattern.findall(Path(module.__file__).read_text(encoding="utf-8"))
+    ]
+    assert hints, "the pattern no longer finds the hints it was written for"
+    wrong = [
+        f"{tool} {argument}="
+        for tool, argument in hints
+        if argument not in inspect.signature(functions[tool]).parameters
+        and argument not in server.SPELLINGS.get(tool, {})
+    ]
+    assert wrong == []
+
+
 def test_every_tool_answers_from_the_bound_atlas(atlas_file: Path):
     functions = {item.__name__: item for item in server.bindings(tools.AtlasSource(atlas_file))}
 
@@ -1221,6 +1244,31 @@ def test_migrate_takes_the_command_line_word_for_the_current_release(atlas_file:
     assert "takes no into" in text
 
 
+def test_an_argument_given_under_both_its_spellings_is_refused(atlas_file: Path):
+    """`from` and `start` both reached `start`, and the later key in the JSON won."""
+    pytest.importorskip("mcp")
+    built = server.build(tools.AtlasSource(atlas_file))
+
+    text = _refusal(built, "migrate", {"to": "kilted", "from": "humble", "start": "jazzy"})
+
+    assert text.startswith("migrate was not run: start was given twice, as start and as from")
+
+
+def test_migrate_over_a_directory_it_cannot_read_names_the_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from rosio import migrate as release
+
+    def refused(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(tmp_path / "secret"))
+
+    monkeypatch.setattr(release, "plan_workspace", refused)
+    with pytest.raises(UsageError) as caught:
+        tools.migrate(str(tmp_path), "kilted", start="jazzy")
+    assert str(tmp_path / "secret") in str(caught.value)
+    assert "Permission denied" in str(caught.value)
+
+
 def test_the_current_release_comes_from_the_one_under_opt_ros_when_the_environment_has_none(
     tmp_path: Path, monkeypatch
 ):
@@ -1319,6 +1367,6 @@ def test_a_graph_with_no_endpoint_says_why_in_one_line():
         "no node in profile robot: a launch file raised there, "
         "rosio drift --only launch.raised names it"
     )
-    assert "drift with rule=launch.raised" in tools.graph(
+    assert "drift with only=launch.raised" in tools.graph(
         _no_endpoints(raised=True), profile="robot"
     )

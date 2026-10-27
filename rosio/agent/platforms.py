@@ -38,13 +38,23 @@ SCOPES = ("project", "user")
 SKILL_NAME = "rosio"
 SERVE_ARGS = ("-m", "rosio", "serve")
 """stdio is the default transport of `rosio serve`, so the registration names no transport
-flag. The interpreter that runs install starts the server, by its absolute path: an assistant
-started outside the virtual environment has no `rosio` on its PATH."""
+flag. At user scope the interpreter that runs install starts the server, by its absolute path:
+an assistant started outside the virtual environment has no `rosio` on its PATH."""
 
 
 def serve_command(atlas: Path | None = None) -> tuple[str, ...]:
     """The command an assistant runs to start this rosio, on `atlas` when one is named."""
     return (sys.executable, *SERVE_ARGS, *(("--atlas", str(atlas)) if atlas else ()))
+
+
+def project_command() -> tuple[str, ...]:
+    """The command a committed project file names: `rosio` from the PATH, on the project's
+    atlas by its path inside the project, which is the directory an MCP client starts its
+    servers in. This machine's interpreter or an absolute path fails in every other clone."""
+    from rosio.config import DEFAULT_OUT_DIR
+    from rosio.extract import ATLAS_NAME
+
+    return ("rosio", "serve", "--atlas", f"{DEFAULT_OUT_DIR}/{ATLAS_NAME}")
 
 
 @dataclass(frozen=True)
@@ -400,6 +410,7 @@ __all__ = [
     "get",
     "keys",
     "platforms",
+    "project_command",
     "serve_command",
     "server_entry",
     "table",

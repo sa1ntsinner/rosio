@@ -34,9 +34,10 @@ from typing import Any
 from rosio import ATLAS_SCHEMA_VERSION, __version__, ids
 from rosio.errors import ContractError
 
-SCHEMA_MINOR = "19"
+SCHEMA_MINOR = "20"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the `build.unbuilt` rule, the `file_after_build` refusal reason with the file
+stored id: node and construction record `auto_declare`, also on the node's coded fact;
+the `build.unbuilt` rule, the `file_after_build` refusal reason with the file
 attributes `found_elsewhere` and `needs`, and the model file attribute `meshes_elsewhere`;
 the unresolved entry `written_in`; the observed node `command_line`, which took
 the place of the observed `argv`, and node `child_of`; the launch exception row `env`; launch

@@ -2,8 +2,9 @@
 
 `rosio extract` reads the first of these that exists: the file `--config` names, the file the
 `ROSIO_CONFIG` environment variable names, `rosio.yaml` in the workspace or the directory above
-it, `rosio.yaml` in the working directory or the directory above it. Without one it extracts one
-profile per launch file it finds. The run summary names the file it read. `rosio init` writes the
+it, `rosio.yaml` in the working directory or the directory above it when one of its roots is the
+workspace or lies inside it. A file in the working directory written for another tree is
+ignored, and extract says so. Without one it extracts one profile per launch file it finds. The run summary names the file it read. `rosio init` writes the
 fallback out as a file to edit.
 
 Relative paths in the file are read from the directory that holds it. A key this page does not
@@ -23,7 +24,7 @@ list is refused, so a typing error never passes unnoticed.
 | `out_dir` | the older spelling of `out`. | |
 | `deterministic` | accepted for older files. `rosio extract` is deterministic unless `--no-deterministic` is passed. | |
 | `waivers` | waiver files `rosio drift` grades with, a path or a list. `--waivers` replaces it. Never read by extract. | none |
-| `resolution_budget` | the resolution rate under which `resolution.below_budget` fires: a number between 0 and 1, or a mapping of want (`topic_name`, `param_value`, ...) to number, where `overall` sets the overall rate. `rosio unresolved` lists what keeps the rate down. | `0.95` overall |
+| `resolution_budget` | the resolution rate under which `resolution.below_budget` fires: a number between 0 and 1, or a mapping of want (`topic_name`, `param_value`, ...) to number, where `overall` sets the overall rate. A key that names no rate is refused. `rosio unresolved` lists what keeps the rate down. | `0.95` overall |
 
 ## A root
 

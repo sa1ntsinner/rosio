@@ -21,6 +21,7 @@ from rosio import ids, model, schema
 from rosio.collect import CollectContext, get, launch_declared
 from rosio.config import Config, Entrypoint, ProfileSpec, RootSpec
 from rosio.drift import build as drift_build
+from rosio.drift import rules as drift_rules
 from rosio.resolve import _launch_child as launch_child
 from rosio.resolve import identity, records
 from rosio.workspace import Workspace
@@ -437,6 +438,20 @@ def test_a_profile_naming_a_missing_launch_file_fails_the_gate(ws: Workspace) ->
     assert "rosio.yaml" in found.fix
     again = drift_build.launch_unloadable(_ghost_atlas(ws, "rtabmap.py"))
     assert [item.id for item in again] == [found.id]
+
+
+def test_one_missing_launch_file_named_twice_is_one_finding(ws: Workspace) -> None:
+    """A launch file started once per robot made two identical findings, and the duplicate id
+    dropped every launch.unloadable finding of the atlas, the real one with it."""
+    twice = Entrypoint(verb="launch", pkg="lx_bringup", target="rtabmap.py")
+    other = Entrypoint(verb="launch", pkg="lx_bringup", target="ghost.py")
+    atlas = _run_profile(ws, "ghost", twice, twice, other)[0]
+    found = drift_rules.findings_for(atlas, only=["launch.unloadable"])
+    assert len(found) == 2
+    assert {("rtabmap.py" in item.say, "ghost.py" in item.say) for item in found} == {
+        (True, False),
+        (False, True),
+    }
 
 
 def test_a_profile_naming_a_launch_file_that_exists_has_no_missing_finding(
@@ -2741,7 +2756,10 @@ def test_one_walk_names_every_variable_the_file_reads_and_nothing_sets(
     ws: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """TurtleBot3 reads TURTLEBOT3_MODEL and LDS_MODEL, and the second used to surface only
-    after a second extract with the first one set."""
+    after a second extract with the first one set. What is set is read from the environment
+    the walk ran with, never from the shell that ran extract."""
+    from rosio.resolve import launch_exec
+
     launch = tmp_path / "robot.launch.py"
     launch.write_text(
         "import os\n"
@@ -2751,9 +2769,11 @@ def test_one_walk_names_every_variable_the_file_reads_and_nothing_sets(
         "ARM = os.environ['ARM_MODEL']\n",
         encoding="utf-8",
     )
-    monkeypatch.delenv("LIDAR_MODEL", raising=False)
-    monkeypatch.setenv("HOME_SET_HERE", "/home/robot")
+    monkeypatch.setenv("LIDAR_MODEL", "only_in_this_shell")
+    monkeypatch.delenv("HOME_SET_HERE", raising=False)
     monkeypatch.delenv("ARM_MODEL", raising=False)
+    sourced: dict[str, str] | None = {"HOME_SET_HERE": "/home/robot"}
+    monkeypatch.setattr(launch_exec, "sourced_environment", lambda ros_setup=(): sourced)
     failure = records.WalkException(
         path=str(launch),
         phase="describe",
@@ -2781,6 +2801,15 @@ def test_one_walk_names_every_variable_the_file_reads_and_nothing_sets(
     get(launch_declared.NAME).collect(ctx)
     (row,) = builder.build().by_kind("run")[0].attrs["exceptions"]
     assert row["env"] == "ROBOT_MODEL LIDAR_MODEL"
+
+    # An environment that could not be read names only the variable the walk stopped at.
+    sourced = None
+    builder = model.AtlasBuilder()
+    ctx = CollectContext(ws=ws, cfg=cfg, builder=builder)
+    ctx.declared.walks.append(walk)
+    get(launch_declared.NAME).collect(ctx)
+    (row,) = builder.build().by_kind("run")[0].attrs["exceptions"]
+    assert row["env"] == "ROBOT_MODEL"
 
 
 def test_a_missing_package_names_the_trees_it_searched_by_label(ws: Workspace) -> None:

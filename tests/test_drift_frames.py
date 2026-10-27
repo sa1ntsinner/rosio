@@ -1603,7 +1603,8 @@ def _budget_atlas(unresolved: int) -> AtlasBuilder:
 def test_below_budget_fires_and_names_the_rate_the_budget_and_the_profile():
     atlas = _budget_atlas(unresolved=4).build()
     found = build_rules.resolution_below_budget(atlas)
-    assert [item.subject for item in found] == [NAV]
+    assert [item.subject for item in found] == ["profile:nx_mapping"], "the first profile"
+    assert found[0].profiles == [NAV]
     assert "0.692" in found[0].say and "0.950" in found[0].say
     assert found[0].severity == rules.severity_of("resolution.below_budget")
 
@@ -2349,6 +2350,37 @@ def test_launch_raised_names_every_unset_variable_the_walk_saw():
     assert found.fix.startswith("set TURTLEBOT3_MODEL and LDS_MODEL under env of profile")
 
 
+def _two_profile_budget(nav: int, sim: int) -> model.Atlas:
+    builder = _builder()
+    for profile, executable, count in ((NAV, "planner", nav), (SIM, "mapper", sim)):
+        owner = _node(builder, f"/{executable}", profile, {"executable": executable})
+        for index in range(count):
+            builder.unresolved(
+                Unresolved(
+                    want=model.Want.TOPIC_NAME.value,
+                    owner=owner,
+                    expr=f"topic_from_variable_{index}",
+                    reason="not_stated_in_source",
+                    evidence=[Source(file=ids.build_file(executable, "src/node.cpp"))],
+                )
+            )
+    builder.count_resolved(model.Want.TOPIC_NAME.value, 9)
+    return builder.build()
+
+
+def test_below_budget_keeps_its_id_when_another_profile_becomes_the_worst():
+    """A waiver keyed on the id stopped matching on a run that repaired blind spots."""
+    (before,) = build_rules.resolution_below_budget(_two_profile_budget(4, 1))
+    (after,) = build_rules.resolution_below_budget(_two_profile_budget(1, 4))
+    assert before.id == after.id
+    assert before.title.endswith(
+        "most blind spots in nx_navigation (4), " + ids.parse_profile(SIM) + " (1)"
+    )
+    assert after.title.endswith(
+        "most blind spots in " + ids.parse_profile(SIM) + " (4), nx_navigation (1)"
+    )
+
+
 def test_below_budget_is_one_finding_that_names_the_worst_profiles_first():
     """One finding per profile repeated the run's rate once per profile and blamed a profile
     holding one blind spot as loudly as the one holding four."""
@@ -2364,7 +2396,7 @@ def test_below_budget_is_one_finding_that_names_the_worst_profiles_first():
         )
     )
     (found,) = build_rules.resolution_below_budget(builder.build())
-    assert found.subject == NAV
+    assert found.subject == "profile:nx_mapping", "one subject whichever profile is worst"
     assert found.title.endswith(
         f"most blind spots in nx_navigation (4), {ids.parse_profile(SIM)} (1)"
     )

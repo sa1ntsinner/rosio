@@ -64,6 +64,39 @@ def test_nav2_lifecycle_node_keeps_its_literal_name():
     assert cpp.file_report(unit)["nodes"][0]["name"] == "controller_server"
 
 
+@pytest.mark.parametrize(
+    ("options", "stated"),
+    [
+        ("rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true)", True),
+        ("rclcpp::NodeOptions().allow_undeclared_parameters(flag)", "unknown"),
+        ("rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(false)", None),
+        ("options", None),
+    ],
+)
+def test_a_node_built_to_take_undeclared_parameters_says_so(options, stated):
+    unit = cpp.parse_text(
+        f'Stop::Stop(bool flag) : rclcpp::Node("safety_stop", {options}) {{}}',
+        path="stop.cpp",
+    )
+    cpp.analyse([unit])
+    (row,) = cpp.file_report(unit)["nodes"]
+    assert row.get("auto_declare") == stated
+
+
+def test_a_main_that_builds_the_options_marks_its_construction():
+    unit = cpp.parse_text(
+        "int main(int argc, char ** argv) {\n"
+        "  auto options = rclcpp::NodeOptions();\n"
+        "  options.automatically_declare_parameters_from_overrides(true);\n"
+        "  rclcpp::spin(std::make_shared<Stop>(options));\n"
+        "}\n",
+        path="main.cpp",
+    )
+    cpp.analyse([unit])
+    (row,) = cpp.file_report(unit)["constructions"]
+    assert row["auto_declare"] is True
+
+
 def test_a_refused_region_can_hide_a_nav2_declaration():
     unit = cpp.parse_text(
         'void f() { FOO(auto p = declare_or_get_parameter<double>("gain", 1.0)); }',

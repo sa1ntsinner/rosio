@@ -139,8 +139,9 @@ class _SourceShares:
     Only a package that a source root holds and no install root does is answered here, and
     only after the index refused it, so an installed copy wins as it does at run time.
 
-    While a launch file builds its description, a package nothing holds is answered too, with
-    a directory that does not exist, and remembered. A description that looks up a driver
+    When a launch file raised while it built its description after a lookup missed, it is built
+    again, and then a package nothing holds is answered too, with a directory that does not
+    exist, and remembered. A description that looks up a driver
     package while it is built otherwise raises before it returns a single action, and the one
     missing package takes every sibling node of the profile with it. The include that reads
     from that directory then fails on its own, as one blind spot.
@@ -170,9 +171,9 @@ class _SourceShares:
                 if package_name in self.shares:
                     self.used.add(package_name)
                     return self.shares[package_name]
+                self.missing.setdefault(package_name, exc)
                 if not self.lenient:
                     raise
-                self.missing.setdefault(package_name, exc)
                 return f"{launch_exec.MISSING_SHARE}/{package_name}"
 
         for owner in (packages, ament_index_python, find_package):
@@ -738,6 +739,16 @@ class Walker:
             self.result.loadable = False
             self.result.notes.append("no generate_launch_description in this file")
             return None
+        self.shares.missing.clear()
+        try:
+            return function()
+        except BaseException as exc:
+            if not self.shares.missing:
+                self._raised("describe", exc, self.entry)
+                return None
+        # Only a description that raised after a lookup missed is built again, leniently. A
+        # file that catches the miss itself has already built the way ros2 launch builds it.
+        self.shares.missing.clear()
         self.shares.lenient = True
         try:
             description = function()

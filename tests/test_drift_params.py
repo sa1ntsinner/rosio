@@ -608,7 +608,11 @@ def test_param_restated_identical_finding_id_is_stable_across_two_runs():
 
 
 def _undeclared_atlas(
-    name: str = "max_speed", declared: tuple[str, ...] = (), states_node: bool = True
+    name: str = "max_speed",
+    declared: tuple[str, ...] = (),
+    states_node: bool = True,
+    auto_declare: bool | str = False,
+    read: bool = False,
 ) -> model.Atlas:
     builder = _builder()
     for other in declared:
@@ -622,14 +626,17 @@ def _undeclared_atlas(
     builder.node(source_file)
     if states_node:
         builder.atlas.entities[source_file].attrs["nodes"] = [{"name": "demo_server"}]
+    values: dict = {"coded_sources": [source_file]}
+    if auto_declare:
+        values["auto_declare"] = auto_declare
     builder.fact(
         NODE,
         CODED,
         profile=PROFILE,
-        values={"coded_sources": [source_file]},
+        values=values,
         attrs={"coded_params_known": True},
     )
-    _param(
+    param_id = _param(
         builder,
         name,
         [
@@ -642,6 +649,18 @@ def _undeclared_atlas(
             )
         ],
     )
+    if read:
+        symbol = ids.build_sym("demo_pkg", "src/demo_server.cpp", "DemoServer::on_timer")
+        builder.node(symbol)
+        builder.edge(
+            model.EdgeKind.READS_PARAM.value,
+            symbol,
+            param_id,
+            key=ids.edge_key(profile=PROFILE, symbol=symbol, name=name, api="get_parameter"),
+            layer=CODED,
+            profile=PROFILE,
+            values={"name": name, "api": "get_parameter", "symbol": symbol},
+        )
     return builder.recompute()
 
 
@@ -754,6 +773,25 @@ def test_a_parameter_the_node_never_declares_wins_nothing_and_is_undeclared():
     after = _run(atlas, "param.set_undeclared")
     assert [item.id for item in after] == [item.id for item in before]
     assert _joined(atlas).to_bytes() == atlas.to_bytes()
+
+
+@pytest.mark.parametrize("auto_declare", [True, "unknown"])
+def test_a_node_that_takes_undeclared_parameters_keeps_the_value(auto_declare):
+    """`automatically_declare_parameters_from_overrides` declares what a file sets, and an
+    option this reader could not read may do the same."""
+    atlas = _joined(_undeclared_atlas(auto_declare=auto_declare))
+    entity = atlas.get(ids.build_param(NODE, "max_speed"))
+    assert entity.state == model.ParamState.EFFECTIVE.value
+    assert entity.effective
+    assert _run(atlas, "param.set_undeclared") == []
+
+
+def test_a_parameter_the_code_reads_back_is_not_ignored():
+    atlas = _joined(_undeclared_atlas(read=True))
+    entity = atlas.get(ids.build_param(NODE, "max_speed"))
+    assert entity.state == model.ParamState.EFFECTIVE.value
+    assert all(not row.note for row in entity.candidates)
+    assert _run(atlas, "param.set_undeclared") == []
 
 
 def test_a_parameter_the_node_declares_stays_effective():

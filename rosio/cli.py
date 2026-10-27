@@ -1008,7 +1008,11 @@ def cmd_extract(args: argparse.Namespace) -> int:
         raise UsageError(f"workspace directory does not exist: {workspace}")
 
     say = _progress("extract", quiet=args.quiet)
-    source = locate_config(args.config, workspace=str(workspace))
+    source = locate_config(
+        args.config,
+        workspace=str(workspace),
+        note=lambda text: print(f"{PROG} extract: {text}", file=sys.stderr),
+    )
     if not args.quiet:
         print(
             f"{PROG} extract: config {source.absolute()}"
@@ -1399,16 +1403,38 @@ def cmd_drift(args: argparse.Namespace) -> int:
     graded, matched = engine.waive(atlas.findings, [item.key for item in waivers])
     answer = query.drift(atlas, min_severity=args.min_severity, limit=args.limit, waived=matched)
     _report_waivers(answer, waivers, matched, args.limit)
+    # A rule that raised while the atlas was built left nothing behind it but its name.
+    failed = [
+        name
+        for name in (atlas.counters.get("drift") or {}).get("failed") or []
+        if not wanted or name in wanted or name not in rules.COMMITTED
+    ]
+    if failed:
+        answer.data["rules_failed"] = failed
+        answer.lines.append(
+            f"  rules that could not be trusted, so their findings are missing: {', '.join(failed)}"
+        )
     code = _answer(args, answer)
-    if engine.crosses_gate(engine.DriftRun(gated=graded), args.fail_on):
+    failures = [
+        engine.RuleFailure(rule=name, kind="raised", exc_type="", message="") for name in failed
+    ]
+    if engine.crosses_gate(engine.DriftRun(gated=graded, failures=failures), args.fail_on):
         crossed = [item for item in graded if _at_or_above(item.severity, args.fail_on)]
         rules_hit = sorted({item.rule for item in crossed})
-        print(
-            f"{PROG}: {plural(len(crossed), 'finding')} at "
-            f"{args.fail_on} or above ({', '.join(rules_hit)}), the gate is "
-            f"--fail-on {args.fail_on}",
-            file=sys.stderr,
-        )
+        if crossed:
+            print(
+                f"{PROG}: {plural(len(crossed), 'finding')} at "
+                f"{args.fail_on} or above ({', '.join(rules_hit)}), the gate is "
+                f"--fail-on {args.fail_on}",
+                file=sys.stderr,
+            )
+        if failed:
+            print(
+                f"{PROG}: {plural(len(failed), 'rule')} could not be trusted "
+                f"({', '.join(failed)}), which the gate grades as error, extract again and "
+                "report the rule if it fails again",
+                file=sys.stderr,
+            )
         return EXIT_DRIFT
     return code
 

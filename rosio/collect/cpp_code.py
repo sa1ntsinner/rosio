@@ -484,6 +484,7 @@ class Unit:
     signatures: dict[str, list[tuple[int, list[str]]]] | None = None
     string_maps: dict[str, tuple[str, int]] = field(default_factory=dict)
     map_mutations: set[str] = field(default_factory=set)
+    auto_declare: bool | str = False
 
     @property
     def syntax(self) -> Any:
@@ -2304,6 +2305,39 @@ def _namespaces_of(node: Any, src: bytes) -> list[str]:
     return list(reversed(out))
 
 
+AUTO_DECLARE_OPTIONS = frozenset(
+    {"automatically_declare_parameters_from_overrides", "allow_undeclared_parameters"}
+)
+
+
+def _auto_declare(root: Any, src: bytes) -> bool | str:
+    """Whether a `NodeOptions` chain in this file lets its node take parameters it never
+    declares: True for a literal `true`, `unknown` when the value is not a literal."""
+    found: bool | str = False
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.named_children)
+        if node.type != "call_expression":
+            continue
+        name, receiver, _template = _call_parts(node, src)
+        if name not in AUTO_DECLARE_OPTIONS or receiver is None:
+            continue
+        arguments = _args(node)
+        value = _flat(arguments[0], src) if len(arguments) == 1 else ""
+        if value == "true":
+            return True
+        if value != "false":
+            found = "unknown"
+    return found
+
+
+def _constructions(unit: Unit, rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not unit.auto_declare:
+        return list(rows)
+    return [{**row, "auto_declare": unit.auto_declare} for row in rows]
+
+
 def _declares_with(body: Any, src: bytes, parameter: str) -> bool:
     stack = [body]
     while stack:
@@ -2361,6 +2395,7 @@ def parse_text(
         reader.constructor_arguments.setdefault(name, []).append(values)
     reader.walk(root)
     unit.type_aliases = _type_aliases(root, src)
+    unit.auto_declare = _auto_declare(root, src)
     # the mutations are a second, whole tree walk that only a map default ever asks for
     unit.string_maps = _string_map_records(root, src, mutations_wanted=False)[0]
     for name, values, site in sites:
@@ -3899,6 +3934,8 @@ def file_report(
             row["construction_ambiguous"] = True
         if item.takes_node_options:
             row["takes_node_options"] = True
+        if unit.auto_declare:
+            row["auto_declare"] = unit.auto_declare
         if not item.stated_name:
             row["unresolved_ref"] = f"node_name:{item.name_expr}"
             unresolved.append(
@@ -4132,7 +4169,7 @@ def file_report(
         "nodes": nodes,
     }
     if unit.constructions:
-        report["constructions"] = unit.constructions
+        report["constructions"] = _constructions(unit, unit.constructions)
     if unit.type_aliases:
         report["type_aliases"] = unit.type_aliases
     if plugin is not None:
@@ -4692,7 +4729,7 @@ class CppCodeCollector:
             run=run,
             values={
                 "nodes": [row for row in report["nodes"] if row["symbol"] == qualname],
-                "constructions": slice_of(unit.constructions),
+                "constructions": _constructions(unit, slice_of(unit.constructions)),
                 "endpoints": slice_of(report["endpoints"]),
                 "parameters": slice_of(report["parameters"]),
                 "plugin_parameters": slice_of(report["plugin_parameters"]),

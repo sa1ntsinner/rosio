@@ -212,6 +212,11 @@ rosio install cursor --dry-run         # print what would be written, write noth
 rosio uninstall claude-code            # put the tree back
 ```
 
+A project file such as `.mcp.json` is committed, so its server entry runs `rosio serve --atlas
+rosio-out/atlas.json` from the PATH, in the project directory the assistant starts it in, and
+works in every clone. When `rosio` is not on a minimal PATH, install says so: `--scope user`
+registers the interpreter that ran install by its absolute path instead.
+
 Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, Aider, OpenCode, Amp, Kilo, and the cross
 framework agent skills directory. Anything that speaks MCP can use the server directly:
 

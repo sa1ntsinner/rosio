@@ -9,7 +9,6 @@ person merges the entry points that start together and states their arguments.
 
 from __future__ import annotations
 
-import importlib.util
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -52,7 +51,7 @@ def offered(cfg: Config) -> Config:
     kept = [
         profile
         for profile in cfg.profiles
-        if not any(_not_offered(item) for item in profile.entrypoints)
+        if not any(_not_offered(item, cfg.ros_setup) for item in profile.entrypoints)
     ]
     return replace(cfg, profiles=tuple(_one_slug_rule(kept)))
 
@@ -127,15 +126,20 @@ is not a system anybody starts, and as a profile it only reported its test depen
 FRONTENDS = {".xml": ("launch_xml",), ".yaml": ("launch_yaml",), ".yml": ("launch_yaml",)}
 
 
-def _not_offered(entry: Entrypoint) -> bool:
+def _not_offered(entry: Entrypoint, ros_setup: Sequence[str] = ()) -> bool:
     """A launch file init leaves out: a launch_testing file, or a markup file no installed
-    frontend parses, which extraction could only refuse."""
+    frontend parses, which extraction could only refuse. The frontend is looked for where
+    extraction walks, in the sourced environment, and a file is offered when that could not
+    be asked."""
+    from rosio.resolve.launch_exec import importable
+
     if entry.verb != "launch" or entry.origin is None:
         return False
     path = Path(entry.origin.path)
     if path.suffix != ".py":
         wanted = FRONTENDS.get(path.suffix, ("launch_xml", "launch_yaml"))
-        return not any(importlib.util.find_spec(name) for name in wanted)
+        found = importable(wanted, ros_setup)
+        return found is not None and not found
     try:
         source = path.read_text(encoding="utf-8", errors="replace")
     except OSError:

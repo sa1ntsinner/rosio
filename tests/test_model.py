@@ -1467,7 +1467,7 @@ def _minor_note() -> str:
 def test_the_minor_is_bumped_and_says_what_each_addition_was():
     """Three additions stood under an unchanged 1.0: a rule id, the pass record, and the
     rename of a `refused_because` value. All three are additive, so the minor moves."""
-    assert model.SCHEMA_VERSION == "1.19"
+    assert model.SCHEMA_VERSION == "1.20"
     assert model.SCHEMA_VERSION.endswith("." + model.SCHEMA_MINOR)
     note = _minor_note()
     for addition in (
@@ -1505,6 +1505,7 @@ def test_the_minor_is_bumped_and_says_what_each_addition_was():
         "found_elsewhere",
         "`needs`",
         "meshes_elsewhere",
+        "record `auto_declare`",
     ):
         assert addition in note
 
@@ -1515,7 +1516,7 @@ def test_a_reader_pinned_to_the_old_minor_still_loads_a_file_written_at_the_new_
     """The check the bump is worth. The loader compares the major alone, and the keys and
     the enum members that build never heard of are kept and re emitted rather than dropped."""
     payload = tiny_atlas().to_json()
-    assert payload["schema_version"] == "1.19"
+    assert payload["schema_version"] == "1.20"
     run_id = ids.build_run("declared", "nx_navigation", "9f2c1a4b")
     payload["entities"][run_id] = {
         "id": run_id,
@@ -1562,15 +1563,20 @@ def test_a_reader_pinned_to_the_old_minor_still_loads_a_file_written_at_the_new_
         "coded",
         values={
             "constructions": [
-                {"class": "Listener", "definition_file": "file:example|listener.hpp"}
+                {
+                    "class": "Listener",
+                    "definition_file": "file:example|listener.hpp",
+                    "auto_declare": True,
+                }
             ],
+            "nodes": [{"name": "listener", "auto_declare": "unknown"}],
             "class_templates": [{"name": "Filter", "definitions": 1, "specialized": False}],
         },
     )
     payload["entities"].update(stamps.build().to_json()["entities"])
     monkeypatch.setattr(model, "SCHEMA_VERSION", "1.0")
     old = Atlas.from_json(payload)
-    assert old.schema_version == "1.19"
+    assert old.schema_version == "1.20"
     assert old.entities[source].fact("coded").values["class_templates"] == [
         {"name": "Filter", "definitions": 1, "specialized": False}
     ]
@@ -1578,6 +1584,8 @@ def test_a_reader_pinned_to_the_old_minor_still_loads_a_file_written_at_the_new_
         old.entities[source].fact("coded").values["constructions"][0]["definition_file"]
         == "file:example|listener.hpp"
     )
+    assert old.entities[source].fact("coded").values["constructions"][0]["auto_declare"] is True
+    assert old.entities[source].fact("coded").values["nodes"][0]["auto_declare"] == "unknown"
     assert old.entities[topic].fact("recorded").values["stamps"]["messages"] == 4
     assert old.entities[recording].fact("recorded").values["stamp_verdict"]["level"] == "ok"
     assert old.entities[run_id].attrs["passes"][0]["state"] == "not_attempted"

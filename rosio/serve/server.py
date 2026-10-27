@@ -299,6 +299,17 @@ def _takes(tool: str, takes: list[str]) -> str:
     return f"{tool} takes {', '.join(named) or 'no arguments'}"
 
 
+def doubled(tool: str, arguments: dict) -> str:
+    """The refusal for one argument given under both of its spellings, or nothing. Renaming
+    both would keep whichever the caller's JSON happened to put last."""
+    twice = [
+        f"{name} was given twice, as {name} and as {spelled}"
+        for spelled, name in sorted(SPELLINGS.get(tool, {}).items())
+        if spelled in arguments and name in arguments
+    ]
+    return f"{tool} was not run: {', '.join(twice)}" if twice else ""
+
+
 def strangers(tool: str, arguments: dict, takes: dict[str, bool]) -> str:
     """The refusal for arguments a tool does not take, or nothing. `takes` maps each argument
     to whether it is required. A stray argument the schema would drop is refused instead,
@@ -401,6 +412,9 @@ def build(source: tools.AtlasSource) -> Any:
     class Server(factory):
         async def call_tool(self, name: str, arguments: dict, *rest: Any, **named: Any) -> Any:
             if name in needed:
+                refused = doubled(name, arguments or {})
+                if refused:
+                    raise refusal(refused)
                 spelled = SPELLINGS.get(name, {})
                 arguments = {
                     spelled.get(key, key): value for key, value in (arguments or {}).items()
@@ -545,6 +559,7 @@ __all__ = [
     "Options",
     "bindings",
     "build",
+    "doubled",
     "guarded",
     "http_app",
     "mcp_problem",

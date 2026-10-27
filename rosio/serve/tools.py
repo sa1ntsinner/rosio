@@ -741,7 +741,7 @@ def _why_empty(atlas: Atlas, chosen: GraphSelection, cli: bool) -> str:
     raised = set(slices.raised_profiles(atlas))
     where = slices.profile_name(chosen.wanted) if chosen.wanted else ""
     if where and where in raised and not chosen.nodes:
-        how = "rosio drift --only launch.raised" if cli else "drift with rule=launch.raised"
+        how = "rosio drift --only launch.raised" if cli else "drift with only=launch.raised"
         return f"no node in profile {where}: a launch file raised there, {how} names it"
     if not any(edge.kind in LINK_KINDS for edge in atlas.edges.values()):
         if not atlas.by_kind("sym"):
@@ -1062,7 +1062,7 @@ def stamps(atlas: Atlas, *, bag: str | None = None, limit: int | None = None) ->
             )
         if len(failed) > rows:
             lines.append(f"  and {len(failed) - rows} more failed checks, raise limit")
-    lines.append("next: drift rule=time.backward and the other time.* rules for the line to fix")
+    lines.append("next: drift only=time.backward and the other time.* rules for the line to fix")
     return _fit(lines, "narrow with bag=<recording>")
 
 
@@ -1646,7 +1646,13 @@ def migrate(
     source, how = current_release(start)
     if not source:
         return _fit([how], "call migrate with start=<release>")
-    changes, _root = release.plan_workspace(_text(workspace) or ".", source, target)
+    directory = _text(workspace) or "."
+    try:
+        changes, _root = release.plan_workspace(directory, source, target)
+    except OSError as exc:
+        raise UsageError(
+            f"migrate could not read {exc.filename or directory}: {exc.strerror or exc}"
+        ) from exc
     wanted = _text(package)
     if wanted:
         changes = [change for change in changes if change.package == wanted]

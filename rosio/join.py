@@ -858,11 +858,19 @@ def blind_files(atlas: model.Atlas, want: str) -> set[str]:
 
 
 def declared_names(atlas: model.Atlas) -> dict[str, set[str]]:
-    """Owner node id to the parameter names its source declares."""
+    """Owner node id to the parameter names its source declares or reads back.
+
+    A read of a name no declaration carries is the code using the value all the same, through
+    a declaration this reader could not follow or a node that takes undeclared parameters.
+    """
     out: dict[str, set[str]] = {}
     for node in atlas.by_kind(model.NodeKind.PARAM.value):
         if any(fact.layer == CODED and fact.values.get("declared_in_code") for fact in node.facts):
             parsed = ids.parse_param(node.id)
+            out.setdefault(parsed.owner, set()).add(parsed.name)
+    for edge in atlas.edges.values():
+        if edge.kind == model.EdgeKind.READS_PARAM.value:
+            parsed = ids.parse_param(edge.dst)
             out.setdefault(parsed.owner, set()).add(parsed.name)
     return out
 
@@ -879,7 +887,8 @@ def ignored(
 
     Only a node whose code the join bound and read whole can say so: a source holding a
     parameter name built at run time may declare this one, and a `main` that only constructs
-    a class defined in another file, with no declaration bound, read none of them.
+    a class defined in another file, with no declaration bound, read none of them. A node
+    built to take undeclared parameters, or one whose value it cannot tell, uses them.
     """
     parsed = ids.parse_param(node.id)
     owner = atlas.entities.get(parsed.owner)
@@ -890,12 +899,15 @@ def ignored(
         coded is None
         or coded.confidence == model.Confidence.UNKNOWN.value
         or coded.values.get("via_known_wrapper")
+        or coded.values.get("auto_declare")
     ):
         return False
     sources = set(coded.values.get("coded_sources") or [])
     if sources & blind:
         return False
     if parsed.owner not in declared and not any(_states_node(atlas, s) for s in sources):
+        return False
+    if parsed.name in declared.get(parsed.owner, ()):
         return False
     own = node.fact(CODED, profile)
     return not (own is not None and own.values.get("declared_in_code"))
@@ -1655,6 +1667,14 @@ def _bind_instance(
     stated = _code_namespace(found)
     if stated:
         values["code_namespace"] = stated
+    auto = {
+        row.get("auto_declare")
+        for carrier in found
+        for row in (*carrier.nodes, *carrier.constructions)
+        if row.get("auto_declare")
+    }
+    if auto:
+        values["auto_declare"] = True if True in auto else "unknown"
     item = _placed(item, stated)
     reads = _read_names(found)
     assigned = _argv_assigned(item)

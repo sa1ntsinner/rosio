@@ -520,6 +520,35 @@ def test_a_created_node_name_that_is_not_a_literal_is_refused() -> None:
     assert [entry["want"] for entry in record["unresolved"]] == ["node_name"]
 
 
+AUTO_DECLARE = """
+import rclpy
+from rclpy.node import Node
+
+
+class SafetyStop(Node):
+    def __init__(self):
+        super().__init__("safety_stop", automatically_declare_parameters_from_overrides=%s)
+        self.distance = self.get_parameter("stop_distance").value
+"""
+
+
+@pytest.mark.parametrize(
+    ("value", "stated"), [("True", True), ("flag", "unknown"), ("False", None)]
+)
+def test_a_node_that_declares_from_overrides_says_so(value: str, stated) -> None:
+    record = _created(AUTO_DECLARE % value)
+    (node,) = record["nodes"]
+    assert node.get("auto_declare") == stated
+
+
+def test_a_created_node_that_allows_undeclared_parameters_says_so() -> None:
+    source = (
+        "import rclpy\ndef main():\n"
+        "    node = rclpy.create_node('gate', allow_undeclared_parameters=True)\n"
+    )
+    assert _created(source)["nodes"][0]["auto_declare"] is True
+
+
 def test_a_create_node_of_another_library_is_not_a_ros_node() -> None:
     source = "import graphlib\ndef main():\n    graphlib.create_node('x')\n"
     assert _created(source)["nodes"] == []

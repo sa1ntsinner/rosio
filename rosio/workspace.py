@@ -202,6 +202,7 @@ class Workspace:
         self._localised: dict[str, str] = {}
         self._rels: dict[str, tuple[str | None, str]] = {}
         self._marks: list[tuple[bytes, bytes]] | None = None
+        self._by_name: dict[str, tuple[str, ...]] | None = None
 
     # ------------------------------------------------------------------
     # discovery
@@ -236,6 +237,16 @@ class Workspace:
     def files(self) -> tuple[str, ...]:
         """Every indexed file, sorted, absolute."""
         return self._files
+
+    def named(self, name: str) -> tuple[str, ...]:
+        """Every indexed file called `name`, sorted, from one index built on first use, so the
+        ignore rules hold and a hundred lookups cost one pass over the index."""
+        if self._by_name is None:
+            index: dict[str, list[str]] = {}
+            for path in self._files:
+                index.setdefault(Path(path).name, []).append(path)
+            self._by_name = {key: tuple(value) for key, value in index.items()}
+        return self._by_name.get(name, ())
 
     def undecodable(self) -> list[dict[str, str]]:
         """One row per file the walk found and could not name, ready for a run record.

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -235,16 +237,19 @@ def install(
 ) -> Report:
     """Write every file the platform reads at this scope.
 
-    The MCP entry starts the interpreter running this install, by its absolute path, and at
-    project scope on the project's atlas by its absolute path, whether or not it is built
-    yet, so neither depends on the PATH or the directory the assistant is started from. A
-    user scope entry serves every project, so it names no atlas. An entry whose server could
-    not start, because this interpreter has no mcp package, is not written."""
+    A project scope entry is committed with the project, so it names `rosio` from the PATH
+    and the atlas by its path inside the project, which is where an MCP client starts its
+    servers, and it starts in every clone. When `rosio` is not on a minimal PATH here the
+    report says so and names the user scope, whose entry starts the interpreter running this
+    install by its absolute path and serves every project, so it names no atlas. An entry
+    whose server could not start, because this interpreter has no mcp package, is not
+    written."""
     row = plat.get(platform)
     plat.check_scope(scope)
     root = Path(root or Path.cwd()).resolve()
     home = Path(home or Path.home()).resolve()
-    command = tuple(command) or plat.serve_command(_atlas(root) if scope == "project" else None)
+    stated = tuple(command)
+    command = stated or (plat.project_command() if scope == "project" else plat.serve_command())
     report = Report(row.key, scope, root, home, verb="install", dry_run=dry_run)
     missing = _mcp_missing()
 
@@ -261,7 +266,26 @@ def install(
             _install_section(target, path, report, command)
 
     _add_notes(row, scope, report)
+    written = any(
+        a.mechanism == "mcp" and a.status in (CREATED, UPDATED, UNCHANGED) for a in report.actions
+    )
+    if scope == "project" and not stated and written and not _on_minimal_path("rosio"):
+        report.notes.append(
+            "rosio is not on a minimal PATH here, so an assistant may not start the server: "
+            "install it where every shell finds it, or install with --scope user, which "
+            "registers this interpreter by its absolute path"
+        )
     return report
+
+
+MINIMAL_PATH = ("/usr/local/bin", "/usr/bin", "/bin", "~/.local/bin")
+"""What a login shell puts on every user's PATH, `~/.local/bin` being where pipx and uv tool
+install a command. An assistant started from a desktop launcher sees this and not a venv."""
+
+
+def _on_minimal_path(name: str) -> bool:
+    directories = [str(Path(item).expanduser()) for item in MINIMAL_PATH]
+    return shutil.which(name, path=os.pathsep.join(directories)) is not None
 
 
 def _install_whole(target: plat.Target, path: Path, report: Report, *, force: bool) -> None:
@@ -281,13 +305,6 @@ def _install_whole(target: plat.Target, path: Path, report: Report, *, force: bo
     if not report.dry_run:
         _write(path, wanted)
     report.actions.append(Action(path, target.mechanism, status, detail, undo))
-
-
-def _atlas(root: Path) -> Path:
-    from rosio.config import DEFAULT_OUT_DIR
-    from rosio.extract import ATLAS_NAME
-
-    return root / DEFAULT_OUT_DIR / ATLAS_NAME
 
 
 def _mcp_missing() -> str:

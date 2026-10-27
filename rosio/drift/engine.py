@@ -467,12 +467,17 @@ def crosses_gate(result: DriftRun, fail_on: str = "never") -> bool:
     The gate severity and the print threshold are two decisions, so this reads the run
     before the print filter took anything out of it. A build told to print errors and to
     fail on warnings fails on a warning it never printed.
+
+    A rule that could not be trusted grades as `error`: whatever it would have found is
+    missing, and a gate that passed over it would read exactly like a clean stack.
     """
     if fail_on == "never":
         return False
     floor = SEVERITY_ORDER.get(fail_on)
     if floor is None:
         raise ContractError(f"fail_on must be error, warn, info or never, got {fail_on!r}")
+    if result.failures:
+        return True
     return any(
         SEVERITY_ORDER.get(item.severity, len(SEVERITY_ORDER)) <= floor
         for item in (result.gated or result.findings)

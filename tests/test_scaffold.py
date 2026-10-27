@@ -322,3 +322,55 @@ def test_init_prefixes_every_slug_once_one_stem_names_two_files(tmp_path: Path) 
 def test_init_keeps_bare_stems_when_no_two_files_share_one(merged: Path) -> None:
     payload = yaml.safe_load(scaffold.render(default_config(str(merged)), merged))
     assert [row["slug"] for row in payload["profiles"]] == ["beta", "bringup"]
+
+
+def _markup_workspace(tmp_path: Path) -> Path:
+    package = tmp_path / "src" / "bot_bringup"
+    (package / "launch").mkdir(parents=True)
+    (package / "package.xml").write_text(
+        '<package format="3"><name>bot_bringup</name></package>', encoding="utf-8"
+    )
+    (package / "launch" / "robot.launch.xml").write_text("<launch/>\n", encoding="utf-8")
+    (package / "launch" / "plain.launch.py").write_text("", encoding="utf-8")
+    return tmp_path
+
+
+def test_a_markup_launch_file_is_offered_by_what_the_sourced_environment_imports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """rosio in a virtual environment cannot import launch_xml while the walk, which runs in
+    the sourced ROS environment, can, and init dropped every XML profile extract would walk."""
+    from rosio.resolve import launch_exec
+
+    workspace = _markup_workspace(tmp_path)
+    asked: list[tuple] = []
+
+    def answer(found):
+        def importable(names, ros_setup=()):
+            asked.append(tuple(names))
+            return found
+
+        return importable
+
+    for found, offered in ((frozenset({"launch_xml"}), True), (frozenset(), False), (None, True)):
+        monkeypatch.setattr(launch_exec, "importable", answer(found))
+        slugs = [p.slug for p in scaffold.offered(default_config(str(workspace))).profiles]
+        assert ("robot" in slugs) is offered, found
+    assert asked and all(names == ("launch_xml",) for names in asked)
+
+
+@pytest.mark.ros
+def test_the_sourced_environment_answers_for_a_frontend_rosio_cannot_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib.util
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *rest: None if name.startswith("launch_") else real(name, *rest),
+    )
+    workspace = _markup_workspace(tmp_path)
+    slugs = [p.slug for p in scaffold.offered(default_config(str(workspace))).profiles]
+    assert "robot" in slugs

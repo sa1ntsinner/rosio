@@ -290,31 +290,37 @@ def test_install_writes_the_three_files_claude_code_reads(tmp_path):
     doc = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
     assert doc["mcpServers"]["rosio"] == {
         "type": "stdio",
-        "command": sys.executable,
-        "args": ["-m", "rosio", "serve", "--atlas", str(tmp_path / "rosio-out" / "atlas.json")],
+        "command": "rosio",
+        "args": ["serve", "--atlas", "rosio-out/atlas.json"],
     }
 
 
-def test_the_server_entry_starts_this_rosio_on_this_atlas(tmp_path):
-    """An assistant started outside the virtual environment had no rosio on its PATH, and
-    the atlas it answered from depended on the directory it was started in."""
-    atlas = tmp_path / "rosio-out" / "atlas.json"
-    atlas.parent.mkdir()
-    atlas.write_text("{}", encoding="utf-8")
+def test_a_project_entry_holds_nothing_of_this_machine(tmp_path):
+    """`.mcp.json` is committed, and it named this machine's venv and checkout, so a
+    teammate's clone got an entry that failed to start."""
     ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
-    entry = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]["rosio"]
-    assert Path(entry["command"]).is_absolute()
-    assert entry["args"] == ["-m", "rosio", "serve", "--atlas", str(atlas)]
+    text = (tmp_path / ".mcp.json").read_text(encoding="utf-8")
+    entry = json.loads(text)["mcpServers"]["rosio"]
+    assert entry["command"] == "rosio"
+    assert entry["args"] == ["serve", "--atlas", "rosio-out/atlas.json"]
+    assert str(tmp_path) not in text and sys.executable not in text
+
+
+def test_a_user_entry_starts_this_interpreter_and_names_no_atlas(tmp_path):
+    """An assistant started outside the virtual environment had no rosio on its PATH."""
     ins.install("codex", "user", root=tmp_path, home=tmp_path / "home")
-    assert "--atlas" not in (tmp_path / "home/.codex/config.toml").read_text(encoding="utf-8")
+    text = (tmp_path / "home/.codex/config.toml").read_text(encoding="utf-8")
+    assert f"command = {json.dumps(sys.executable)}" in text
+    assert "--atlas" not in text
 
 
-def test_the_server_entry_names_the_atlas_before_it_is_built(tmp_path):
-    """The client's working directory decided which atlas a server answered from when the
-    project had none yet at install time."""
-    ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
-    entry = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]["rosio"]
-    assert entry["args"][-2:] == ["--atlas", str(tmp_path / "rosio-out" / "atlas.json")]
+def test_a_project_entry_says_when_rosio_is_not_on_a_minimal_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(ins, "_on_minimal_path", lambda name: False)
+    report = ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
+    assert "--scope user" in report.text()
+    monkeypatch.setattr(ins, "_on_minimal_path", lambda name: True)
+    report = ins.install("claude-code", "project", root=tmp_path / "other", home=tmp_path / "h")
+    assert "--scope user" not in report.text()
 
 
 def test_no_server_entry_is_written_when_the_server_could_not_start(tmp_path, monkeypatch):
@@ -515,14 +521,7 @@ def test_the_opencode_entry_uses_the_shape_that_config_expects(tmp_path):
     doc = json.loads((tmp_path / "opencode.json").read_text(encoding="utf-8"))
     assert doc["mcp"]["rosio"] == {
         "type": "local",
-        "command": [
-            sys.executable,
-            "-m",
-            "rosio",
-            "serve",
-            "--atlas",
-            str(tmp_path / "rosio-out" / "atlas.json"),
-        ],
+        "command": ["rosio", "serve", "--atlas", "rosio-out/atlas.json"],
         "enabled": True,
     }
 

@@ -112,10 +112,10 @@ record and is not read.
 
 | key | one row |
 | --- | --- |
-| `nodes` | `{name, name_source, namespace, namespace_source, form, symbol, class}` |
+| `nodes` | `{name, name_source, namespace, namespace_source, form, symbol, class, auto_declare}` |
 | `classes` | `{name}`, a qualified C++ class or struct declaration, including classes with no ROS records |
 | `class_templates` | `{name, definitions, specialized}`, the count of class template bodies in one file and whether a class or member specialization exists; explicit instantiations and forward declarations contribute no definition |
-| `constructions` | `{class, owner_symbol, line_hint, definition_file}`, the literal type constructed in `main`, as written, with an optional file id for a unique class in an included header of the same package |
+| `constructions` | `{class, owner_symbol, line_hint, definition_file, auto_declare}`, the literal type constructed in `main`, as written, with an optional file id for a unique class in an included header of the same package |
 | `type_aliases` | `{name, target, namespace, line_hint}`, a namespace scope using or typedef alias with its qualified name and target spelling |
 | `endpoints` | `{kind, raw, name, name_state, type, type_id, qos, owner_symbol, via_known_wrapper, condition, guard_parameters, line_hint}` |
 | `parameters` | `{name, type, default, has_default, default_state, reads, owner_symbol}` |
@@ -131,6 +131,12 @@ record and is not read.
   taken as it stands.
 * A `parameter_reads` row is a read of a parameter no declaration in the same file carries,
   which is what tells a declaration apart from a value the code actually uses.
+* `auto_declare` on a `nodes` or `constructions` row is `true` when the node is built with
+  `automatically_declare_parameters_from_overrides` or `allow_undeclared_parameters` set to a
+  literal true (an rclpy keyword, or a `NodeOptions` call in the C++ file), and `unknown` when
+  the value is not a literal. The join states it on the node's `coded` fact, and a node that
+  carries it, or whose sources read the parameter back, is never said to ignore a value a file
+  sets.
 * `parameters` and `plugin_parameters` are two record kinds and not one list: a row carrying
   a base class or a suffix is a suffix only declaration bound to a plugin and never becomes a
   node parameter. The join reads both at one call site, `Carrier.declarations`, because the
@@ -684,7 +690,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.19`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.20`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -803,6 +809,10 @@ What was added, in the order it arrived:
   `meshes_elsewhere` the paths inside the same package that hold a file of that name, and
   `model.mesh_missing` names them as the fix.
 
+* in `1.20`, `auto_declare` on `nodes` and `constructions` record rows and on the node's
+  `coded` fact. A parameter a file sets for such a node keeps its win, and so does one the
+  node's sources read back with no declaration this reader follows.
+
 One observed key was renamed in `1.17` without a major bump. The process table wrote the
 whole command line of a node under `argv`, the key under which the declared layer states only
 the arguments a launch file passes, so every launched node with arguments disagreed with
@@ -893,7 +903,21 @@ finding over a mesh the package holds elsewhere changed its detail and its finge
 and no finding cites a file of rosio itself as where it is true. No release had shipped, so no
 stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.19` file: `Atlas.from_json` compares the major
+Inside `1.20` several things moved without a new key. `resolution.below_budget` keeps one
+subject for the whole run, the first profile by id, else the first package, and names the
+worst profiles in its text, because a subject that followed the worst profile moved the id
+whenever a repair handed that place to another profile and un waived the finding.
+`launch.unloadable` states one finding per profile and missing entry point however often the
+profile names it. A launch exception row's `env` names the other variables by the sourced
+environment the walk ran with, and names only the one the walk stopped at when that
+environment could not be read, and it no longer names a variable read with `os.environ.get`
+or `os.getenv`, which answer None rather than raise. A launch file builds its description
+once as `ros2 launch` builds it, and only one that raised after a package lookup missed is
+built again with the missing package answered, so a file that catches the miss itself keeps
+its own decision and records no `PackageNotFoundError`. No release had shipped, so no stored
+id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.20` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -985,6 +1009,12 @@ stopped with data still to read, naming the collector, the recorded reason and w
 therefore does not hold. A pass whose inputs were absent never fires it: a collector with
 nothing to read is complete, and a rule that reports every small repository is ignored
 within a week.
+
+A rule that raises inside the engine, or produces two findings under one id, writes no
+finding and is named in `counters.drift.failed` instead. `rosio drift` prints that list and
+grades it as `error` under every `--fail-on` but `never`: whatever the rule would have found
+is missing, and a gate that passed over it would read exactly like a clean stack. It is not a
+rule id, because no rule can report that it did not run.
 
 `extract.input_refused` is the other one, and it is `warn`. It fires once per entity
 carrying `attrs.refused_because`, which is one input a collector could not read inside a pass

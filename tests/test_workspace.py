@@ -834,3 +834,28 @@ def test_a_parameters_file_this_process_cannot_open_is_not_a_parameters_file(
         yaml_path.chmod(0o644)
     assert str(yaml_path) in ws.files()
     assert str(yaml_path) not in selected
+
+
+def test_a_missing_file_is_looked_for_in_the_index_and_not_in_a_tree_walk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every absent mesh walked its whole package again, and a file under an ignored
+    directory was named as the place the file had moved to."""
+    from rosio.collect import same_name_in_package
+
+    package = tmp_path / "src" / "bot"
+    for relpath in ("package.xml", "meshes/base.stl", "old/base.stl", "build_cache/base.stl"):
+        (package / relpath).parent.mkdir(parents=True, exist_ok=True)
+        (package / relpath).write_text("x", encoding="utf-8")
+    (package / "package.xml").write_text(
+        '<package format="3"><name>bot</name></package>', encoding="utf-8"
+    )
+    ws = Workspace.discover([RootSpec("src", str(tmp_path / "src"))], ignore=("build_cache",))
+
+    def walked(*args, **kwargs):
+        raise AssertionError("the package tree was walked again")
+
+    monkeypatch.setattr(Path, "rglob", walked)
+    missing = str(package / "urdf" / "base.stl")
+    assert same_name_in_package(ws, missing) == ["meshes/base.stl", "old/base.stl"]
+    assert same_name_in_package(ws, str(package / "meshes" / "base.stl")) == ["old/base.stl"]

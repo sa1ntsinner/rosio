@@ -303,6 +303,36 @@ def test_a_missing_driver_package_costs_its_include_and_not_the_profile(tmp_path
     assert include.path == "$(find-pkg-share rosio_no_such_driver)/launch/driver.launch.py"
 
 
+OPTIONAL_DRIVER = """\
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    nodes = [Node(package="lx", executable="base", name="base")]
+    try:
+        get_package_share_directory("rosio_no_such_driver")
+        nodes.append(Node(package="rosio_no_such_driver", executable="drv", name="drv"))
+    except PackageNotFoundError:
+        pass
+    return LaunchDescription(nodes)
+"""
+
+
+@pytest.mark.ros
+def test_a_launch_file_that_handles_a_missing_package_builds_as_ros2_launch_builds_it(
+    tmp_path: Path,
+):
+    """A probe for an optional package is the file's own decision: the guarded node is not
+    started and nothing raised."""
+    entry = tmp_path / "optional.launch.py"
+    entry.write_text(OPTIONAL_DRIVER, encoding="utf-8")
+    walk = launch_exec.walk(str(entry))
+    assert [(node.pkg, node.name) for node in walk.nodes] == [("lx", "base")]
+    assert walk.exceptions == []
+
+
 @pytest.mark.ros
 def test_a_description_that_raises_for_another_reason_still_says_so(tmp_path: Path):
     entry = tmp_path / "broken.launch.py"
@@ -1748,16 +1778,18 @@ def generate_launch_description():
     arm = EnvironmentVariable('ARM_MODEL')
     gripper = EnvironmentVariable(name='GRIPPER', default_value='none')
     again = os.environ['ROBOT_MODEL']
+    if os.environ.get('X_FLAG'):
+        os.environ['WRITTEN_HERE'] = '1'
     return [lidar, distro, quiet, home, port, arm, gripper, again]
 """
 
 
 def test_environment_reads_name_every_variable_read_without_a_default():
+    """`os.environ.get` and `os.getenv` answer None for an unset variable, so a file that
+    reads one that way does not need it, and a variable the file sets is not read."""
     assert launch_exec.environment_reads(ENVIRONMENT_READS) == (
         "ROBOT_MODEL",
         "LIDAR_MODEL",
-        "ROS_DISTRO",
-        "ROBOT_HOME",
         "ARM_MODEL",
     )
 

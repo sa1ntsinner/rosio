@@ -165,6 +165,14 @@ SHELL_STATE = frozenset({"_", "SHLVL", "PWD", "OLDPWD"})
 
 ENV_SCRIPT = f"import json, os; print({MARKER!r} + json.dumps(dict(os.environ)))"
 
+IMPORTABLE_SCRIPT = (
+    "import importlib.util, json, sys; "
+    f"print({MARKER!r} + json.dumps("
+    "{'found': [n for n in sys.argv[1:] if importlib.util.find_spec(n)]}))"
+)
+
+_importable: dict[tuple[tuple[str, ...], tuple[str, ...]], frozenset[str] | None] = {}
+
 
 @dataclass(frozen=True)
 class LaunchImport:
@@ -231,6 +239,27 @@ def _python(ros_setup: Sequence[str], script: str) -> tuple[list[str], dict[str,
     if env is None:
         return ["bash", "-lc", _sourced(ros_setup, f"exec python3 {script}")], None
     return ["bash", "-c", f"exec python3 {script}"], env
+
+
+def importable(names: Sequence[str], ros_setup: Sequence[str] = ()) -> frozenset[str] | None:
+    """The modules of `names` the interpreter of the launch walk finds, after sourcing these
+    setup files, or None when it could not be asked. rosio's own interpreter can sit in a
+    virtual environment that sees none of the ROS packages the walk imports."""
+    key = (tuple(ros_setup), tuple(sorted(names)))
+    if key in _importable:
+        return _importable[key]
+    arguments = " ".join(shlex.quote(name) for name in key[1])
+    command, child_env = _python(ros_setup, f"-c {shlex.quote(IMPORTABLE_SCRIPT)} {arguments}")
+    try:
+        done = subprocess.run(
+            command, env=child_env, capture_output=True, text=True, timeout=120, check=False
+        )
+        payload = _payload(done.stdout) if done.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        payload = None
+    found = frozenset(str(name) for name in payload["found"]) if payload else None
+    _importable[key] = found
+    return found
 
 
 def probe(ros_setup: Sequence[str] = ()) -> LaunchImport:
@@ -966,11 +995,13 @@ def _scope(tree: ast.AST) -> tuple[ast.AST, bool]:
 
 
 def environment_reads(source: str) -> tuple[str, ...]:
-    """The environment variables a launch file reads with no default, in source order.
+    """The environment variables a launch file needs, in source order.
 
-    `os.environ[...]`, `os.environ.get` and `os.getenv` with one argument, and
-    `EnvironmentVariable` without `default_value`. A walk stops at the first one that is unset,
-    so this is how every other one the same file needs is named before a second extract.
+    `os.environ[...]` read, and `EnvironmentVariable` without `default_value`, which both
+    raise when the variable is unset. `os.environ.get` and `os.getenv` answer None instead, so
+    a file reading one that way decides for itself what an unset variable means. A walk stops
+    at the first one that is unset, so this is how every other one the same file needs is
+    named before a second extract.
     """
     try:
         tree = parse_python(source)
@@ -979,15 +1010,12 @@ def environment_reads(source: str) -> tuple[str, ...]:
     found: list[tuple[int, int, str]] = []
     for node in ast.walk(tree):
         name = None
-        if isinstance(node, ast.Subscript) and _environ(node.value):
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Load)
+            and _environ(node.value)
+        ):
             name = node.slice
-        elif isinstance(node, ast.Call) and len(node.args) == 1 and not node.keywords:
-            func = node.func
-            if isinstance(func, ast.Attribute) and (
-                (func.attr == "get" and _environ(func.value))
-                or (func.attr == "getenv" and isinstance(func.value, ast.Name))
-            ):
-                name = node.args[0]
         if (
             isinstance(node, ast.Call)
             and _call_name(node.func) == "EnvironmentVariable"
@@ -1172,6 +1200,7 @@ __all__ = [
     "encode_walk",
     "environment_reads",
     "import_report",
+    "importable",
     "probe",
     "walk",
     "walk_ast",

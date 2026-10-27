@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -254,14 +254,18 @@ def load_config(path: str | None, *, workspace: Any) -> Config:
     return _from_payload(payload, target, workspace)
 
 
-def locate_config(path: str | None, *, workspace: Any) -> Path | None:
+def locate_config(
+    path: str | None, *, workspace: Any, note: Callable[[str], None] | None = None
+) -> Path | None:
     """The configuration file a verb reads, or None for the fallback.
 
     In order: the file named on the command line, the one `ROSIO_CONFIG` names, `rosio.yaml`
     in the workspace or the directory above it, then `rosio.yaml` in the working directory or
     the directory above it. The last is where `rosio init` writes when the workspace is a tree
-    nobody may write into, such as /opt/ros/<distro>. A named file that does not exist is a
-    usage error, an absent implicit one is not.
+    nobody may write into, such as /opt/ros/<distro>, and it is read only when one of its
+    roots is the workspace or lies inside it: a file written for another tree would make the
+    atlas depend on the directory the shell stood in. `note` hears why one was passed over.
+    A named file that does not exist is a usage error, an absent implicit one is not.
     """
     explicit = path or os.environ.get(CONFIG_ENV) or None
     if explicit:
@@ -269,7 +273,39 @@ def locate_config(path: str | None, *, workspace: Any) -> Path | None:
         if not target.is_file():
             raise UsageError(f"config file not found: {explicit}")
         return target
-    return _find_config(_workspace_dir(workspace)) or _find_config(Path.cwd())
+    directory = _workspace_dir(workspace)
+    found = _find_config(directory)
+    if found is not None:
+        return found
+    here = _find_config(Path.cwd())
+    if here is None or directory is None or _describes(here, directory):
+        return here
+    if note is not None:
+        note(
+            f"ignored {here.absolute()}: none of its roots is {directory.absolute()} or lies "
+            "inside it, so it was written for another tree. name it with --config to read it"
+        )
+    return None
+
+
+def _describes(config: Path, workspace: Path) -> bool:
+    """Whether one root a configuration states is the workspace or lies inside it."""
+    try:
+        raw = _read_yaml(config).get("roots")
+    except (UsageError, AttributeError):
+        return False
+    if not isinstance(raw, list):
+        return False
+    base = config.parent
+    target = workspace.resolve()
+    for item in raw:
+        stated = item.get("path") if isinstance(item, dict) else item
+        if not isinstance(stated, str) or not stated:
+            continue
+        root = Path(_resolve(stated, base)).resolve()
+        if root == target or target in root.parents:
+            return True
+    return False
 
 
 def default_config(workspace: Any, packages: Sequence[str] = ()) -> Config:
@@ -394,10 +430,20 @@ def _from_payload(payload: dict[str, Any], target: Path, workspace: Any) -> Conf
 
 def _budget(raw: Any) -> float | dict[str, float] | None:
     """A number between 0 and 1 for the overall rate, or a mapping of want to number with an
-    optional `overall`, which is the shape `resolution.below_budget` reads."""
+    optional `overall`, which is the shape `resolution.below_budget` reads. A key that names
+    no rate would load and never gate anything, so it is refused."""
+    from rosio.model import Want
+
     if raw is None:
         return None
     if isinstance(raw, dict):
+        known = ["overall", *(item.value for item in Want)]
+        unknown = sorted(str(key) for key in raw if str(key) not in known)
+        if unknown:
+            raise UsageError(
+                f"resolution_budget has no rate called {', '.join(unknown)}, "
+                f"the keys are {', '.join(known)}"
+            )
         return {str(key): _fraction(value) for key, value in raw.items()}
     return _fraction(raw)
 

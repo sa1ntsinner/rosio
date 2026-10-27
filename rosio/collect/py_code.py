@@ -125,6 +125,9 @@ action into five endpoints with no name. Signatures on humble: `rclpy/action/ser
 _LOOKUP_CALLS = ("lookup_transform", "can_transform")
 
 _CREATE_NODE = "rclpy.create_node"
+AUTO_DECLARE_OPTIONS = frozenset(
+    {"automatically_declare_parameters_from_overrides", "allow_undeclared_parameters"}
+)
 """The functional form of a node. Eight sites on the reference stack build a node this way,
 and without it the literal name the call states is lost and the endpoints made on the returned
 object belong to nothing."""
@@ -930,6 +933,7 @@ class PyFile:
         if call is None:
             self.nodes.append(record)
             return
+        self._auto_declare(call, ctx, record)
         expr = self._name_argument(call)
         if expr is None:
             self.nodes.append(record)
@@ -967,6 +971,22 @@ class PyFile:
             )
             self._blind("node_name", source, reason, symbol, expr)
         self.nodes.append(record)
+
+    def _auto_declare(self, call: ast.Call, ctx: Ctx, record: dict[str, Any]) -> None:
+        """A node built to take parameters it never declares: True for a literal True, and
+        `unknown` when the keyword is not a literal or arrives through `**`."""
+        found: bool | str = False
+        for keyword in call.keywords:
+            if keyword.arg is None:
+                found = found or "unknown"
+            elif keyword.arg in AUTO_DECLARE_OPTIONS:
+                val = self._eval(keyword.value, ctx)
+                if val.known and val.value is True:
+                    found = True
+                elif not (val.known and val.value is False) and found is not True:
+                    found = "unknown"
+        if found:
+            record["auto_declare"] = found
 
     def _constructor_name(
         self, constructor: ast.FunctionDef | ast.AsyncFunctionDef, class_name: str, parameter: str
@@ -1103,6 +1123,7 @@ class PyFile:
             "symbol_id": ids.build_sym(self.package, self.relpath, ctx.symbol),
             "line_hint": _line(node),
         }
+        self._auto_declare(node, ctx, record)
         if expr is None:
             self.nodes.append(record)
             return Val(expr=text, reason="call_result")
