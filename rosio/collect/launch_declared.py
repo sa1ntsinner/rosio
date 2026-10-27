@@ -397,7 +397,7 @@ class LaunchDeclaredCollector:
         placed: list[_Placed] = []
         for walk in walks:
             try:
-                placed.extend(self._emit_file(ctx, spec, walk, run))
+                placed.extend(self._emit_file(ctx, spec, walk, run, late))
             except ContractError as exc:
                 late.append(
                     {
@@ -601,6 +601,7 @@ class LaunchDeclaredCollector:
         spec: ProfileSpec,
         walk: records.LaunchWalk,
         run: str,
+        late: list[dict[str, Any]],
     ) -> list[_Placed]:
         profile_id = ids.build_profile(spec.slug)
         launchfile_id = _launchfile_id(ctx.ws, walk.entry_path)
@@ -668,13 +669,19 @@ class LaunchDeclaredCollector:
         for node, steps in zip(ordered, _distinct_steps(ordered), strict=True):
             locator = "/".join(f"{step.action}({step.disc})" for step in steps)
             launchent_id = ids.build_launchent(package or ids.REPO_PKG, relative, steps)
-            identity = _identity(node, executed=walk.strategy == "executed")
-            source = _source(
-                ctx.ws,
-                node.site.path if node.site else walk.entry_path,
-                locator,
-                node.site.line_hint if node.site else None,
-            )
+            source = _held_source(ctx.ws, walk, node.site, node.entity_path, locator)
+            try:
+                identity = _identity(node, executed=walk.strategy == "executed")
+            except ContractError as exc:
+                late.append(
+                    {
+                        "path": _problem_path(source.file),
+                        "phase": "visit",
+                        "exc_type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+                )
+                continue
             placed.append(
                 _Placed(
                     node=node,
@@ -709,6 +716,13 @@ class LaunchDeclaredCollector:
             child_sets.setdefault(include.path, set()).add(stated)
         for include in walk.includes:
             site = include.site or records.Site(path=walk.entry_path)
+            cited = _held_source(
+                ctx.ws,
+                walk,
+                site,
+                include.entity_path,
+                site.locator if _in_workspace(ctx.ws, site.path) else "/".join(include.entity_path),
+            )
             if not include.resolved or not include.path:
                 ctx.builder.unresolved(
                     model.Unresolved(
@@ -720,7 +734,7 @@ class LaunchDeclaredCollector:
                         reason=include.reason or "the included launch file path did not resolve",
                         role="include",
                         resolvable_by=["install the included package", "supply the argument"],
-                        evidence=[_source(ctx.ws, site.path, site.locator, site.line_hint)],
+                        evidence=[cited],
                     )
                 )
                 continue
@@ -735,7 +749,7 @@ class LaunchDeclaredCollector:
                         reason="the included launch file is outside every configured root",
                         role="include",
                         resolvable_by=["add the package to the roots"],
-                        evidence=[_source(ctx.ws, site.path, site.locator, site.line_hint)],
+                        evidence=[cited],
                     )
                 )
                 continue
@@ -772,7 +786,7 @@ class LaunchDeclaredCollector:
                                 expr=substitutions.command_text(command, ctx.ws.token),
                                 reason="command_substitution",
                                 role=f"include_argument:{name}",
-                                evidence=[_source(ctx.ws, site.path, site.locator, site.line_hint)],
+                                evidence=[cited],
                             )
                         )
                 ctx.builder.edge("contains", launchfile_id, entity_id, layer=LAYER)
@@ -783,7 +797,7 @@ class LaunchDeclaredCollector:
                     run=run,
                     values=values,
                     confidence=model.Confidence.RESOLVED.value,
-                    evidence=[_source(ctx.ws, site.path, site.locator, site.line_hint)],
+                    evidence=[cited],
                 )
             ctx.builder.node(child_id)
             ctx.builder.fact(
@@ -809,7 +823,7 @@ class LaunchDeclaredCollector:
                     if len(child_sets[include.path]) == 1
                     else {}
                 ),
-                evidence=[_source(ctx.ws, site.path, site.locator, site.line_hint)],
+                evidence=[cited],
             )
 
     # ------------------------------------------------------------------
@@ -1991,6 +2005,35 @@ def _source(
     ws: Workspace, path: str, locator: str = "", line_hint: int | None = None
 ) -> model.Source:
     return ws.source(ws.site(path, locator, line_hint))
+
+
+def _held_source(
+    ws: Workspace,
+    walk: records.LaunchWalk,
+    site: records.Site | None,
+    trail: tuple[str, ...],
+    locator: str,
+) -> model.Source:
+    """A site as a line the workspace holds.
+
+    A node or an include stated in a file outside every root, nav2_bringup from the ROS
+    installation under turtlebot3, is cited at the deepest include on its trail whose line a
+    root holds, which is the line an engineer edits. The locator is the action trail, so it
+    still names every outside file between that line and the site."""
+    if site is not None and _in_workspace(ws, site.path):
+        return _source(ws, site.path, locator, site.line_hint)
+    held = [
+        (len(include.entity_path), include.site)
+        for include in walk.includes
+        if include.site is not None
+        and include.entity_path
+        and trail[: len(include.entity_path)] == include.entity_path
+        and _in_workspace(ws, include.site.path)
+    ]
+    if held:
+        _depth, site = max(held, key=lambda item: item[0])
+        return _source(ws, site.path, locator, site.line_hint)
+    return _source(ws, walk.entry_path, locator)
 
 
 def _remap_source(ws: Workspace, remap: records.Remap) -> model.Source | None:

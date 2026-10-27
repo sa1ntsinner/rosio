@@ -1164,6 +1164,12 @@ read the file at this path. Documentation is not verification.
    the one shape section 4 states, attributes and no fact, and `extract.input_refused` is the
    rule that reads it.
 
+   A site in a file no root holds is still a claim. A node or an include that a launch file
+   from the ROS installation states (turtlebot3 starts every nav2 node through
+   `nav2_bringup`) cites the deepest include on its action trail whose line a root holds,
+   which is the line an engineer edits, and its locator is the trail, which names every
+   outside file on the way. Failing to cite it once dropped every node the walk started.
+
    **A refused input leaves its denominator behind.** A want whose only site was inside the
    file you refused becomes one `unresolved` entry owned by that file, with the reason and
    the raw expression, so the want stays in `counters.resolution_rate` and the rate falls.

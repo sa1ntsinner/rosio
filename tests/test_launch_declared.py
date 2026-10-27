@@ -2391,4 +2391,132 @@ def test_a_file_outside_every_root_is_never_named_by_its_machine_path(tmp_path: 
     assert blind.expr == "@outside/share/nav2_bringup/launch/bringup_launch.py"
     rows = [row for run in atlas.by_kind("run") for row in run.attrs["exceptions"]]
     assert "@outside/map.py" in [row["path"] for row in rows]
-    assert any("@outside/map.py" in row["message"] for row in rows)
+    assert "node:/map_server" in atlas.entities
+
+
+def _outside_include(tmp_path: Path) -> tuple[CollectContext, records.LaunchWalk]:
+    """A root launch file that includes nav2_bringup from the ROS installation, which no
+    root holds, and the two nodes the included file starts, beside one it starts itself."""
+    checkout = tmp_path / "ws"
+    (checkout / ".git").mkdir(parents=True)
+    package = checkout / "src" / "bot"
+    (package / "launch").mkdir(parents=True)
+    (package / "package.xml").write_text(
+        "<package format='3'><name>bot</name><version>0.0.0</version>"
+        "<description>d</description><maintainer email='a@b.c'>a</maintainer>"
+        "<license>Apache-2.0</license></package>",
+        encoding="utf-8",
+    )
+    entry = package / "launch" / "nav.launch.py"
+    entry.write_text("def generate_launch_description():\n    pass\n", encoding="utf-8")
+    distro = tmp_path / "opt" / "ros" / "jazzy"
+    bringup = distro / "share" / "nav2_bringup" / "launch" / "bringup_launch.py"
+    navigation = distro / "share" / "nav2_bringup" / "launch" / "navigation_launch.py"
+    include = "Include(bringup_launch.py)"
+    inner = "Include(navigation_launch.py)"
+    roots = (RootSpec("src", str(checkout / "src")),)
+    walk = records.LaunchWalk(
+        entry_path=str(entry),
+        profile="nav",
+        includes=[
+            records.LaunchInclude(
+                path=str(bringup),
+                entity_path=(include,),
+                site=records.Site(str(entry), include, 7),
+            ),
+            records.LaunchInclude(
+                path=str(navigation),
+                entity_path=(include, inner),
+                site=records.Site(str(bringup), inner, 40),
+            ),
+        ],
+        nodes=[
+            records.ResolvedNode(
+                pkg=pkg,
+                executable=exe,
+                namespace="",
+                name=exe,
+                name_source="literal",
+                entity_path=(include, inner, f"Node({exe})"),
+                site=records.Site(str(navigation), f"Node({exe})", line),
+            )
+            for pkg, exe, line in (
+                ("nav2_controller", "controller_server", 60),
+                ("nav2_planner", "planner_server", 70),
+            )
+        ]
+        + [
+            records.ResolvedNode(
+                pkg="rviz2",
+                executable="rviz2",
+                namespace="",
+                name="rviz2",
+                name_source="literal",
+                entity_path=("Node(rviz2)",),
+                site=records.Site(str(entry), "Node(rviz2)", 9),
+            )
+        ],
+    )
+    cfg = Config(
+        roots=roots,
+        ros_setup=(str(distro / "setup.bash"),),
+        profiles=(
+            ProfileSpec(
+                slug="nav",
+                entrypoints=(Entrypoint(verb="launch", pkg="bot", target="nav.launch.py"),),
+            ),
+        ),
+    )
+    ctx = CollectContext(ws=Workspace.discover(list(roots)), cfg=cfg, builder=model.AtlasBuilder())
+    ctx.declared.walks.append(walk)
+    return ctx, walk
+
+
+def test_a_node_an_outside_include_starts_is_cited_at_the_include_in_the_root(
+    tmp_path: Path,
+) -> None:
+    """turtlebot3 starts every nav2 node through nav2_bringup from the ROS installation. The
+    site of each node sat in a file no root holds, citing it raised, and the walk lost every
+    node it started. The engineer edits the include line of the root file, so that line is
+    cited, and the action trail names the outside files on the way to the node."""
+    ctx, _walk = _outside_include(tmp_path)
+    get(launch_declared.NAME).collect(ctx)
+    atlas = ctx.builder.build()
+    assert {"node:/controller_server", "node:/planner_server", "node:/rviz2"} <= set(atlas.entities)
+    edge = next(
+        edge
+        for edge in atlas.edges.values()
+        if edge.kind == "launches" and edge.dst == "node:/controller_server"
+    )
+    (row,) = [row for fact in edge.facts for row in fact.evidence]
+    assert row.file == "file:bot|launch/nav.launch.py"
+    assert row.locator == (
+        "Include(bringup_launch.py)/Include(navigation_launch.py)/Node(controller_server)"
+    )
+    assert row.line_hint == 7
+    rows = [row for run in atlas.by_kind("run") for row in run.attrs["exceptions"]]
+    assert rows == []
+    assert str(tmp_path) not in model.dumps(atlas.to_json())
+    assert schema.validate(atlas.to_json()) == []
+
+
+def test_one_node_that_fails_to_place_drops_none_of_its_siblings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, _walk = _outside_include(tmp_path)
+    real = launch_declared._identity
+
+    def failing(node: records.ResolvedNode, **kwargs: object) -> identity.Identity:
+        if node.executable == "planner_server":
+            raise launch_declared.ContractError("no identity for planner_server")
+        return real(node, **kwargs)
+
+    monkeypatch.setattr(launch_declared, "_identity", failing)
+    get(launch_declared.NAME).collect(ctx)
+    atlas = ctx.builder.build()
+    assert {"node:/controller_server", "node:/rviz2"} <= set(atlas.entities)
+    assert "node:/planner_server" not in atlas.entities
+    rows = [row for run in atlas.by_kind("run") for row in run.attrs["exceptions"]]
+    assert [(row["path"], row["message"]) for row in rows] == [
+        ("bot/launch/nav.launch.py", "no identity for planner_server")
+    ]
