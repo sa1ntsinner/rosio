@@ -474,6 +474,13 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             )
             declares = "declares" if len(sources) <= 1 else "declare"
             near = _nearest_name(name, join.declared_in(declared, owner_id, profile))
+            # A dict the launch file builds holds every key on the line that hands it over,
+            # and that line also carries the values the node does read.
+            drop = (
+                f"remove {name} from the dictionary passed at {at}"
+                if winner.mechanism == model.Mechanism.LAUNCH_INLINE_DICT.value
+                else f"delete the line at {at}"
+            )
             meant = (
                 f" {owner_text} declares {near}, which is likely what was meant." if near else ""
             )
@@ -494,13 +501,17 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
                         f"Rename {name} to {near} at {at}, or correct the declaration if "
                         f"{near} is the misspelling."
                         if near
-                        else f"Declare {name} in the node source, or delete the line at {at}."
+                        else f"Declare {name} in the node source, or {drop}."
                     ),
                     say=(
                         f"In profile {slug}, {at} sets {owner_text} {name} to "
                         f"{rules.value_text(winner.value)} and {read} {declares} no parameter "
                         f"with that name, so the value is ignored.{meant}"
-                        + ("" if near else f" Delete the line at {at} or declare the parameter.")
+                        + (
+                            ""
+                            if near
+                            else f" {drop[:1].upper()}{drop[1:]} or declare the parameter."
+                        )
                     ),
                     profiles=[profile],
                     layers=[CODED, DECLARED],

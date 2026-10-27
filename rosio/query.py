@@ -973,6 +973,14 @@ _RELATION_WORDS = {
 
 _WORD_RE = re.compile(r"[A-Za-z0-9_/.:~-]+")
 
+_ENDPOINT_WANTS = {
+    "publishes": ("topic_name",),
+    "subscribes": ("topic_name",),
+    "serves": ("action_name", "service_name"),
+    "calls": ("action_name", "service_name"),
+}
+"""The blind spot want that could hide an edge of each endpoint relation."""
+
 
 def query(atlas: Atlas, question: str, *, limit: int = DEFAULT_LIMIT) -> Answer:
     """A scoped subgraph for a plain language question, matched by name and kind only.
@@ -1100,10 +1108,20 @@ def query(atlas: Atlas, question: str, *, limit: int = DEFAULT_LIMIT) -> Answer:
             lines.append(f"    {row['src_label']} {row['kind']} {row['dst_label']}")
         _more(lines, edge_hidden, "relations")
     elif relations:
-        lines.append(
-            f"  no {', '.join(sorted(relations))} edge touches these in this atlas, "
-            "which is an answer and not a failure"
-        )
+        wants = sorted({want for kind in relations for want in _ENDPOINT_WANTS.get(kind, ())})
+        blind = sum(1 for entry in atlas.unresolved if entry.want in wants)
+        data["blind_spots"] = blind
+        if blind:
+            lines.append(
+                f"  no {', '.join(sorted(relations))} edge touches these in this atlas, and "
+                f"{plural(blind, 'endpoint name')} the source builds at run time could be one "
+                f"of them: rosio unresolved --want {' --want '.join(wants)}"
+            )
+        else:
+            lines.append(
+                f"  no {', '.join(sorted(relations))} edge touches these in this atlas, "
+                "which is an answer and not a failure"
+            )
     lines.append("  explain any of these for the facts and the provenance")
     return Answer(verb="query", data=data, lines=lines)
 
@@ -1982,8 +2000,10 @@ REASONS = {
     "environment_variable": "an environment variable at run time",
     "executable_entry_unresolved": "no source file defines this executable's entry point",
     "external_descriptor_file": "a file the node reads at run time",
+    "cpp_refused_by_atlas": "a C++ source stating a value the atlas cannot hold",
     "file_after_build": "a file only colcon build puts in place",
     "file_missing": "the file it names does not exist",
+    "frame_empty": "a frame id that is an empty string",
     "file_not_installed": "the install tree lacks a file the source holds",
     "local_variable": "a local variable whose value rosio does not follow",
     "loop_variable": "an element of a loop rosio cannot unroll",

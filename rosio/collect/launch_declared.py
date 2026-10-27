@@ -449,7 +449,8 @@ class LaunchDeclaredCollector:
             self._emit_node(ctx, spec, run, row, late, live)
         for entry_node in runs:
             self._emit_run_node(ctx, spec, run, entry_node, late)
-        self._emit_lifecycle(ctx, spec, run, placed, late)
+        started = [row for row in placed if row.identity.node_id in live]
+        self._emit_lifecycle(ctx, spec, run, started, late)
         self._emit_models(ctx, spec, run, placed, late)
 
         ctx.builder.fact(
@@ -954,6 +955,11 @@ class LaunchDeclaredCollector:
                 )
             )
 
+        if _site_off(row) and identity.node_id not in live:
+            # The site starts nothing in this profile and no live site starts this node, so
+            # the launch entity and its gates are all there is to state.
+            self._emit_site(builder, spec, run, row)
+            return
         values: dict[str, Any] = {
             "pkg": node.pkg,
             "executable": node.executable,
@@ -997,17 +1003,7 @@ class LaunchDeclaredCollector:
             values={"form": node.form},
             evidence=[row.source],
         )
-        builder.edge(
-            model.EdgeKind.LAUNCHES.value,
-            profile_id,
-            row.launchent_id,
-            key=ids.edge_key(profile=spec.slug, launchent=row.launchent_id),
-            layer=LAYER,
-            profile=profile_id,
-            run=run,
-            values={"entry": row.launchfile_id},
-            evidence=[row.source],
-        )
+        self._emit_site(builder, spec, run, row)
         if identity.fqn:
             builder.count_resolved(model.Want.NODE_NAME.value)
         else:
@@ -1024,6 +1020,22 @@ class LaunchDeclaredCollector:
             )
         self._emit_gates(ctx, spec, run, row)
         self._emit_remaps(ctx, spec, run, row)
+
+    def _emit_site(
+        self, builder: model.AtlasBuilder, spec: ProfileSpec, run: str, row: _Placed
+    ) -> None:
+        profile_id = ids.build_profile(spec.slug)
+        builder.edge(
+            model.EdgeKind.LAUNCHES.value,
+            profile_id,
+            row.launchent_id,
+            key=ids.edge_key(profile=spec.slug, launchent=row.launchent_id),
+            layer=LAYER,
+            profile=profile_id,
+            run=run,
+            values={"entry": row.launchfile_id},
+            evidence=[row.source],
+        )
 
     def _emit_run_node(
         self,
@@ -1412,6 +1424,7 @@ def _run_entry(ctx: CollectContext, spec: ProfileSpec, entry: Entrypoint) -> _Ru
         argv=tuple(entry.argv),
         site=site,
     )
+    node = ros_args.program_params(node)
     _hand_on(
         ctx,
         records.LaunchWalk(

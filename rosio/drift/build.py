@@ -1250,6 +1250,7 @@ REFUSAL_COSTS = {
     "bag_storage_absent": "the per topic counts and time spans this storage file would carry",
     "bag_storage_unreadable": "the per topic counts and time spans this storage file carries",
     "bag_unreadable": "every topic, type and count this recording holds",
+    "cpp_refused_by_atlas": "the endpoints, parameters and node names this source states",
     "generator_list_unreadable": "the interface list this build file names",
     "interface_unreadable": "the fields of the type this file defines",
     "file_missing": "whatever this file states",

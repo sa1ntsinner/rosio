@@ -491,8 +491,11 @@ def _constructed_carriers(
     found: list[Carrier],
     by_exe: dict[str, list[Carrier]],
     bound: set[str],
+    by_component: dict[str, list[Carrier]] | None = None,
 ) -> None:
-    """A link makes code available, only a construction selects the class that runs."""
+    """A link makes code available, only a construction selects the class that runs. A
+    registered component is constructed by its container, so the library that registers it
+    makes its methods and those of the classes it reaches available the same way."""
     aliases: dict[str, dict[str, set[tuple[str, str]]]] = {}
     atlas = builder.atlas
     templates: dict[str, dict[str, dict[tuple[str, str], dict[str, Any]]]] = {}
@@ -521,6 +524,52 @@ def _constructed_carriers(
             name = _class_type(ids.parse_sym(carrier.symbol).qualname).rpartition("::")[0]
             if name and name != "rclcpp":
                 methods.setdefault(pkg, {}).setdefault(name, []).append(carrier)
+
+    def members(pkg: str, name: str, sources: set[str], definition: str) -> list[Carrier]:
+        """The method carriers of a class, its bases and the classes it hands itself to."""
+        selected: set[str] = set()
+        pending = [name] if name else []
+        while pending:
+            current = pending.pop()
+            if current in selected:
+                continue
+            selected.add(current)
+            for base in sorted(bases.get(pkg, {}).get(current, set())):
+                resolved = _resolve_class(
+                    base,
+                    current.rpartition("::")[0],
+                    classes.get(pkg, set()),
+                    aliases.get(pkg, {}),
+                )
+                if resolved:
+                    pending.append(resolved)
+        return [
+            carrier
+            for selected_name in sorted(selected)
+            for carrier in _methods_of(methods.get(pkg, {}), selected_name, classes.get(pkg, set()))
+            # a class the constructed one inherits or hands itself to, defined in a header
+            # of its package, is compiled wherever it is included
+            if carrier.file in sources
+            or carrier.file == definition
+            or (selected_name != name and _header(carrier.file))
+        ]
+
+    by_component = {} if by_component is None else by_component
+    for component in sorted(by_component):
+        registering = {item.file for item in by_component[component] if item.file}
+        for pkg in sorted({ids.parse_file(file_id).package for file_id in registering}):
+            sources = {
+                path
+                for (owner, _target), paths in libraries.items()
+                if owner == pkg and paths & registering
+                for path in paths
+            }
+            name = _resolve_class(component, "", classes.get(pkg, set()), aliases.get(pkg, {}))
+            rows = by_component[component]
+            for carrier in members(pkg, name, sources | registering, ""):
+                if all(item.owner != carrier.owner for item in rows):
+                    rows.append(carrier)
+
     builds = _build_rows(atlas)
     unique_templates = {
         pkg: {
@@ -569,35 +618,7 @@ def _constructed_carriers(
                                 evidence=_source(main, row),
                             )
                         )
-                selected: set[str] = set()
-                pending = [name] if name else []
-                while pending:
-                    current = pending.pop()
-                    if current in selected:
-                        continue
-                    selected.add(current)
-                    for base in sorted(bases.get(pkg, {}).get(current, set())):
-                        resolved = _resolve_class(
-                            base,
-                            current.rpartition("::")[0],
-                            classes.get(pkg, set()),
-                            aliases.get(pkg, {}),
-                        )
-                        if resolved:
-                            pending.append(resolved)
-                for selected_by, carrier in [
-                    (selected_name, item)
-                    for selected_name in sorted(selected)
-                    for item in _methods_of(table, selected_name, classes.get(pkg, set()))
-                ]:
-                    if (
-                        carrier.file not in sources
-                        and carrier.file != row.get("definition_file")
-                        # a class the constructed one inherits or hands itself to, defined
-                        # in a header of its package, is compiled wherever it is included
-                        and (selected_by == name or not _header(carrier.file))
-                    ):
-                        continue
+                for carrier in members(pkg, name, sources, str(row.get("definition_file") or "")):
                     rows = by_exe.setdefault(exe, [])
                     existing = next((item for item in rows if item.owner == carrier.owner), None)
                     if existing is not None and not existing.construction_sources:
@@ -903,7 +924,7 @@ _STRING = re.compile(r"\"((?:[^\"\\]|\\.)*)\"|'((?:[^'\\]|\\.)*)'")
 _PLACEHOLDER = re.compile(r"\{[^{}]*\}|%[-+ #0-9.]*[a-z]")
 
 
-_CHOICE = re.compile(r"[?\[]|\|\||&&|\b(?:if|else|or|and)\b")
+_CHOICE = re.compile(r"[?]|\|\||&&|\b(?:if|else|or|and)\b")
 _FORMATTERS = frozenset({"", "std::string", "string", "std::format", "fmt::format", "str"})
 _CALLEE = re.compile(r"([\w:]*)\s*$")
 
@@ -915,7 +936,9 @@ def could_name(expr: str, name: str) -> bool:
     order: `"sensor." + id` builds `sensor.front` and never `min_range`. An expression with
     no literal, a constant or a variable, could build any name. Literals are pieces of the
     name only in a plain concatenation or a format string: a condition choosing between two
-    names, a subscript, or a call taking a literal (`names_.at("gain_key")`) could build any.
+    names, a literal inside a subscript, or a call taking a literal (`names_.at("gain_key")`)
+    could build any. A subscript is an unknown piece like a variable, so `ids_[i] + ".plugin"`
+    builds only names ending in `.plugin`.
     """
     if not _spells_pieces(expr):
         return True
@@ -939,6 +962,8 @@ def _spells_pieces(expr: str) -> bool:
     if _CHOICE.search(blank):
         return False
     for found in _STRING.finditer(blank):
+        if blank.count("[", 0, found.start()) > blank.count("]", 0, found.start()):
+            return False  # a literal inside a subscript, `names_["gain_key"]`
         before = re.sub(r"[fFrRbBuU]{1,2}$", "", blank[: found.start()]).rstrip()
         if before.endswith(","):
             depth = 0
@@ -1241,6 +1266,25 @@ def declared_names(atlas: model.Atlas) -> dict[tuple[str, str], set[str]]:
             parsed = ids.parse_param(edge.dst)
             for fact in edge.facts:
                 out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
+    # A plugin instance the yaml selects is loaded from `<instance>.plugin`, and declares
+    # `<instance>.<suffix>` on its node for every suffix its class declares.
+    suffixes: dict[str, set[str]] = {}
+    for node in atlas.by_kind(model.NodeKind.PPARAM.value):
+        if any(
+            fact.layer == CODED
+            and (fact.values.get("declared_in_code") or fact.values.get("declared_by"))
+            for fact in node.facts
+        ):
+            plugin_param = ids.parse_pparam(node.id)
+            suffixes.setdefault(plugin_param.lookup, set()).add(plugin_param.suffix)
+    for node in atlas.by_kind(model.NodeKind.PINST.value):
+        instance = ids.parse_pinst(node.id)
+        for fact in node.facts:
+            out.setdefault((instance.owner, fact.profile), set()).add(f"{instance.instance}.plugin")
+            for suffix in suffixes.get(str(fact.values.get("plugin") or ""), ()):
+                out.setdefault((instance.owner, fact.profile), set()).add(
+                    f"{instance.instance}.{suffix}"
+                )
     return out
 
 
@@ -1509,7 +1553,7 @@ def index_of(builder: model.AtlasBuilder, report: JoinReport) -> Index:
             selected = by_symbol.get(next(iter(classes)), [])
             if selected:
                 by_exe[entity.id] = selected
-    _constructed_carriers(builder, found, by_exe, bound)
+    _constructed_carriers(builder, found, by_exe, bound, by_component)
     _untraced_helpers(builder, found, bound, (by_plugin, by_component))
     report.unbound_carriers = len(
         [
@@ -3265,6 +3309,10 @@ def _argv_assigned(item: Instance) -> dict[str, str]:
             out[ids.normalise_param_name(name)] = text
         except ContractError:
             continue
+    for name, (text, _flag) in ros_args.program_assignments(
+        item.pkg, item.executable, item.argv
+    ).items():
+        out.setdefault(name, text)
     return out
 
 

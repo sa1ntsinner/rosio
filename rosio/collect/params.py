@@ -2556,7 +2556,9 @@ class ParamsCollector:
             profile_id = ids.build_profile(slug) if slug else model.ANY_PROFILE
             alternates: set[str] = set()
             for node in sorted(walk.nodes, key=_node_key):
-                if node.attrs.get("unreachable"):
+                if node.attrs.get("unreachable") or any(
+                    gate.outcome == "false" for gate in node.gates
+                ):
                     # A condition that holds false in this profile: the node never starts,
                     # so nothing it would read is live configuration of anything.
                     continue

@@ -369,6 +369,25 @@ TABLE: tuple[Wrapper, ...] = (
         "first after the node",
     ),
     Wrapper(
+        symbol="nav2_util::TwistPublisher",
+        library="nav2_util",
+        language="cpp",
+        endpoints=(
+            WrapperEndpoint(
+                "publisher",
+                type="geometry_msgs/msg/TwistStamped",
+                name_source="argument",
+                qos="the qos argument, nav2::qos::StandardTopicQoS by default",
+            ),
+        ),
+        argument=1,
+        evidence="nav2_util/include/nav2_util/twist_publisher.hpp:53-66, the constructor "
+        "TwistPublisher(node, topic, qos) creates the publisher on topic",
+        parameters=("enable_stamped_cmd_vel",),
+        note="enable_stamped_cmd_vel, declared true, picks TwistStamped; set false the same "
+        "topic carries geometry_msgs/msg/Twist. Checked on navigation2 main, not on humble.",
+    ),
+    Wrapper(
         symbol="rclpy.action.ActionClient",
         library="rclpy",
         language="python",

@@ -556,8 +556,11 @@ with per candidate provenance.
   could spell (`"sensor." + id` never builds `min_range`): such a key is `other` in that
   profile and wins nothing, with a note saying why, and any other key is `undeclared`. The
   literal text is read as pieces of the name only in a plain concatenation or a format string;
-  a condition choosing between names, a subscript, or a call taking a literal
-  (`names_.at("gain_key")`) could build any name and hides every key. The C++ and the python
+  a condition choosing between names, a literal inside a subscript, or a call taking a literal
+  (`names_.at("gain_key")`) could build any name and hides every key, while a subscript
+  holding no literal is an unknown piece like a variable (`ids_[i] + ".plugin"`). A plugin
+  instance declares `<instance>.plugin` and every suffix its class declares, so a key under a
+  selected instance is decided by the plugin and not by a blind spot. The C++ and the python
   collectors both record such a declaration as a `param_name` blind spot and count the
   declarations they read under the same want. What a node declares or reads back is taken
   from the profile the code ran in, because a sim and a real profile can start one node name
@@ -814,7 +817,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.25`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.26`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -978,6 +981,12 @@ What was added, in the order it arrived:
   package holds beside one an export names and it does not. `share_read_from` named the tree
   the walk read, which is no longer another tree, so the key went rather than change its
   meaning; no release had shipped, so no reader of it existed.
+
+* in `1.26`, the `refused_because` value `cpp_refused_by_atlas`, a C++ source whose records
+  the atlas refused (two sites folded into one statement), which is now a refused file entity
+  with `refused_detail` instead of a run exception row alone, and the unresolved reason
+  `frame_empty`, a frame literal that names no frame (`""`, `"/"`), which no longer mints
+  `frame:`.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace
@@ -1242,7 +1251,33 @@ site directories of the install roots go on the python path of the walk in the o
 roots, and a CMake target lists its `.ipp` and `.hxx` files as sources. No release had
 shipped, so no stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.25` file: `Atlas.from_json` compares the major
+Inside `1.26` several ids and texts moved besides the new keys. A component library binds the
+helper classes, header members and bases of the class it registers, so a composed node states
+the endpoints a helper makes, and `create_action_server` and `create_action_client` (rclcpp
+and rclcpp_action) are action endpoints, so `action` entities and their `serves` and `calls`
+edges exist where there were none. The wrapper table holds `nav2_util::TwistPublisher`, whose
+second argument is the topic. A `std::string` parameter of a plugin's `configure` or
+`initialize`, and `getName()`, are the plugin instance name, so `name + ".scale"` there is a
+suffix of a `pparam` and not a `param_name` blind spot, and a helper the plugin hands that
+name to declares suffixes of the same plugin; the parameter states and the `param_name` rate
+of a plugin stack moved. A `param_name` blind spot whose name a local holds states the
+local's initializer (`prefix + ".value"`) as its expression, which moved those entry ids.
+`static_transform_publisher` arguments, flags or the positional form, are parameters of its
+node (`frame_id`, `child_frame_id`, `translation.*`, `rotation.*`), its role digest covers
+them, and a frame its source reads from a parameter is no longer minted from the default, so
+the synthetic ids of static publishers moved and `frame:frame` and `frame:child` went. Two
+literal origins for one frame pair in one C++ file are two `tf_parent` sites keyed by a digest
+over the origin, where they raised. A node only a site whose condition is false in every
+profile starts is not an entity and owns no blind spot: the launch entity stays, with its
+`launches` edge, which removed synthetic nodes and `node_name` entries. `import a.b` binds
+`a`, so a type spelled `sensor_msgs.msg.Image` is `type:sensor_msgs|msg|Image`. A python
+`sendTransform` reads every transform of a list and the one a method of the node builds and
+returns, and an element it cannot follow is a `frame_id` blind spot. `param.set_undeclared`
+over a dict a launch file passes asks to remove the key from that dict rather than to delete
+the line, and `rosio query` over an endpoint relation no edge answers names the blind spots of
+that want. No release had shipped, so no stored id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.26` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

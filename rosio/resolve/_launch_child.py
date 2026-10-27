@@ -1916,6 +1916,7 @@ def _finish_node(
         params=tuple(params),
         command_blinds=tuple(sorted(set(blinds))),
     )
+    node = ros_args.program_params(node)
     if blinds:
         disc = node.name or node.executable or node.plugin_class or "unknown"
         action = node.entity_path[-1].partition("(")[0]

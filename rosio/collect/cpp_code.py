@@ -71,6 +71,17 @@ PUBLISH_CALLS = frozenset({"create_publisher", "create_lifecycle_publisher"})
 SUBSCRIBE_CALLS = frozenset({"create_subscription"})
 SERVICE_CALLS = frozenset({"create_service"})
 CLIENT_CALLS = frozenset({"create_client"})
+PLUGIN_SETUP_METHODS = frozenset({"configure", "initialize"})
+PLUGIN_NAME = "plugin_name"
+PLUGIN_NAME_ARGUMENT = "<plugin instance name>"
+"""A construction argument that hands a helper the instance name of the plugin building it."""
+"""The origin of a name that holds a plugin's instance name, which only the yaml states."""
+ACTION_FACTORY_CALLS = {
+    "create_action_server": "action_server",
+    "create_action_client": "action_client",
+}
+"""nav2 `LifecycleNode::create_action_server<T>(name, ...)` and the `nav2::interfaces` free
+functions that take the node first."""
 TIMER_CALLS = frozenset({"create_wall_timer", "create_timer"})
 CAMERA_CALLS = frozenset({"create_camera_publisher", "create_camera_subscription"})
 IMAGE_CALLS = frozenset({"create_publisher", "create_subscription"}) | CAMERA_CALLS
@@ -170,6 +181,7 @@ KNOWN_WRAPPERS: dict[str, dict[str, str]] = {
         ),
     },
     "image_transport::SubscriberFilter": {"reason": ""},
+    "nav2_util::TwistPublisher": {"reason": "the qos is a constructor argument of the wrapper"},
 }
 """Types this reader recognises as creating a real endpoint no `create_publisher` or
 `create_subscription` call names, with the C++ specific note each one needs. What each
@@ -327,6 +339,8 @@ class Ref:
     member: str = ""
     owner: str = ""
     parameter_suffix: str = ""
+    built: str = ""
+    """The expression a local was assigned from, kept when it could not be read."""
 
     @property
     def resolved(self) -> bool:
@@ -505,6 +519,8 @@ class Unit:
     broadcasts: list[TfBroadcast] = field(default_factory=list)
     lookups: list[TfLookup] = field(default_factory=list)
     registrations: list[Registration] = field(default_factory=list)
+    plugin_of_helper: Registration | None = None
+    """The plugin that builds this file's helper class and hands it the instance name."""
     wrappers: dict[str, tuple[int, int]] = field(default_factory=dict)
     shared_wrappers: dict[str, tuple[int, int]] = field(default_factory=dict)
     member_wrappers: dict[tuple[str, str], str] = field(default_factory=dict)
@@ -915,7 +931,8 @@ class _Reader:
             found = self.lookup(expr)
             if found is not None:
                 binding = found.binding or ("member" if expr.endswith("_") else "local")
-                return replace(found, expr=expr, binding=binding)
+                built = found.built or (found.expr if found.status == UNRESOLVED else "")
+                return replace(found, expr=expr, binding=binding, built=built)
             if expr in self.defines:
                 return Ref(LITERAL, self.defines[expr], expr, origin="macro", source_name=expr)
             if expr.endswith("_") and self.klass:
@@ -950,10 +967,7 @@ class _Reader:
         second = self.resolve(right)
         if second.status == LITERAL and (
             first.origin == "parameter"
-            or (
-                first.member
-                and not (first.expr in {"name_", "this->name_"} and second.value.startswith("."))
-            )
+            or (first.member and not (_plugin_prefix(first) and second.value.startswith(".")))
         ):
             return replace(
                 first,
@@ -972,8 +986,7 @@ class _Reader:
                 binding=carrier.binding,
             )
         if second.status == LITERAL and (
-            first.status == SUFFIX
-            or (first.expr in {"name_", "this->name_"} and second.value.startswith("."))
+            first.status == SUFFIX or (_plugin_prefix(first) and second.value.startswith("."))
         ):
             # The head is the plugin instance name the yaml supplies, so what the source
             # states is the tail, and the separating dot belongs to neither half.
@@ -997,6 +1010,8 @@ class _Reader:
             if arguments:
                 return replace(self.resolve(arguments[0]), expr=expr)
             return Ref(UNRESOLVED, "", expr)
+        if name == "getName" and not arguments and self.klass:
+            return Ref(UNRESOLVED, "", expr, origin=PLUGIN_NAME)
         declare = self._declare_shape(name, arguments, template)
         if declare is not None and declare[1] is not None:
             parameter = self.resolve(declare[0])
@@ -1239,6 +1254,7 @@ class _Reader:
             pushed = True
         self.scopes.append({})
         options = self._parameters(declarator)
+        self._plugin_name_parameter(declarator, qualified)
         if qualified:
             self.unit.methods.append(qualified)
             if body is not None and not body.named_child_count:
@@ -1252,6 +1268,28 @@ class _Reader:
         if pushed:
             self.classes.pop()
         self.functions.pop()
+
+    def _plugin_name_parameter(self, declarator: Any, qualified: str) -> None:
+        """The one string a plugin's `configure` or `initialize` takes is its instance name,
+        which the yaml supplies, so a parameter named from it is a suffix of that name."""
+        if not self.klass or qualified.rpartition("::")[2] not in PLUGIN_SETUP_METHODS:
+            return
+        target = declarator
+        while target is not None and target.type != "function_declarator":
+            target = _child(target, "declarator")
+        parameters = _child(target, "parameters") if target is not None else None
+        if parameters is None:
+            return
+        names = []
+        for child in parameters.named_children:
+            type_node = _child(child, "type")
+            inner = _child(child, "declarator")
+            if type_node is None or inner is None:
+                continue
+            if _flat(type_node, self.src).removeprefix("const ") == "std::string":
+                names.append(_text(inner, self.src).strip("&* "))
+        if len(names) == 1 and names[0]:
+            self.scopes[-1][names[0]] = Ref(UNRESOLVED, "", names[0], origin=PLUGIN_NAME)
 
     def _function_name(self, declarator: Any) -> tuple[str, str]:
         target = declarator
@@ -1318,8 +1356,10 @@ class _Reader:
                     and sites[0][position] is not None
                     and required <= len(sites[0]) <= (accepted or len(sites[0]))
                 ):
-                    self.scopes[-1][text] = Ref(
-                        LITERAL, sites[0][position], text, origin="constructor_argument"
+                    self.scopes[-1][text] = (
+                        Ref(UNRESOLVED, "", text, origin=PLUGIN_NAME)
+                        if sites[0][position] == PLUGIN_NAME_ARGUMENT
+                        else Ref(LITERAL, sites[0][position], text, origin="constructor_argument")
                     )
                 default = _child(child, "default_value")
                 if default is not None:
@@ -1536,6 +1576,7 @@ class _Reader:
         ]
         raw = f"{wrapper}({_flat(_construction_args(value), self.src)[1:-1]})"
         self._wrapper_endpoints(wrapper, raw, value)
+        self._named_wrapper_endpoints(name, wrapper, value)
         if wrapper == "message_filters::Subscriber":
             message = _template_head(_flat(value, self.src), wrapper) or _template_head(
                 type_text, wrapper
@@ -1550,6 +1591,41 @@ class _Reader:
             ]
             if arguments is not None and arguments.type == "argument_list" and len(listed) > 1:
                 self._filter_endpoint(name, listed[1], value, "Subscriber")
+
+    def _named_wrapper_endpoints(self, member: str, wrapper: str, value: Any) -> None:
+        """The endpoints a wrapper class creates under the name its constructor is handed,
+        `TwistPublisher(node, "cmd_vel")`. message_filters and image_transport have readers
+        of their own."""
+        row = wrappers.lookup(wrapper, "cpp")
+        if row is None or row.argument is None or wrapper in _OWN_READERS:
+            return
+        arguments = _construction_args(value)
+        listed = [
+            item
+            for item in (arguments.named_children if arguments is not None else [])
+            if item.type != "comment"
+        ]
+        if arguments is None or arguments.type != "argument_list" or len(listed) <= row.argument:
+            return
+        ref = self.resolve(listed[row.argument])
+        for item in row.endpoints:
+            if item.name_source != "argument":
+                continue
+            self.unit.endpoints.append(
+                Endpoint(
+                    kind=item.kind,
+                    name=ref,
+                    sym=self.sym,
+                    owner_class=self.klass,
+                    line=_line(value),
+                    api=wrapper,
+                    type_text=item.type,
+                    qos=None,
+                    qos_reason=str(KNOWN_WRAPPERS[wrapper]["reason"]),
+                    condition=self.guarded(member),
+                    guard=self.guard_of(member),
+                )
+            )
 
     def _wrapper_endpoints(
         self, wrapper: str, raw: str, site: Any, *, conditional: bool = True
@@ -1755,8 +1831,11 @@ class _Reader:
             self._image_endpoints(f"image_transport::{name}", arguments, node)
             return True
         action = head.startswith("rclcpp_action::")
+        factory = name in ACTION_FACTORY_CALLS
         if action and name in ("create_client", "create_server"):
             kind = "action_client" if name == "create_client" else "action_server"
+        elif factory:
+            kind = ACTION_FACTORY_CALLS[name]
         elif name in PUBLISH_CALLS:
             kind = "publisher"
         elif name in SUBSCRIBE_CALLS:
@@ -1783,6 +1862,8 @@ class _Reader:
             position = 4
         interface_arity = 8 if name == "create_server" else 5
         name_position = (4 if len(arguments) >= interface_arity else 1) if action else 0
+        if factory and len(arguments) > 1 and _is_node_argument(arguments[0], self.src):
+            name_position = 1
         if name_position >= len(arguments):
             return True
         ref = self.resolve(arguments[name_position])
@@ -2267,6 +2348,9 @@ def _template_head(text: str, symbol: str) -> str:
         elif char in ",>" and not depth:
             return " ".join(text[start:index].split())
     return ""
+
+
+_OWN_READERS = frozenset({"message_filters::Subscriber", "image_transport::SubscriberFilter"})
 
 
 def _wrapper_of(text: str) -> str:
@@ -3637,18 +3721,29 @@ def _helper_arguments(units: Sequence[Unit]) -> None:
         return next(iter(found)) if len(found) == 1 else ""
 
     sites: dict[tuple[str, str], list[tuple[str | None, ...]]] = {}
+    builders: dict[tuple[str, str], Unit] = {}
     for unit in units:
         if unit.syntax is None:
             continue
         defines = dict(_DEFINE.findall(unit.source.decode("utf-8", "replace")))
+        names_held = {
+            member for (_klass, member), ref in unit.members.items() if ref.origin == PLUGIN_NAME
+        } | {"getName()"}
         for spelling, arguments in _helper_constructions(unit.syntax, unit.source):
             values = [_string_of(argument, unit.source) for argument in arguments]
-            sites.setdefault((unit.pkg, match(unit.pkg, spelling)), []).append(
+            texts = [_flat(argument, unit.source).removeprefix("this->") for argument in arguments]
+            key = (unit.pkg, match(unit.pkg, spelling))
+            sites.setdefault(key, []).append(
                 tuple(
-                    defines.get(_flat(argument, unit.source)) if value is None else value
-                    for argument, value in zip(arguments, values, strict=True)
+                    value
+                    if value is not None
+                    else PLUGIN_NAME_ARGUMENT
+                    if text in names_held
+                    else defines.get(text)
+                    for text, value in zip(texts, values, strict=True)
                 )
             )
+            builders[key] = unit
     for unit in units:
         if unit.syntax is None or unit.construction_sites:
             continue
@@ -3684,6 +3779,15 @@ def _helper_arguments(units: Sequence[Unit]) -> None:
             )
             reader.constructor_arguments[klass] = values
             reader.walk(unit.syntax)
+            if PLUGIN_NAME_ARGUMENT in values[0]:
+                unit.plugin_of_helper = next(
+                    (
+                        item
+                        for item in builders[(unit.pkg, qualname)].registrations
+                        if item.macro == "PLUGINLIB_EXPORT_CLASS"
+                    ),
+                    None,
+                )
             constructor = f"{klass}::{klass.rpartition('::')[2]}"
             for record_key in ("endpoints", "params", "reads", "broadcasts", "lookups"):
                 setattr(
@@ -3696,7 +3800,7 @@ def _helper_arguments(units: Sequence[Unit]) -> None:
                 held = unit.members.get(member)
                 if (
                     member[0] == klass
-                    and value.status == LITERAL
+                    and (value.status == LITERAL or value.origin == PLUGIN_NAME)
                     and (held is None or held.status != LITERAL)
                 ):
                     unit.members[member] = value
@@ -4430,6 +4534,8 @@ def _map_state(value: Any, refused: str) -> str:
 
 def _finish_param(item: ParamSite, index: CodeIndex) -> ParamSite:
     name = _finish(item.name, index)
+    if name.status == SUFFIX:
+        item = replace(item, scope="plugin")
     if item.default_state != "unknown" or item.default_ref is None:
         return replace(item, name=name)
     default = _finish(item.default_ref, index)
@@ -4438,10 +4544,16 @@ def _finish_param(item: ParamSite, index: CodeIndex) -> ParamSite:
     return replace(item, name=name, default=default.value, default_state="known")
 
 
+def _plugin_prefix(ref: Ref) -> bool:
+    return ref.expr in {"name_", "this->name_"} or ref.origin == PLUGIN_NAME
+
+
 def _finish(ref: Ref, index: CodeIndex) -> Ref:
     if ref.status != UNRESOLVED or not ref.member:
         return ref
     found = index.members.get((ref.owner, ref.member))
+    if found is not None and found.origin == PLUGIN_NAME and ref.parameter_suffix[:1] == ".":
+        return Ref(SUFFIX, ref.parameter_suffix[1:], ref.expr, origin="plugin_parameter")
     if found is None or (
         found.status == UNRESOLVED and not (found.origin == "parameter" and found.source_name)
     ):
@@ -4466,7 +4578,10 @@ UNRESOLVED_REASONS = {
     "runtime_attribute_default": (["observed"], ()),
     "external_descriptor_file": (["observed"], ()),
     "not_stated_in_source": (["declared", "observed"], ()),
+    "frame_empty": (["observed"], ()),
 }
+EMPTY_FRAME = "frame_empty"
+_STRING_PIECE = re.compile(r'"[^"]+"')
 
 
 def _reason(expr: str, want: str, *, loop: bool = False) -> str:
@@ -4618,6 +4733,14 @@ def _plugin_param_view(
         "reads": [_read_view(row) for row in reads],
         "line_hint": item.line,
     }
+
+
+def _frame_ref(ref: Ref) -> Ref:
+    """A literal that names no frame (`""`, `"/"`) is a blind spot, not a frame id."""
+    if ref.status == LITERAL and not ref.value.strip().lstrip("/"):
+        expr = ref.expr or f'"{ref.value}"'
+        return replace(ref, status=UNRESOLVED, expr=expr, origin=EMPTY_FRAME)
+    return ref
 
 
 def _frame_view(ref: Ref) -> tuple[str | None, str]:
@@ -4792,7 +4915,8 @@ def file_report(
     parameters: list[dict[str, Any]] = []
     plugin_parameters: list[dict[str, Any]] = []
     plugin = next(
-        (item for item in unit.registrations if item.macro == "PLUGINLIB_EXPORT_CLASS"), None
+        (item for item in unit.registrations if item.macro == "PLUGINLIB_EXPORT_CLASS"),
+        unit.plugin_of_helper,
     )
     base_class = plugin.base_class if plugin else ""
     lookup_name = lookups.get(plugin.type, (base_class, plugin.type))[1] if plugin else ""
@@ -4804,7 +4928,10 @@ def file_report(
             unresolved.append(
                 {
                     "want": model.Want.PARAM_NAME.value,
-                    "expr": item.spelling,
+                    # a local holding `prefix + ".value"` builds only names with that tail
+                    "expr": (
+                        item.name.built if _STRING_PIECE.search(item.name.built) else item.spelling
+                    ),
                     "reason": "not_stated_in_source",
                     "resolvable_by": ["observed"],
                     **({"construction": item.construction} if item.construction else {}),
@@ -4875,6 +5002,7 @@ def file_report(
 
     broadcasts: list[dict[str, Any]] = []
     for item in unit.broadcasts:
+        item = replace(item, parent=_frame_ref(item.parent), child=_frame_ref(item.child))
         parent, parent_state = _frame_view(item.parent)
         child, child_state = _frame_view(item.child)
         row = {
@@ -4916,6 +5044,7 @@ def file_report(
 
     lookup_rows: list[dict[str, Any]] = []
     for item in unit.lookups:
+        item = replace(item, target=_frame_ref(item.target), source=_frame_ref(item.source))
         target, target_state = _frame_view(item.target)
         source, source_state = _frame_view(item.source)
         row = {
@@ -4966,7 +5095,7 @@ def file_report(
         report["constructions"] = _constructions(unit, unit.constructions)
     if unit.type_aliases:
         report["type_aliases"] = unit.type_aliases
-    if plugin is not None:
+    if plugin is not None and plugin is not unit.plugin_of_helper:
         report["plugins"] = [
             {
                 "macro": plugin.macro,
@@ -5041,7 +5170,9 @@ def file_report(
 
 
 def _frame_unresolved(ref: Ref, sym: str, line: int, construction: str = "") -> dict[str, Any]:
-    reason = _reason(ref.expr, model.Want.FRAME_ID.value)
+    reason = (
+        EMPTY_FRAME if ref.origin == EMPTY_FRAME else _reason(ref.expr, model.Want.FRAME_ID.value)
+    )
     return {
         "want": model.Want.FRAME_ID.value,
         "expr": ref.expr,
@@ -5319,6 +5450,19 @@ class CppCodeCollector:
         """
         ws = ctx.ws
         file_id = ws.file_id(path)
+        ctx.builder.node(
+            file_id,
+            attrs={
+                "language": "cpp",
+                "loadable": False,
+                "refused_because": "cpp_refused_by_atlas",
+                "refused_detail": message.replace(path, file_id),
+            },
+        )
+        package, _relpath = ws.rel(path)
+        if package and package != ids.REPO_PKG:
+            ctx.builder.node(ids.build_pkg(package))
+            ctx.builder.edge(model.EdgeKind.CONTAINS.value, ids.build_pkg(package), file_id)
         late.append(
             {
                 "path": file_id,
@@ -5430,6 +5574,10 @@ class CppCodeCollector:
             )
         self._count(builder, report)
         plugin_id = self._plugin(ctx, run, unit, report, file_id)
+        rows = report.get("plugin_parameters") or []
+        if not plugin_id and rows:
+            plugin_id = ids.build_plugin(rows[0]["base_class"], rows[0]["lookup_name"])
+            builder.node(plugin_id)
         for qualname in unit.symbols:
             self._symbol(ctx, run, unit, report, qualname, file_id, plugin_id)
         for entry in report["unresolved"]:
@@ -5549,9 +5697,9 @@ class CppCodeCollector:
         for row in slice_of(report["tf"]["broadcasts"]):
             self._broadcast(ctx, run, unit, row, sym_id)
         for row in slice_of(report["tf"]["lookups"]):
-            for name in (row["target"], row["source"]):
-                if name:
-                    builder.node(ids.build_frame(name))
+            for role in ("target", "source"):
+                if row[role] and not row.get(f"{role}_from_parameter"):
+                    builder.node(ids.build_frame(row[role]))
         for item in sorted(
             unit.params, key=lambda row: (row.scope, row.name.value, row.construction)
         ):
@@ -5593,26 +5741,49 @@ class CppCodeCollector:
     ) -> None:
         builder = ctx.builder
         ws = ctx.ws
+        # A frame read from a parameter is the code default, which a profile may replace, so
+        # only the join states it, once per profile.
+        if row.get("parent_from_parameter") or row.get("child_from_parameter"):
+            return
         for name in (row["parent"], row["child"]):
             if name:
                 builder.node(ids.build_frame(name))
         if not row["parent"] or not row["child"]:
             return
+        parent, child = ids.build_frame(row["parent"]), ids.build_frame(row["child"])
+        key = ids.edge_key(sym=sym_id, pair=f"{row['parent']}>{row['child']}")
+        values = {
+            "source": "cpp_broadcast",
+            "symbol": sym_id,
+            "broadcaster": row["broadcaster"],
+            "condition": row["condition"],
+        }
+        # Two sites of one symbol stating the same pair fold into one edge; one that states
+        # other content takes that content into its key, as `join._site_edge` does.
+        edge = builder.atlas.edges.get(
+            ids.build_edge(model.EdgeKind.TF_PARENT.value, parent, child, key)
+        )
+        slot = edge.fact(LAYER, model.ANY_PROFILE) if edge is not None else None
+        if slot is not None and any(
+            name not in slot.values or slot.values[name] != value for name, value in values.items()
+        ):
+            key = ids.edge_key(
+                site=key,
+                content=ids.digest_fields(
+                    {name: str(value) for name, value in sorted(values.items())}
+                ),
+            )
         builder.edge(
             model.EdgeKind.TF_PARENT.value,
-            ids.build_frame(row["parent"]),
-            ids.build_frame(row["child"]),
-            key=ids.edge_key(sym=sym_id, pair=f"{row['parent']}>{row['child']}"),
+            parent,
+            child,
+            key=key,
             layer=LAYER,
             run=run,
-            values={
-                "source": "cpp_broadcast",
-                "symbol": sym_id,
-                "broadcaster": row["broadcaster"],
-                "condition": row["condition"],
-            },
+            values=values,
             confidence=model.Confidence.CERTAIN.value,
             evidence=[ws.source(ws.site(unit.path, row["owner_symbol"], row["line_hint"]))],
+            fold=True,
         )
 
     def _plugin_param(

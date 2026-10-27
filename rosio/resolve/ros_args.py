@@ -17,6 +17,7 @@ Two properties matter more than coverage:
 
 from __future__ import annotations
 
+import math
 import re
 import sys
 from collections.abc import Sequence
@@ -341,6 +342,107 @@ def apply_ros_args(node: records.ResolvedNode, parsed: records.RosArgs) -> recor
 def apply_argv(node: records.ResolvedNode, argv: Sequence[str]) -> records.ResolvedNode:
     """Parse and fold in one step."""
     return apply_ros_args(node, parse_ros_args(argv))
+
+
+STATIC_TF_PROGRAM = ("tf2_ros", "static_transform_publisher")
+_STATIC_TF_FLAGS = {
+    "--x": "translation.x",
+    "--y": "translation.y",
+    "--z": "translation.z",
+    "--qx": "rotation.x",
+    "--qy": "rotation.y",
+    "--qz": "rotation.z",
+    "--qw": "rotation.w",
+    "--roll": "roll",
+    "--pitch": "pitch",
+    "--yaw": "yaw",
+    "--frame-id": "frame_id",
+    "--frame_id": "frame_id",
+    "--child-frame-id": "child_frame_id",
+    "--child_frame_id": "child_frame_id",
+}
+
+
+def program_params(node: records.ResolvedNode) -> records.ResolvedNode:
+    """The parameters a known program sets from its own arguments.
+
+    `tf2_ros/static_transform_publisher` reads its flags, or the positional form ending in the
+    frame pair, and hands them to its node as parameter overrides
+    (`static_transform_broadcaster_program.cpp`), so the node's `frame_id` default is never
+    what runs once the arguments name a frame.
+    """
+    found = program_assignments(node.pkg, node.executable, node.argv)
+    if not found:
+        return node
+    order = max((item.order for item in node.params), default=-1) + 1
+    base = node.site.locator if node.site else ""
+    added = tuple(
+        records.ParamSource(
+            order=order + index,
+            kind="ros_args_assign",
+            values=((name, found[name][0]),),
+            note="an argument static_transform_publisher hands its node as a parameter",
+            site=_site(node, base, found[name][1]),
+        )
+        for index, name in enumerate(sorted(found))
+    )
+    return replace(node, params=(*node.params, *added))
+
+
+def program_assignments(
+    pkg: str, executable: str, argv: Sequence[Any]
+) -> dict[str, tuple[str, str]]:
+    """Parameter name to (text, the argument that states it) for a known program."""
+    if (pkg, executable) != STATIC_TF_PROGRAM:
+        return {}
+    words = [str(item) for item in argv]
+    if ROS_ARGS in words:
+        words = words[: words.index(ROS_ARGS)]
+    found: dict[str, tuple[str, str]] = {}
+    if words and words[0] in _STATIC_TF_FLAGS:
+        for flag, value in zip(words[::2], words[1::2], strict=False):
+            if flag in _STATIC_TF_FLAGS:
+                found[_STATIC_TF_FLAGS[flag]] = (value, flag)
+    elif len(words) in (8, 9):
+        names = ["translation.x", "translation.y", "translation.z"]
+        names += (
+            ["yaw", "pitch", "roll"]
+            if len(words) == 8
+            else ["rotation.x", "rotation.y", "rotation.z", "rotation.w"]
+        )
+        names += ["frame_id", "child_frame_id"]
+        found = {name: (value, "positional") for name, value in zip(names, words, strict=True)}
+    angles = [_number(found.pop(name, ("0", ""))[0]) for name in ("roll", "pitch", "yaw")]
+    if None not in angles and any(angles) and "rotation.w" not in found:
+        quaternion = _quaternion(*angles)  # type: ignore[arg-type]
+        for index, name in enumerate(("rotation.x", "rotation.y", "rotation.z", "rotation.w")):
+            found[name] = (repr(quaternion[index]), "--roll --pitch --yaw")
+    for name, (value, flag) in list(found.items()):
+        number = _number(value)
+        if name.startswith(("translation.", "rotation.")) and number is not None:
+            # the program parses every number as a double, whatever the text spells
+            found[name] = (repr(number), flag)
+    return found
+
+
+def _number(text: str) -> float | None:
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _quaternion(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
+    """`tf2::Quaternion::setRPY`."""
+    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+    cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+    return (
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    )
 
 
 def available(*_args: object, **_kwargs: object) -> bool:

@@ -711,6 +711,7 @@ def _undeclared_atlas(
     read: bool = False,
     plugins: int = 0,
     locator: str = "",
+    mechanism: str = model.Mechanism.YAML_BASE.value,
 ) -> model.Atlas:
     builder = _builder()
     for other in declared:
@@ -744,7 +745,7 @@ def _undeclared_atlas(
         [
             _candidate(
                 1.0,
-                model.Mechanism.YAML_BASE.value,
+                mechanism,
                 _source(BASE, locator or f"demo_server.ros__parameters.{name}", 12),
                 rank=0,
                 wins=True,
@@ -772,6 +773,15 @@ def test_param_set_undeclared_fires_when_no_declaration_names_the_key():
     assert found[0].severity == model.Severity.WARN.value
     assert "demo_pkg/src/demo_server.cpp" in found[0].say
     assert "config/params.yaml:12" in found[0].say
+
+
+def test_param_set_undeclared_asks_to_remove_a_key_from_a_launch_dict_not_its_line():
+    """voxel_grid_based_euclidean_cluster.launch.py hands one dict built from yaml to the
+    node, so the line also carries every key the node does read."""
+    atlas = _undeclared_atlas(mechanism=model.Mechanism.LAUNCH_INLINE_DICT.value)
+    (found,) = _run(atlas, "param.set_undeclared")
+    assert "remove max_speed from the dictionary passed at" in found.fix
+    assert "delete the line" not in found.fix.lower() + found.say.lower()
 
 
 def test_param_set_undeclared_names_the_node_source_first_and_counts_in_plain_words():

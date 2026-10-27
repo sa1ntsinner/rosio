@@ -522,7 +522,12 @@ class PyFile:
         for node in ast.walk(ast.Module(body=body, type_ignores=[])):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    self.imports[alias.asname or alias.name.split(".")[0]] = alias.name
+                    # `import a.b` binds `a` to `a`, and `import a.b as c` binds `c` to `a.b`
+                    if alias.asname:
+                        self.imports[alias.asname] = alias.name
+                    else:
+                        head = alias.name.split(".")[0]
+                        self.imports[head] = head
             elif isinstance(node, ast.ImportFrom):
                 base = self._import_base(node)
                 if not base:
@@ -2203,50 +2208,127 @@ class PyFile:
         wrapper = holder.wrapper or ""
         kind = "static" if "Static" in wrapper else "dynamic"
         args = self._positional(node)
-        parent, child = self._transform_frames(args[0] if args else None, ctx)
-        record: dict[str, Any] = {
-            "kind": kind,
-            "parent": parent.value if parent.known else None,
-            "child": child.value if child.known else None,
-            "parent_state": parent.state if parent.known else "unresolved",
-            "child_state": child.state if child.known else "unresolved",
-            "broadcaster": wrapper or None,
-            "condition": holder.condition,
-            **_guard_view(holder.guard),
-            "owner_symbol": ctx.symbol,
-            "frame_ids": [],
-            "line_hint": _line(node),
-        }
-        for role, val in (("parent", parent), ("child", child)):
-            if val.known:
-                record["frame_ids"].append(ids.build_frame(str(val.value)))
-                self.resolved_counts["frame_id"] += 1
-                if val.from_parameter:
-                    record[f"{role}_from_parameter"] = val.from_parameter
-            elif val.expr:
-                record["unresolved_ref"] = f"frame_id:{val.expr}"
-                self._blind("frame_id", val.expr, val.reason, ctx.symbol, node)
-        self.broadcasts.append(record)
+        pairs = self._transform_pairs(args[0] if args else None, ctx)
+        if args and not pairs and not isinstance(args[0], ast.List | ast.Tuple):
+            # transforms this reader cannot follow are lost, so they are a blind spot
+            self._blind("frame_id", self._src(args[0]), "", ctx.symbol, node)
+            return
+        for parent, child in pairs:
+            record: dict[str, Any] = {
+                "kind": kind,
+                "parent": parent.value if parent.known else None,
+                "child": child.value if child.known else None,
+                "parent_state": parent.state if parent.known else "unresolved",
+                "child_state": child.state if child.known else "unresolved",
+                "broadcaster": wrapper or None,
+                "condition": holder.condition,
+                **_guard_view(holder.guard),
+                "owner_symbol": ctx.symbol,
+                "frame_ids": [],
+                "line_hint": _line(node),
+            }
+            for role, val in (("parent", parent), ("child", child)):
+                if val.known:
+                    record["frame_ids"].append(ids.build_frame(str(val.value)))
+                    self.resolved_counts["frame_id"] += 1
+                    if val.from_parameter:
+                        record[f"{role}_from_parameter"] = val.from_parameter
+                elif val.expr:
+                    record["unresolved_ref"] = f"frame_id:{val.expr}"
+                    self._blind("frame_id", val.expr, val.reason, ctx.symbol, node)
+            self.broadcasts.append(record)
 
-    def _transform_frames(self, node: ast.expr | None, ctx: Ctx) -> tuple[Val, Val]:
+    def _transform_pairs(self, node: ast.expr | None, ctx: Ctx) -> list[tuple[Val, Val]]:
+        """(parent, child) per transform one `sendTransform` argument holds."""
         if node is None:
-            return _UNKNOWN, _UNKNOWN
-        if isinstance(node, ast.List | ast.Tuple) and node.elts:
-            node = node.elts[0]
+            return [(_UNKNOWN, _UNKNOWN)]
+        if isinstance(node, ast.List | ast.Tuple):
+            pairs: list[tuple[Val, Val]] = []
+            for item in node.elts:
+                found = self._transform_pairs(item, ctx)
+                if not found:
+                    self._blind("frame_id", self._src(item), "", ctx.symbol, item)
+                pairs.extend(found)
+            return pairs
         if isinstance(node, ast.Name):
             fields = ctx.fields.get(node.id, {})
-            return (
-                fields.get("header.frame_id", _UNKNOWN),
-                fields.get("child_frame_id", _UNKNOWN),
-            )
+            return [
+                (fields.get("header.frame_id", _UNKNOWN), fields.get("child_frame_id", _UNKNOWN))
+            ]
         if isinstance(node, ast.Call):
+            method = self._own_method(node)
+            if method is not None:
+                return self._returned_transforms(method, ctx)
             parent = self._keyword(node, "frame_id")
             child = self._keyword(node, "child_frame_id")
-            return (
-                self._eval(parent, ctx) if parent is not None else _UNKNOWN,
-                self._eval(child, ctx) if child is not None else _UNKNOWN,
+            if (
+                parent is None
+                and child is None
+                and not _dotted(node.func).endswith("TransformStamped")
+            ):
+                return []
+            return [
+                (
+                    self._eval(parent, ctx) if parent is not None else _UNKNOWN,
+                    self._eval(child, ctx) if child is not None else _UNKNOWN,
+                )
+            ]
+        return []
+
+    def _own_method(self, node: ast.Call) -> ast.FunctionDef | None:
+        """The one method `self.<name>()` with no arguments calls, read from this module."""
+        func = node.func
+        if (
+            node.args
+            or node.keywords
+            or not isinstance(func, ast.Attribute)
+            or not isinstance(func.value, ast.Name)
+            or func.value.id != "self"
+        ):
+            return None
+        found = [
+            item
+            for item in ast.walk(self.tree)
+            if isinstance(item, ast.FunctionDef) and item.name == func.attr
+        ]
+        return found[0] if len(found) == 1 else None
+
+    def _returned_transforms(self, method: ast.FunctionDef, ctx: Ctx) -> list[tuple[Val, Val]]:
+        """The transforms a method builds field by field and returns, `return (a, b)`.
+
+        Only a returned name whose frame fields the method assigns from expressions this
+        reader evaluates counts, so anything else stays a blind spot of the caller.
+        """
+        fields: dict[str, dict[str, ast.expr]] = {}
+        returned: ast.expr | None = None
+        for item in ast.walk(method):
+            if isinstance(item, ast.Return):
+                if returned is not None:
+                    return []
+                returned = item.value
+            elif isinstance(item, ast.Assign) and len(item.targets) == 1:
+                path = _dotted(item.targets[0]).split(".", 1)
+                if len(path) == 2 and path[1] in ("header.frame_id", "child_frame_id"):
+                    fields.setdefault(path[0], {})[path[1]] = item.value
+        names = (
+            returned.elts
+            if isinstance(returned, ast.List | ast.Tuple)
+            else [returned]
+            if returned is not None
+            else []
+        )
+        pairs: list[tuple[Val, Val]] = []
+        for name in names:
+            held = fields.get(name.id) if isinstance(name, ast.Name) else None
+            if not held or len(held) != 2:
+                return []
+            pairs.append(
+                (
+                    self._eval(held["header.frame_id"], ctx),
+                    self._eval(held["child_frame_id"], ctx),
+                )
             )
-        return _UNKNOWN, _UNKNOWN
+        return pairs
 
     def _lookup(self, node: ast.Call, ctx: Ctx, call: str) -> None:
         args = self._positional(node)

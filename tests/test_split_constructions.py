@@ -184,8 +184,10 @@ PUBLIC_SOURCES = {
         "findings": {"extract.input_refused": 1},
         # One of them is pkg:@repo, the workspace every extraction writes. The test
         # directories a configuration that states no ignore skips hold no entity any more.
-        "entities": 1868,
-        "edges": 2389,
+        # `import rclpy.context` beside `import rclpy` no longer rebinds `rclpy`, so two
+        # `rclpy.create_node` calls are read, each a symbol with its defines edge.
+        "entities": 1870,
+        "edges": 2391,
     },
     "rl_src": {
         # The C++ reading of the fifth trial left fewer blind spots and lifted the rate over
@@ -202,7 +204,9 @@ PUBLIC_SOURCES = {
         "entities": 1646,
         # navsat_transform builds the static broadcaster its header declares in its
         # initializer list, so both of its launch names publish /tf_static.
-        "edges": 2298,
+        # A frame the code reads from a parameter is no longer a `*` tf_parent from the
+        # default, so map to odom is stated per profile only.
+        "edges": 2297,
     },
 }
 
