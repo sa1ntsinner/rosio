@@ -921,6 +921,18 @@ def test_a_released_share_file_stands_for_the_same_file_in_the_package_source(
     assert ws.underlay_twin(str(twin)) is None
 
 
+def test_a_python_module_edited_since_the_build_names_its_installed_copy(bench: Path) -> None:
+    """awk_ws: safety_stop.py changed in src, and the installed copy is what runs."""
+    module = bench / "src" / "demo_pkg" / "demo_pkg" / "demo_node.py"
+    site = bench / "install" / "demo_pkg" / "lib" / "python3.12" / "site-packages"
+    installed = _write(site / "demo_pkg" / "demo_node.py", module.read_text(encoding="utf-8"))
+    ws = _discover(bench)
+    assert ws.stale_module(str(module)) is None
+    installed.write_text("def main():\n    return 1\n", encoding="utf-8")
+    assert ws.stale_module(str(module)) == str(installed)
+    assert ws.stale_module(str(installed)) is None
+
+
 def test_cmake_executables_expand_a_variable_the_same_file_sets() -> None:
     """turtlebot3 names its executable `${EXECUTABLE_NAME}` after `set(EXECUTABLE_NAME ...)`."""
     from rosio.workspace import _cmake_executables

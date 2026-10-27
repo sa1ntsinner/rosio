@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from rosio import extra_command
 from rosio.agent import install as ins
 from rosio.agent import platforms as plat
 from rosio.errors import UsageError
@@ -316,11 +317,28 @@ def test_a_user_entry_starts_this_interpreter_and_names_no_atlas(tmp_path):
 
 def test_a_project_entry_says_when_rosio_is_not_on_a_minimal_path(tmp_path, monkeypatch):
     monkeypatch.setattr(ins, "_on_minimal_path", lambda name: False)
-    report = ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
+    report = ins.install("cursor", "project", root=tmp_path, home=tmp_path / "home")
     assert "--scope user" in report.text()
+    assert "uv tool install '" in report.text()
     monkeypatch.setattr(ins, "_on_minimal_path", lambda name: True)
-    report = ins.install("claude-code", "project", root=tmp_path / "other", home=tmp_path / "h")
+    report = ins.install("cursor", "project", root=tmp_path / "other", home=tmp_path / "h")
+    assert "minimal PATH" not in report.text()
+
+
+def test_a_platform_whose_user_scope_writes_no_server_is_never_offered_it(tmp_path, monkeypatch):
+    """claude-code user scope writes no MCP entry, so --scope user left no server at all."""
+    monkeypatch.setattr(ins, "_on_minimal_path", lambda name: False)
+    report = ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
     assert "--scope user" not in report.text()
+    assert "uv tool install '" in report.text()
+    assert "Claude Code's own command" in report.text()
+
+
+def test_install_prints_one_line_for_paths_nobody_watched_being_read(tmp_path):
+    report = ins.install("copilot", "project", root=tmp_path, home=tmp_path / "home")
+    assert [note for note in report.notes if "seen read" in note] == [
+        "2 of these paths not yet seen read by copilot, rosio install --list says which"
+    ]
 
 
 def test_no_server_entry_is_written_when_the_server_could_not_start(tmp_path, monkeypatch):
@@ -334,7 +352,7 @@ def test_no_server_entry_is_written_when_the_server_could_not_start(tmp_path, mo
     assert statuses(report)[str(tmp_path / ".mcp.json")] == ins.SKIPPED
     assert not (tmp_path / ".mcp.json").exists()
     assert (tmp_path / "CLAUDE.md").is_file()
-    assert "pip install 'rosio[mcp]'" in report.text()
+    assert extra_command("mcp") in report.text()
 
 
 def test_an_unchanged_install_prints_no_notes(tmp_path):

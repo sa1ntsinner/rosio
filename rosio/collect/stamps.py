@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from rosio import ids, model
+from rosio import extra_line, ids, model
 from rosio.collect import CollectContext, register
 from rosio.collect.bag import BAG_PKG, METADATA_NAME, STORAGE_SUFFIXES, BagCollector
 from rosio.errors import CollectorError
@@ -27,7 +27,7 @@ def require_reader() -> None:
     except ImportError as exc:
         raise CollectorError(
             f"header stamp checks need the stamps extra ({STAMPS_EXTRA}), "
-            "install it with: pip install 'rosio[stamps]'",
+            f"install it with: {extra_line('stamps')}",
             LAYER,
             NAME,
         ) from exc

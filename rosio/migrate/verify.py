@@ -179,7 +179,11 @@ def build(source: Sequence[SourcePackage], root: Path, target: str, image: str |
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise UsageError("Docker must be installed and running.") from exc
     if ready.returncode:
-        raise UsageError("Docker must be installed and running.")
+        # Docker names its own fix, such as the WSL integration of Docker Desktop.
+        said = ready.stderr or ready.stdout or b""
+        said = said.decode("utf-8", "replace") if isinstance(said, bytes) else said
+        first = next((line.strip() for line in said.splitlines() if line.strip()), "")
+        raise UsageError("Docker must be installed and running" + (f": {first}" if first else "."))
     if image is None:
         image = f"rosio-facts:{target}"
         present = subprocess.run(["docker", "image", "inspect", image], capture_output=True)

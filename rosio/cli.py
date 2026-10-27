@@ -133,6 +133,39 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", metavar="command")
 
+    init = _sub(
+        subparsers,
+        "init",
+        "write a rosio.yaml to edit",
+        "Write the configuration extraction would use without one: the roots found in the "
+        "workspace, the ROS setup files a launch file needs, and one profile per launch file. "
+        "Edit it so each profile is one system you actually start.",
+    )
+    init.add_argument(
+        "workspace",
+        nargs="?",
+        default=".",
+        metavar="PATH",
+        help="workspace directory, default is the current one",
+    )
+    init.add_argument("--force", action="store_true", help="replace an existing rosio.yaml")
+    init.add_argument(
+        "--print", action="store_true", help="print the configuration instead of writing it"
+    )
+    init.add_argument(
+        "--package",
+        action="append",
+        metavar="NAME",
+        help="write the profiles of this package only, repeatable, for an install tree "
+        "such as /opt/ros/<distro> that holds hundreds of launch files",
+    )
+    init.add_argument(
+        "--config",
+        metavar="FILE",
+        help="file to write, default is rosio.yaml in PATH, with paths below its directory "
+        "written relative to it",
+    )
+
     extract = _sub(
         subparsers,
         "extract",
@@ -591,7 +624,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         metavar="KEY",
         help="require this key as Authorization: Bearer <key> or as an x-api-key header, "
-        "required to bind anywhere but loopback",
+        "required to bind anywhere but loopback. default: the ROSIO_API_KEY variable, "
+        "which ps does not show",
     )
     serve.add_argument(
         "--path",
@@ -712,39 +746,6 @@ def build_parser() -> argparse.ArgumentParser:
         "print the version and the atlas schema version",
         "Print the rosio version and the major.minor of the atlas schema it writes.",
         flags=("json",),
-    )
-
-    init = _sub(
-        subparsers,
-        "init",
-        "write a rosio.yaml to edit",
-        "Write the configuration extraction would use without one: the roots found in the "
-        "workspace, the ROS setup files a launch file needs, and one profile per launch file. "
-        "Edit it so each profile is one system you actually start.",
-    )
-    init.add_argument(
-        "workspace",
-        nargs="?",
-        default=".",
-        metavar="PATH",
-        help="workspace directory, default is the current one",
-    )
-    init.add_argument("--force", action="store_true", help="replace an existing rosio.yaml")
-    init.add_argument(
-        "--print", action="store_true", help="print the configuration instead of writing it"
-    )
-    init.add_argument(
-        "--package",
-        action="append",
-        metavar="NAME",
-        help="write the profiles of this package only, repeatable, for an install tree "
-        "such as /opt/ros/<distro> that holds hundreds of launch files",
-    )
-    init.add_argument(
-        "--config",
-        metavar="FILE",
-        help="file to write, default is rosio.yaml in PATH, with paths below its directory "
-        "written relative to it",
     )
 
     stamps = _sub(
@@ -1328,7 +1329,12 @@ def _problem_lines(problems: list, atlas=None) -> list[tuple[str, int]]:
             where = f"the {where.split('/', 1)[1]} collector"
         elif where == "@launch":
             where = "the launch walk"
-        text = f"{where} {row.get('exc_type', '')}: {row.get('message', '')}".strip()
+        if row.get("exc_type") == "ContractError":
+            # A broken invariant inside rosio, not a property of the file it was reading.
+            text = f"{where}: rosio hit an internal error here, please report it: "
+            text += str(row.get("message", ""))
+        else:
+            text = f"{where} {row.get('exc_type', '')}: {row.get('message', '')}".strip()
         text = re.sub(OPAQUE, "an OpaqueFunction", text)
         text = readable(text.replace("@output", "<its output file>"), atlas)
         counted[text] = counted.get(text, 0) + 1
@@ -2104,9 +2110,15 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         out = Path(args.out or DEFAULT_OUT_DIR)
         out = out if out.is_absolute() else workspace / out
         written = out / "migrate" / f"{start}-to-{args.target}.diff"
+        rewritten = sum(1 for change in changes if change.automatic)
+        if not diff:
+            # A second apply rewrites nothing, and the diff of the first is the record.
+            kept = f", the earlier diff stays in {written}" if written.is_file() else ""
+            data["diff"] = str(written) if kept else ""
+            lines = [f"rosio migrate apply: nothing to rewrite{kept}"]
+            return _answer(args, Answer(f"migrate {action}", data=data, lines=lines))
         written.parent.mkdir(parents=True, exist_ok=True)
         written.write_text(diff, encoding="utf-8")
-        rewritten = sum(1 for change in changes if change.automatic)
         data["diff"] = str(written)
         lines = [
             f"rosio migrate apply: {rewritten} rewrites, diff in {written}",

@@ -359,6 +359,24 @@ def scaffold_ignore() -> tuple[str, ...]:
     return INSTALL_PREFIX_IGNORE
 
 
+def test_init_leaves_out_launch_files_kept_where_tests_live(workspace: Path) -> None:
+    """robot_localization: nine of twelve profiles were test/test_*.launch.py."""
+    package = workspace / "src" / "lx_bringup"
+    plain = (
+        "from launch import LaunchDescription\n"
+        "def generate_launch_description():\n"
+        "    return LaunchDescription([])\n"
+    )
+    names = ("test/ekf.launch.py", "tests/launch/nav.launch.py", "launch/ekf_test.launch.py")
+    for relative in names:
+        (package / relative).parent.mkdir(parents=True, exist_ok=True)
+        (package / relative).write_text(plain, encoding="utf-8")
+    _target, written = scaffold.write(workspace)
+    targets = {item.target for profile in written.profiles for item in profile.entrypoints}
+    assert not {"ekf.launch.py", "nav.launch.py", "ekf_test.launch.py"} & targets
+    assert targets
+
+
 def test_init_does_not_offer_a_launch_testing_file_as_a_profile(workspace: Path) -> None:
     """ros2_control_demos keeps a launch_testing file per example, and each became a profile
     that only ever reported its test dependencies."""
@@ -367,7 +385,7 @@ def test_init_does_not_offer_a_launch_testing_file_as_a_profile(workspace: Path)
         "import launch_testing\ndef generate_test_description():\n    return None\n",
         encoding="utf-8",
     )
-    (launch / "test_named_like_a_test.launch.py").write_text(
+    (launch / "test_drive.launch.py").write_text(
         "from launch import LaunchDescription\n"
         "def generate_launch_description():\n"
         "    return LaunchDescription([])\n",
@@ -376,7 +394,7 @@ def test_init_does_not_offer_a_launch_testing_file_as_a_profile(workspace: Path)
     _target, written = scaffold.write(workspace)
     targets = {item.target for profile in written.profiles for item in profile.entrypoints}
     assert "test_bringup.launch.py" not in targets
-    assert "test_named_like_a_test.launch.py" in targets
+    assert "test_drive.launch.py" in targets
     assert "test_bringup.launch.py" not in scaffold.render(
         default_config(str(workspace)), workspace
     )

@@ -225,21 +225,24 @@ rosio uninstall claude-code            # put the tree back
 
 A project file such as `.mcp.json` is committed, so its server entry runs `rosio serve --atlas
 rosio-out/atlas.json` from the PATH, in the project directory the assistant starts it in, and
-works in every clone. When `rosio` is not on a minimal PATH, install says so: `--scope user`
-registers the interpreter that ran install by its absolute path instead.
+works in every clone. When `rosio` is not on a minimal PATH, install says so and names the fix:
+`uv tool install` of your checkout puts `rosio` in `~/.local/bin`, and for an assistant whose user
+scope holds a server entry, `--scope user` registers the interpreter that ran install by its
+absolute path instead.
 
 Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, Aider, OpenCode, Amp, Kilo, and the cross
 framework agent skills directory. Anything that speaks MCP can use the server directly:
 
 ```bash
 rosio serve                                        # stdio
-rosio serve --http --host 0.0.0.0 --api-key "$KEY" # one server for a team
+ROSIO_API_KEY="$KEY" rosio serve --http --host 0.0.0.0 # one server for a team, key kept out of ps
 ```
 
 Twelve tools: `overview`, `param_chain`, `drift`, `explain`, `query`, `path`, `neighbours`,
 `graph`, `unresolved`, `stamps`, `transform`, `migrate`. Every response is capped and says when it truncated and how to narrow the question.
-Arguments carry the command line's names (`only` as in `--only`, `source` and `target` as in
-`rosio path`), except that `migrate` takes `start` for `--from` and accepts `from` too. An
+Flags keep the command line's names (`only` as in `--only`, `source` and `target` as in
+`rosio path`). Positional words get names of their own: `query` takes `question`, `param_chain`
+takes `node` and `name`, and `migrate` takes `start` for `--from` and accepts `from` too. An
 argument a tool does not take is refused with the names it does.
 The server starts without an atlas, and each tool then names the extract command that builds one.
 Over `--http`, `migrate` reads only the served workspace: the directory `--workspace` names, else

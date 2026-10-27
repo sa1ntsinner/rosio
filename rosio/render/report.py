@@ -611,6 +611,8 @@ def _cause(reason: str) -> str:
     group as they are, and a sentence groups by its opening, so thirty remaps that differ
     only in a topic name are one cause and not thirty.
     """
+    if reason in query.REASONS:
+        return query.REASONS[reason]
     words = reason.split()
     return reason if len(words) <= 2 else " ".join(words[:4]) + " ..."
 

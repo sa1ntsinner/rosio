@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import hmac
 import inspect
+import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from rosio import __version__
+from rosio import __version__, extra_command
 from rosio.errors import RosioError, UsageError
 from rosio.model import SEVERITY_ORDER, Want
 from rosio.serve import tools
@@ -45,7 +47,7 @@ MCP_MIN, MCP_MAX = _bounds(MCP_EXTRA)
 """The range as two comparable releases, derived so a bump of the string cannot leave the
 version check the cli runs behind."""
 
-MCP_INSTALL = f"pip install 'rosio[mcp]', which pins {MCP_EXTRA}"
+MCP_INSTALL = f"{extra_command('mcp')}, which pins {MCP_EXTRA}"
 
 
 def mcp_problem() -> str:
@@ -82,7 +84,7 @@ UVICORN_EXTRA = "uvicorn>=0.31.1"
 
 UVICORN_MISSING = (
     "the http transport needs uvicorn, which is not installed. "
-    f"install it with: pip install 'rosio[mcp]', which pins {UVICORN_EXTRA}"
+    f"install it with: {extra_command('mcp')}, which pins {UVICORN_EXTRA}"
 )
 
 INSTRUCTIONS = (
@@ -91,6 +93,10 @@ INSTRUCTIONS = (
     "and what a recording holds. Call overview first. Every answer is deterministic, states "
     "the file and line to edit, and says so when the atlas cannot support an answer."
 )
+
+
+KEY_VARIABLE = "ROSIO_API_KEY"
+"""Where the http key is read from when --api-key is not given."""
 
 
 @dataclass
@@ -108,6 +114,8 @@ class Options:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def check(self) -> Options:
+        # A key on the command line is visible in ps to every user of the machine.
+        self.api_key = self.api_key or os.environ.get(KEY_VARIABLE, "")
         if not str(self.atlas).strip():
             raise UsageError("an atlas is needed: --atlas <dir>/atlas.json")
         if not self.http:
@@ -117,7 +125,8 @@ class Options:
         if self.host not in LOOPBACK and not self.api_key:
             raise UsageError(
                 f"binding to {self.host} serves the atlas to the network and no key is set. "
-                "pass --api-key <secret>, or bind 127.0.0.1 and put a proxy in front. "
+                f"set {KEY_VARIABLE} or pass --api-key, or bind 127.0.0.1 and put a proxy in "
+                "front. "
                 "an atlas names every file, node and parameter of the workspace"
             )
         if not 1 <= int(self.port) <= 65535:
@@ -373,7 +382,7 @@ def _mcp_note() -> str:
     return (
         f"mcp {found} is installed and exposes neither MCPServer nor FastMCP, so there is no "
         f"server to build. rosio needs {MCP_EXTRA}. "
-        "move it into that range with: pip install 'rosio[mcp]'"
+        f"move it into that range with: {extra_command('mcp')}"
     )
 
 
@@ -469,6 +478,9 @@ def run(options: Options) -> None:
     except ImportError as exc:
         raise UsageError(UVICORN_MISSING) from exc
 
+    # mcp logs every session at INFO through a column wrapped handler, which buries a real
+    # warning on a team server.
+    logging.getLogger("mcp").setLevel(logging.WARNING)
     config = uvicorn.Config(
         http_app(server, options), host=options.host, port=options.port, log_level="warning"
     )

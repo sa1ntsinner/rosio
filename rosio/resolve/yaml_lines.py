@@ -122,6 +122,16 @@ class Leaf:
     order: int = 0
 
 
+def _said(exc: BaseException) -> str:
+    """What the parser said, at the line and column a reader opens, without its own name
+    for the input."""
+    mark = getattr(exc, "problem_mark", None)
+    problem = getattr(exc, "problem", None)
+    if mark is None or not problem:
+        return str(exc)
+    return f"line {mark.line + 1}, column {mark.column + 1}: {problem}"
+
+
 def load(text: str, *, path: str = "") -> Document:
     """Load one yaml document, recording a line for every key path.
 
@@ -136,7 +146,7 @@ def load(text: str, *, path: str = "") -> Document:
         lines: dict[tuple[str, ...], int] = {}
         data = None if node is None else _build(node, loader, (), lines)
     except (CollectorError, yaml.YAMLError, RecursionError, TypeError, ValueError) as exc:
-        raise CollectorError(f"{path or 'yaml'} is not readable as yaml: {exc}") from exc
+        raise CollectorError(f"{path or 'yaml'} is not readable as yaml: {_said(exc)}") from exc
     finally:
         loader.dispose()
     return Document(data=data, lines=lines, path=path)

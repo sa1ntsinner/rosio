@@ -18,6 +18,8 @@ interchangeable:
   (`message_filters.Subscriber`), so the endpoint is real and its name is the caller's
 * `expanded`, the caller passes one name and the library derives several from it, which is
   how one action name becomes three services and two topics
+* `sibling`, the library replaces the last segment of the caller's name, which is how
+  image_transport puts `camera_info` beside the image topic of a camera
 
 `implicit` rows are the endpoints every ros node gets from its base class. They are not
 materialised by the join, because the source constructs nothing: they exist so a later rule
@@ -40,7 +42,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rosio.errors import ContractError
 
@@ -51,7 +53,7 @@ LANGUAGES = ("python", "cpp")
 
 ENDPOINT_KINDS = ("publisher", "subscriber", "service_server", "service_client")
 
-NAME_SOURCES = ("fixed", "argument", "expanded")
+NAME_SOURCES = ("fixed", "argument", "expanded", "sibling")
 
 ACTION_SERVICE_SUFFIXES = ("_action/send_goal", "_action/cancel_goal", "_action/get_result")
 ACTION_TOPIC_SUFFIXES = ("_action/feedback", "_action/status")
@@ -92,6 +94,9 @@ class WrapperEndpoint:
             return ""
         if self.name_source == "argument":
             return name
+        if self.name_source == "sibling":
+            head, _, _ = name.rstrip("/").rpartition("/")
+            return f"{head}/{self.suffix}" if head or name.startswith("/") else self.suffix
         return f"{name.rstrip('/')}/{self.suffix}"
 
 
@@ -136,6 +141,108 @@ class Wrapper:
 
 
 _TF = "tf2_msgs/msg/TFMessage"
+
+_IMAGE = "sensor_msgs/msg/Image"
+_IMAGE_HEADERS = "/opt/ros/jazzy/include/image_transport/image_transport/"
+
+
+def _image_rows() -> tuple[Wrapper, ...]:
+    """image_transport, checked against ROS jazzy rather than humble.
+
+    Every form takes the base topic from the caller. The raw transport publishes or subscribes
+    that topic itself. The per transport siblings (`compressed`, `theora`) are left out because
+    which ones exist depends on the transport plugins installed, which no source states. A
+    camera form also carries `camera_info`, which `getCameraInfoTopic` in camera_common.hpp
+    puts beside the base topic, and which a launch file remaps on its own.
+    """
+    image = WrapperEndpoint("publisher", type=_IMAGE, name_source="argument")
+    info = WrapperEndpoint(
+        "publisher", type="sensor_msgs/msg/CameraInfo", name_source="sibling", suffix="camera_info"
+    )
+    sub_image = replace(image, kind="subscriber")
+    sub_info = replace(info, kind="subscriber")
+    forms = (
+        (
+            "create_publisher",
+            (image,),
+            1,
+            "image_transport.hpp:53 create_publisher(node, base_topic, ...)",
+        ),
+        (
+            "create_subscription",
+            (sub_image,),
+            1,
+            "image_transport.hpp:63 create_subscription(node, base_topic, ...)",
+        ),
+        (
+            "create_camera_publisher",
+            (image, info),
+            1,
+            "image_transport.hpp:75 create_camera_publisher(node, base_topic, ...)",
+        ),
+        (
+            "create_camera_subscription",
+            (sub_image, sub_info),
+            1,
+            "image_transport.hpp:85 create_camera_subscription(node, base_topic, ...)",
+        ),
+        (
+            "ImageTransport::advertise",
+            (image,),
+            0,
+            "image_transport.hpp:120 advertise(base_topic, ...)",
+        ),
+        (
+            "ImageTransport::advertiseCamera",
+            (image, info),
+            0,
+            "image_transport.hpp:262 advertiseCamera(base_topic, ...)",
+        ),
+        (
+            "ImageTransport::subscribe",
+            (sub_image,),
+            0,
+            "image_transport.hpp:146 subscribe(base_topic, ...)",
+        ),
+        (
+            "ImageTransport::subscribeCamera",
+            (sub_image, sub_info),
+            0,
+            "image_transport.hpp:287 subscribeCamera(base_topic, ...)",
+        ),
+        (
+            "CameraPublisher",
+            (image, info),
+            1,
+            "camera_publisher.hpp:71 CameraPublisher(node, base_topic, ...)",
+        ),
+        (
+            "CameraSubscriber",
+            (sub_image, sub_info),
+            1,
+            "camera_subscriber.hpp:73 CameraSubscriber(node, base_topic, ...)",
+        ),
+        (
+            "SubscriberFilter",
+            (sub_image,),
+            1,
+            "subscriber_filter.hpp:109 subscribe(node, base_topic, transport, ...)",
+        ),
+    )
+    return tuple(
+        Wrapper(
+            symbol=f"image_transport::{form}",
+            library="image_transport",
+            language="cpp",
+            endpoints=endpoints,
+            argument=argument,
+            evidence=_IMAGE_HEADERS + evidence,
+        )
+        for form, endpoints, argument, evidence in forms
+    )
+
+
+_IMAGE_TRANSPORT = _image_rows()
 
 TABLE: tuple[Wrapper, ...] = (
     Wrapper(
@@ -364,28 +471,7 @@ TABLE: tuple[Wrapper, ...] = (
         "expansion as the client",
         note="Unused by the reference stack.",
     ),
-    Wrapper(
-        symbol="image_transport::ImageTransport::advertise",
-        library="image_transport",
-        language="cpp",
-        endpoints=(WrapperEndpoint("publisher", name_source="argument"),),
-        argument=0,
-        evidence="include/image_transport/image_transport/image_transport.hpp:120 and :126 "
-        "advertise(base_topic, ...)",
-        note="The base topic is real. The per transport siblings (compressed, theora) are not "
-        "in this table because which ones exist depends on the transport plugins installed, "
-        "which no source states. Unused by the reference stack.",
-    ),
-    Wrapper(
-        symbol="image_transport::ImageTransport::subscribe",
-        library="image_transport",
-        language="cpp",
-        endpoints=(WrapperEndpoint("subscriber", name_source="argument"),),
-        argument=0,
-        evidence="include/image_transport/image_transport/image_transport.hpp declares "
-        "subscribe(base_topic, ...) beside advertise",
-        note="Unused by the reference stack.",
-    ),
+    *_IMAGE_TRANSPORT,
     Wrapper(
         symbol="rclpy.node.Node",
         library="rclpy",

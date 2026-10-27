@@ -231,7 +231,7 @@ def _ranked(counts: dict[str, int], top: int = 8, noun: str = "kinds") -> str:
 def _named(items: Sequence[str], top: int = DEFAULT_LIMIT, more: str = "more") -> str:
     """A list of names, capped. Every answer is capped, and so is every refusal: an atlas
     with a thousand profiles once put seven kilobytes into a message promising four."""
-    shown = ", ".join(_clip(str(item), 90) for item in items[:top])
+    shown = ", ".join(_clip_name(str(item)) for item in items[:top])
     if len(items) > top:
         shown = f"{shown}, and {len(items) - top} {more}"
     return shown or "none"
@@ -239,6 +239,14 @@ def _named(items: Sequence[str], top: int = DEFAULT_LIMIT, more: str = "more") -
 
 def _clip(text: str, width: int) -> str:
     return slices._clip(text, width)
+
+
+def _clip_name(item: str, width: int = 90) -> str:
+    """A name clipped before its bracket, so a QoS note is never cut in half."""
+    head, sep, tail = item.partition(" [")
+    if sep and item.endswith("]"):
+        return _clip(head, width) + sep + tail
+    return _clip(item, width)
 
 
 def _subject(item: Finding) -> str:
@@ -402,13 +410,14 @@ def explain(atlas: Atlas, selector: str, *, limit: int | None = None) -> str:
     if not selector:
         raise UsageError("explain needs a selector, for example /controller_server or /scan")
     if selector.startswith(("find:", "sha256:")) or slices.is_rule(selector):
-        return _fit(
-            slices.explain(atlas, selector, limit=_limit(limit)).lines,
-            "pass a fingerprint for one finding",
-        )
+        answer = slices.explain(atlas, selector, limit=_limit(limit))
+        if not answer.ok:
+            raise UsageError("\n".join(answer.lines))
+        return _fit(answer.lines, "pass a fingerprint for one finding")
     entity_id, note = _entity(atlas, selector)
     if not entity_id:
-        return _fit(note, "call query with the plain words instead")
+        # `rosio explain` exits 2 here, so the tool answers as an error too.
+        raise UsageError(_fit(note, "call query with the plain words instead"))
     rows = _limit(limit)
     data = slices.explain(atlas, entity_id, limit=rows).data
     node = atlas.entities[entity_id]
@@ -894,6 +903,17 @@ def graph(
         )
     if not wanted and len(atlas.by_kind("profile")) > 1:
         lines.append(f"these merge every profile, narrow with {_pass(cli, 'profile', '<name>')}")
+    stale = [
+        slices.label(node.id)
+        for node in atlas.by_kind("file")
+        if node.attrs.get("install_copy_differs")
+    ]
+    if stale:
+        how = "rosio drift --only build.stale" if cli else "drift with only=build.stale"
+        lines.append(
+            f"src and install differ at {_named(stale, top=3, more='more files')}: launch "
+            f"files and yaml show what runs now, sources show the next build, {how} says which"
+        )
     return _fit(lines, f"pass {_pass(cli, 'focus', '<node>')} or a smaller {_pass(cli, 'limit')}")
 
 
@@ -1093,7 +1113,7 @@ def unresolved(
     for entry in kept[:rows]:
         lines.append(f"  {entry.want}: {slices.readable(entry.expr, atlas)}")
         lines.append(
-            f"      in {slices.label(entry.owner)} ({entry.reason})"
+            f"      in {slices.label(entry.owner)} ({slices.reason_text(entry.reason)})"
             + (f" at {slices.site(entry.evidence[0])}" if entry.evidence else "")
         )
         if entry.resolvable_by:

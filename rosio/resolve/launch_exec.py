@@ -117,8 +117,8 @@ SETUP_FIX = (
 VENV_FIX = (
     "the interpreter that walks launch files is a virtual environment that hides the system "
     "packages, and ROS 2 installs part of its own python stack as operating system packages. "
-    "Recreate it with python3 -m venv --system-site-packages <dir> and install rosio "
-    "into it again"
+    "Recreate it with --system-site-packages (uv venv, or python3 -m venv once the "
+    "python3-venv package is installed) and install rosio into it again"
 )
 GENERIC_FIX = "make python3 able to import launch and launch_ros in a login shell"
 

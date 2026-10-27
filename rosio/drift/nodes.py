@@ -218,6 +218,24 @@ def ambiguities(atlas: model.Atlas) -> tuple[Ambiguity, ...]:
     return tuple(out)
 
 
+def _gated(atlas: model.Atlas, node_id: str, profile: str) -> bool:
+    """Every site that starts the node in this profile waits on a gate, so the node may not
+    be up yet. The gates live on the launch entity, where one site is one entity."""
+    sites = [
+        atlas.entities[edge.src]
+        for edge in atlas.in_edges(node_id)
+        if edge.kind == model.EdgeKind.LAUNCHES.value
+        and edge.src in atlas.entities
+        and edge.fact(DECLARED, profile) is not None
+    ]
+
+    def gates(site: model.Node) -> Any:
+        fact = site.fact(DECLARED, profile) or site.fact(DECLARED, model.ANY_PROFILE)
+        return fact.values.get("gates") if fact is not None else None
+
+    return bool(sites) and all(gates(site) for site in sites)
+
+
 def _ambiguous_ids(rows: Iterable[Ambiguity]) -> set[str]:
     out: set[str] = set()
     for row in rows:
@@ -245,7 +263,7 @@ def node_declared_not_observed(atlas: model.Atlas) -> list[model.Finding]:
             declared = stated(entity, DECLARED, profile)
             if declared is None or says_anything(entity, OBSERVED, profile):
                 continue
-            if declared.values.get("gated") or entity.attrs.get("unreachable"):
+            if _gated(atlas, entity.id, profile) or entity.attrs.get("unreachable"):
                 continue
             where = slug(profile)
             name = human(entity.id)

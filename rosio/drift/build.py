@@ -625,17 +625,19 @@ def model_mesh_missing(atlas: Atlas) -> list[Finding]:
 
 @rules.register("build.stale")
 def build_stale(atlas: Atlas) -> list[Finding]:
-    """A file read through the package share whose two copies hold different bytes.
+    """A file whose src and install copies hold different bytes.
 
-    One finding per file, never one per value read from it. The install tree here holds
-    copies rather than symlinks and can be older than src, so without this rule the same
-    build state arrives as a content difference on every parameter that file carries.
+    One finding per file, never one per value read from it. Launch files and the files they
+    reach through the package share are read from the install tree, which is what
+    `ros2 launch` runs, so the atlas states what runs and src holds the next build. A python
+    module is read from src, so the atlas states the next build and the installed copy is
+    what runs. Either way the user meets the difference, and the text says which tree the
+    atlas shows.
 
     What is measured is a byte difference at one package relative path. That is evidence
     and not proof of a stale build: a package that keeps two spellings of one interface and
     installs the second one leaves a different file under src at the same relative path,
-    with nothing stale about it. The text says what was measured and leaves the cause to the
-    reader.
+    with nothing stale about it. The fix leaves that case to the reader.
     """
     findings: list[Finding] = []
     for node in atlas.by_kind(model.NodeKind.FILE.value):
@@ -643,30 +645,37 @@ def build_stale(atlas: Atlas) -> list[Finding]:
             continue
         parsed = ids.parse_file(node.id)
         relpath, package = parsed.relpath, parsed.package
+        if node.attrs.get("via_package_share"):
+            shown, root = "the installed copy, which is what runs now", model.Root.INSTALL.value
+            say = (
+                f"{package} {relpath} differs between src and install; rosio shows the "
+                "installed copy, which is what runs, and the src edits run after colcon build."
+            )
+        else:
+            shown, root = "the src copy, which runs only after a build", model.Root.SRC.value
+            say = (
+                f"{package} {relpath} differs between src and install; rosio shows the src "
+                "copy, and the installed one is what runs until colcon build."
+            )
         findings.append(
             Finding(
                 rule="build.stale",
                 severity=rules.severity_of("build.stale"),
                 subject=node.id,
-                title=f"the two trees hold different bytes at {relpath}",
+                title=f"src and install hold different bytes at {package}/{relpath}",
                 detail=(
-                    f"a launch file resolved {relpath} through the package share of "
-                    f"{package}, so the values come from the install tree, and the file at "
-                    "the same package relative path under src holds different bytes. A stale "
-                    "build is the usual cause. The other one is an installed copy generated "
-                    "from a different source file, in which case src is not the file to edit."
+                    f"{relpath} of {package} under src holds different bytes from its installed "
+                    f"copy, and the values in this atlas come from {shown}. A stale build is "
+                    "the usual cause."
                 ),
                 fix=(
-                    f"rebuild {package} and compare again, and when the two still differ read "
-                    f"the install rule for {relpath} to find the source it is built from"
+                    f"colcon build --packages-select {package} and extract again; when the two "
+                    f"still differ, read the install rule for {relpath} to find the file it is "
+                    "built from"
                 ),
-                say=(
-                    f"{package} {relpath} was read from the install tree and the src file at "
-                    "that path holds different bytes, so rebuild the package and compare "
-                    "again before trusting these values."
-                ),
+                say=say,
                 layers=[model.Layer.DECLARED.value],
-                where=[Source(file=node.id, root=model.Root.INSTALL.value)],
+                where=[Source(file=node.id, root=root)],
             )
         )
     return findings
@@ -903,7 +912,11 @@ def resolution_below_budget(
     return [
         Finding(
             rule="resolution.below_budget",
-            severity=rules.severity_of("resolution.below_budget"),
+            # Under the default budget nothing in the user's code can lift the rate, so a
+            # first run is not red under --fail-on warn. A budget in rosio.yaml makes it warn.
+            severity=rules.severity_of(
+                "resolution.below_budget", "" if _budget_stated(atlas, budget) else "unbudgeted"
+            ),
             subject=subject,
             title=f"the resolution rate {rate:.3f} is under the budget {overall:.3f}{held}",
             detail=_budget_detail(
@@ -940,6 +953,10 @@ def _whole_run_subject(atlas: Atlas) -> str:
     runs = sorted(node.id for node in atlas.by_kind(model.NodeKind.RUN.value))
     owners = sorted(entry.owner for entry in atlas.unresolved if entry.owner in atlas.entities)
     return (runs or owners or [""])[0]
+
+
+def _budget_stated(atlas: Atlas, budget: object) -> bool:
+    return budget is not None or (atlas.x.get("drift") or {}).get(BUDGET_KEY) is not None
 
 
 def _budget(
@@ -1044,8 +1061,8 @@ def extract_pass_incomplete(atlas: Atlas) -> list[Finding]:
         )
         if cpp_code.INSTALL_HINT in str(row.get("reason") or ""):
             fix = (
-                f"install the C++ extra with {cpp_code.INSTALL_HINT} into the environment "
-                "rosio runs from, then extract again"
+                "install the C++ extra into the environment rosio runs from "
+                f"({cpp_code.INSTALL_HINT}), then extract again"
             )
         findings.append(
             Finding(
@@ -1143,24 +1160,33 @@ def extract_input_refused(atlas: Atlas) -> list[Finding]:
         label = _refused_label(node)
         detail = str(node.attrs.get("refused_detail") or "")
         cost = REFUSAL_COSTS.get(because, UNKNOWN_COST)
+        where = _refused_where(atlas, node)
+        line = where[0].line_hint if where else None
+        said = detail.partition("is not readable as yaml: ")[2]
+        title = f"{label} was refused: {because}"
+        say = f"{label} was refused with {because}, so this atlas does not hold {cost}."
+        fix = _refused_fix(node, because, label)
+        if said:
+            title = f"{label}:{line} is not valid yaml" if line else f"{label} is not valid yaml"
+            say = f"{label} is not valid yaml, {said}, so this atlas does not hold {cost}."
+            position = said.partition(": ")[0]
+            fix = f"correct the yaml at {position} of {label}, then extract again"
         findings.append(
             Finding(
                 rule=RULE_REFUSED,
                 severity=rules.severity_of(RULE_REFUSED),
                 subject=node.id,
-                title=f"{label} was refused: {because}",
+                title=title,
                 detail=(
                     f"The collector that reads {label} recorded {because}"
                     + (f", {_clip(detail)}" if detail else "")
-                    + f". This is one input inside a pass, so no pass row states it, and {cost} "
-                    "never reached this atlas. Until this rule existed, the blind spot it "
-                    "owns and the rate that fell with it were all a reader met."
+                    + f". {cost[0].upper()}{cost[1:]} never reached this atlas."
                 ),
-                fix=_refused_fix(node, because, label),
-                say=f"{label} was refused with {because}, so this atlas does not hold {cost}.",
+                fix=fix,
+                say=say,
                 layers=sorted(node.layers),
-                profiles=sorted(node.profiles),
-                where=_refused_where(atlas, node),
+                profiles=sorted(node.profiles) or _reading_profiles(atlas, node.id),
+                where=where,
             )
         )
     return findings
@@ -1178,6 +1204,20 @@ def _refused_fix(node: model.Node, because: str, label: str) -> str:
     if because == params_collector.MISSING_FILE:
         return f"correct the path that names {label} or add the file, then extract again"
     return f"make {label} readable and extract again, or take it out of the roots"
+
+
+def _reading_profiles(atlas: Atlas, file_id: str) -> list[str]:
+    """The profiles whose launch sites read a file. A refused file states no fact, so its
+    own profiles are empty, and an empty list reads as every profile."""
+    return sorted(
+        {
+            fact.profile
+            for site in atlas.by_kind(model.NodeKind.LAUNCHENT.value)
+            for fact in site.facts
+            if fact.profile != model.ANY_PROFILE
+            and any(row.get("file") == file_id for row in fact.values.get("file_reads") or [])
+        }
+    )
 
 
 def _refused_label(node: model.Node) -> str:
@@ -1206,13 +1246,22 @@ def _refused_where(atlas: Atlas, node: model.Node) -> list[Source]:
             if row.file == node.id
         }
     )
+    lines = sorted(
+        {
+            row.line_hint
+            for entry in atlas.unresolved
+            if entry.owner == node.id
+            for row in entry.evidence
+            if row.file == node.id and row.line_hint
+        }
+    )
     if cited:
         root = cited[0]
     elif ids.parse_file(node.id).package == BAG_PKG:
         root = model.Root.BAG.value
     else:
         root = model.Root.SRC.value
-    return [Source(file=node.id, root=root)]
+    return [Source(file=node.id, root=root, line_hint=lines[0] if lines else None)]
 
 
 # ---------------------------------------------------------------------------

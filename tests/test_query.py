@@ -1269,3 +1269,81 @@ def test_a_reason_is_printed_whole_and_each_rate_says_what_it_covers():
     assert shown.endswith(reason.strip())
     assert "0.750 of every wanted value resolved" in body
     assert "other: 1 unresolved, 0.750 of this want resolved" in body
+
+
+def test_an_unresolved_reason_reads_as_a_sentence_and_json_keeps_the_code():
+    """ros2_control_demos printed file_after_build 42 times as the reason."""
+    builder = model.AtlasBuilder()
+    owner = ids.build_file("demo", "urdf/robot.urdf.xacro")
+    builder.node(owner)
+    for expr, reason in (
+        ("declared.urdf: xacro refused demo/urdf/robot.urdf.xacro: error: x", "file_after_build"),
+        ("rate_topic", "the remap resolves to /x, and nothing states its kind"),
+    ):
+        builder.unresolved(model.Unresolved(want="frame_id", owner=owner, expr=expr, reason=reason))
+    answer = query.unresolved(builder.build())
+    text = "\n".join(answer.lines)
+    assert "file_after_build" not in text
+    assert "a file only colcon build puts in place" in text
+    assert "the remap resolves to /x, and nothing states its kind" in text
+    assert "declared.urdf:" not in text
+    assert answer.data["by_want"]["frame_id"]["reasons"]["file_after_build"] == 1
+
+
+def test_explain_states_the_whole_effective_line():
+    """rover: `effective in rover: ... name=safety_stop...` hid the rest behind --json."""
+    builder = model.AtlasBuilder()
+    values = {f"key_{index:02d}": f"value_{index:02d}" for index in range(30)}
+    builder.fact("node:/safety_stop", "coded", values=values)
+    builder.fact("node:/safety_stop", "declared", values={"name": "safety_stop"})
+    body = texts(query.explain(builder.build(), "/safety_stop"))
+    effective = next(line for line in body.splitlines() if "effective in" in line)
+    assert effective.endswith("key_11=value_11, and 19 more, --limit shows more")
+    body = texts(query.explain(builder.build(), "/safety_stop", limit=40))
+    effective = next(line for line in body.splitlines() if "effective in" in line)
+    assert effective.endswith("key_29=value_29, name=safety_stop")
+
+
+def _tree_atlas(attrs: dict, pkg_attrs: dict, root: str) -> model.Atlas:
+    builder = model.AtlasBuilder()
+    owner = ids.build_node("/slam_toolbox")
+    source = ids.build_file("slam_toolbox", "config/mapper.yaml")
+    builder.node(owner)
+    builder.node(source, attrs=attrs)
+    builder.node(ids.build_pkg("slam_toolbox"), attrs=pkg_attrs)
+    param_id = ids.build_param(owner, "resolution")
+    builder.node(param_id)
+    builder.set_param(
+        param_id,
+        state="effective",
+        candidates=[
+            Candidate(
+                value=0.05,
+                value_type="double",
+                mechanism="launch_params_file",
+                source=Source(file=source, locator="resolution", line_hint=31, root=root),
+                rank=0,
+                wins=True,
+                profile="profile:online_async",
+            )
+        ],
+    )
+    return builder.build()
+
+
+@pytest.mark.parametrize(
+    ("attrs", "pkg_attrs", "root", "tag"),
+    [
+        ({}, {"share_read_from": "ROS jazzy"}, "src", "value read from ROS jazzy"),
+        ({"install_copy_differs": True}, {}, "install", "install, src differs"),
+        ({"install_copy_differs": True}, {}, "src", "src, the install copy runs"),
+        ({}, {}, "src", ""),
+    ],
+)
+def test_param_says_which_tree_the_value_runs_from(attrs, pkg_attrs, root, tag):
+    """slam_toolbox in src set 0.07 at line 31 and param cited that line for 0.05 read from
+    the release, with no tag, while build.underlay said the package came from ROS jazzy."""
+    answer = query.param(_tree_atlas(attrs, pkg_attrs, root), "/slam_toolbox", "resolution")
+    edit = next(line for line in answer.lines if line.strip().startswith("effective"))
+    assert edit.endswith(f"config/mapper.yaml:31 [{tag}]" if tag else "config/mapper.yaml:31")
+    assert answer.data["profiles"]["profile:online_async"]["read_from"] == (tag or "src")

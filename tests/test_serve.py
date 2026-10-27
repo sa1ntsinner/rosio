@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from rosio import ids, model
+from rosio import extra_command, ids, model
 from rosio.errors import ContractError, UsageError
 from rosio.model import Candidate, Finding, Source, Unresolved
 from rosio.serve import server, tools
@@ -389,7 +389,9 @@ def test_explain_renders_a_finding_when_the_selector_is_one(atlas):
 
 
 def test_explain_lists_the_candidates_when_a_name_is_ambiguous(atlas):
-    text = tools.explain(atlas, "controller")
+    with pytest.raises(UsageError) as caught:
+        tools.explain(atlas, "controller")
+    text = str(caught.value)
 
     assert "names 3 entities, pick one and pass its id" in text
     assert "param:/controller_server|FollowPath.plugin" in text
@@ -397,9 +399,12 @@ def test_explain_lists_the_candidates_when_a_name_is_ambiguous(atlas):
 
 
 def test_explain_says_so_when_nothing_carries_the_name(atlas):
-    text = tools.explain(atlas, "/nothing_like_this")
-
-    assert "nothing in this atlas" in text
+    """`rosio explain nope_x` exits 2, and the tool answered the same with is_error false."""
+    with pytest.raises(UsageError) as caught:
+        tools.explain(atlas, "/nothing_like_this")
+    assert "nothing in this atlas" in str(caught.value)
+    with pytest.raises(UsageError):
+        tools.explain(atlas, "sha256:0000000000000000")
 
 
 # ---------------------------------------------------------------------------
@@ -588,12 +593,21 @@ def test_stdio_is_the_default_and_needs_no_key():
     assert server.Options(atlas="atlas.json").check().http is False
 
 
-def test_an_open_bind_without_a_key_is_refused_and_not_warned_about():
+def test_the_key_is_read_from_the_environment_where_ps_does_not_show_it(monkeypatch):
+    monkeypatch.setenv("ROSIO_API_KEY", "from-env")
+    chosen = server.Options(atlas="atlas.json", http=True, host="0.0.0.0").check()
+    assert chosen.api_key == "from-env"
+    stated = server.Options(atlas="a.json", http=True, host="0.0.0.0", api_key="flag").check()
+    assert stated.api_key == "flag"
+
+
+def test_an_open_bind_without_a_key_is_refused_and_not_warned_about(monkeypatch):
+    monkeypatch.delenv("ROSIO_API_KEY", raising=False)
     with pytest.raises(UsageError) as caught:
         server.Options(atlas="atlas.json", http=True, host="0.0.0.0").check()
 
     message = str(caught.value)
-    assert "--api-key" in message
+    assert "--api-key" in message and "ROSIO_API_KEY" in message
     assert "127.0.0.1" in message
 
 
@@ -726,7 +740,7 @@ def test_the_missing_mcp_package_names_the_install_command(monkeypatch):
     with pytest.raises(UsageError) as caught:
         server._server_class()
 
-    assert "pip install 'rosio[mcp]'" in str(caught.value)
+    assert extra_command("mcp") in str(caught.value)
 
 
 def test_the_server_registers_every_tool_when_mcp_is_installed(atlas_file: Path):
@@ -1593,3 +1607,29 @@ def test_migrate_over_http_says_nothing_about_a_file_a_link_takes_outside(
     answer = migrate("jazzy", start="humble")
     assert "inside.cpp" in answer
     assert "linked.cpp" not in answer
+
+
+def test_a_long_endpoint_name_is_clipped_before_its_qos_bracket():
+    """image_pipeline: `... (unnamed by launch) [keep_last...; no subscriber`."""
+    name = "stereo_image_proc/stereo_image_proc::DisparityNode (unnamed by launch) " * 2
+    shown = tools._named([f"{name.strip()} [keep_last, depth 1]", "/short [reliable]"])
+    assert shown.endswith("[keep_last, depth 1], /short [reliable]")
+    assert "...[" not in shown and "... [keep_last, depth 1]" in shown
+
+
+def test_the_http_server_keeps_session_chatter_out_of_its_log(atlas_file, monkeypatch):
+    """Every session create and terminate came out as a wrapped INFO block on stderr."""
+    import logging
+    import types
+
+    pytest.importorskip("mcp")
+    ran = []
+    fake = types.SimpleNamespace(
+        Config=lambda *args, **kwargs: kwargs,
+        Server=lambda config: types.SimpleNamespace(run=lambda: ran.append(config)),
+    )
+    monkeypatch.setitem(sys.modules, "uvicorn", fake)
+    logging.getLogger("mcp").setLevel(logging.NOTSET)
+    server.run(server.Options(atlas=str(atlas_file), http=True))
+    assert ran and ran[0]["log_level"] == "warning"
+    assert logging.getLogger("mcp").getEffectiveLevel() == logging.WARNING

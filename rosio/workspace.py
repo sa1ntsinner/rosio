@@ -621,6 +621,24 @@ class Workspace:
             return twin, records.ROOTS[0]
         return absolute, records.ROOTS[1]
 
+    def stale_module(self, path: str) -> str | None:
+        """The installed copy of a python module under src when it holds different bytes.
+        ament_python copies the package's modules to `lib/python3.X/site-packages` under its
+        install prefix, and that copy is what runs until the next build."""
+        absolute = self.localise(path)
+        if self.root_of(absolute) != records.ROOTS[0]:
+            return None
+        name, relative = self.rel(absolute)
+        package = self.packages.get(name or "")
+        if package is None or not package.share_path:
+            return None
+        prefix = Path(package.share_path).parent.parent
+        for site in sorted(prefix.glob("lib/python3*/site-packages")):
+            candidate = site / relative
+            if candidate.is_file():
+                return None if _same_bytes(absolute, str(candidate)) else str(candidate)
+        return None
+
     def share_reads(self) -> list[ShareRead]:
         """Every file cited so far that was reached through the package share, sorted."""
         return [self._share_reads[key] for key in sorted(self._share_reads)]

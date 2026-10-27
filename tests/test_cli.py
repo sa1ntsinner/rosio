@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from rosio import ATLAS_SCHEMA_VERSION, __version__, cli, ids, model
+from rosio import ATLAS_SCHEMA_VERSION, __version__, cli, extra_command, ids, model
 from rosio.cli import HANDLERS, IMPLEMENTED, VERBS, build_parser, commands, main
 from rosio.errors import EXIT_DRIFT, EXIT_OK, EXIT_USAGE, UsageError
 from rosio.model import Candidate, Finding, Source, Unresolved
@@ -1176,7 +1176,7 @@ def test_an_mcp_outside_the_range_is_refused_by_name(found, refused, monkeypatch
     with pytest.raises(UsageError) as exc:
         cli._require_mcp()
     assert found in str(exc.value)
-    assert "pip install 'rosio[mcp]'" in str(exc.value)
+    assert extra_command("mcp") in str(exc.value)
 
 
 def test_a_missing_mcp_names_the_exact_install_command(monkeypatch):
@@ -1188,7 +1188,7 @@ def test_a_missing_mcp_names_the_exact_install_command(monkeypatch):
     monkeypatch.setattr("importlib.metadata.version", absent)
     with pytest.raises(UsageError) as exc:
         cli._require_mcp()
-    assert "pip install 'rosio[mcp]', which pins mcp>=1.14,<3" in str(exc.value)
+    assert f"{extra_command('mcp')}, which pins mcp>=1.14,<3" in str(exc.value)
 
 
 def test_install_writes_the_files_and_uninstall_takes_them_back(tmp_path: Path, capsys):
@@ -1289,7 +1289,7 @@ def test_the_summary_prints_one_line_per_distinct_problem_with_names_a_reader_kn
             "world.sdf.xacro` writes when it runs",
             2,
         ),
-        ("the params collector ContractError: m", 1),
+        ("the params collector: rosio hit an internal error here, please report it: m", 1),
     ]
 
 
@@ -1425,3 +1425,42 @@ def test_output_still_buffered_when_the_reader_leaves_ends_quietly():
     err = child.stderr.read().decode()
     assert child.wait(timeout=30) == 141
     assert "Traceback" not in err and "BrokenPipeError" not in err
+
+
+def test_an_extra_is_installed_the_way_rosio_was(monkeypatch, tmp_path):
+    """A checkout install in a uv environment has no pip and no PyPI release to name."""
+    import importlib.metadata
+    import json
+    import sys
+
+    class Found:
+        def __init__(self, record):
+            self.record = record
+
+        def read_text(self, _name):
+            return self.record
+
+    checkout = json.dumps({"url": "file:///home/u/rosio", "dir_info": {}})
+    monkeypatch.setattr(importlib.metadata, "distribution", lambda _name: Found(checkout))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    assert extra_command("cpp") == "pip install '/home/u/rosio[cpp]'"
+    (tmp_path / "pyvenv.cfg").write_text("home = /usr/bin\nuv = 0.9.0\n", encoding="utf-8")
+    assert extra_command("cpp") == "uv pip install '/home/u/rosio[cpp]'"
+    monkeypatch.setattr(importlib.metadata, "distribution", lambda _name: Found(None))
+    assert extra_command("cpp") == "uv pip install 'rosio[cpp]'"
+
+
+def test_init_comes_first_in_the_help_the_epilog_says_to_start_with(capsys):
+    text = cli.build_parser().format_help()
+    listed = text[text.index("command") :]
+    assert listed.index("    init") < listed.index("    extract")
+
+
+def test_bagmutate_says_what_each_flag_takes(capsys):
+    from rosio.stamps import mutate
+
+    with pytest.raises(SystemExit):
+        mutate.main(["--help"])
+    out = capsys.readouterr().out
+    assert "the fault to put in" in out
+    assert "where in the recording the fault starts" in out

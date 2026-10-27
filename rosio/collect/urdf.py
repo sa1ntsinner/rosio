@@ -915,12 +915,18 @@ def expand_xacro(
     if done.returncode != 0:
         message = " ".join((done.stderr or done.stdout or "").split())
         # The prefixes the index searched name this machine and nothing a reader can act on.
-        message = _SEARCHING.sub("", message)[:400]
+        message = _SEARCHING.sub("", message)
+        # The tail names the file this call already names, and the errno restates the line.
+        message = _PROCESSING.sub("", _ERRNO.sub("", message)).strip()
+        if len(message) > 400:
+            message = message[:400].rsplit(" ", 1)[0] + "..."
         raise CollectorError(f"xacro refused {path}: {message}", LAYER, NAME)
     return done.stdout
 
 
 _SEARCHING = re.compile(r", searching: \[[^\]]*\]")
+_PROCESSING = re.compile(r"\s*when processing file: .*$")
+_ERRNO = re.compile(r"\s*\[Errno \d+\][^\[]*?(?= when processing file:|$)")
 
 _NO_SUCH_FILE = re.compile(r"No such file or directory: '?([^'\s]+)")
 

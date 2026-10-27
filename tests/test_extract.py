@@ -760,6 +760,32 @@ def test_a_stale_installed_copy_is_one_finding_on_the_file(tmp_path: Path):
     assert schema.validate(atlas.to_json()) == []
 
 
+def test_the_walk_runs_the_installed_launch_file_and_names_the_stale_src(tmp_path: Path):
+    """awk_ws: ros2 launch ran the installed bringup with /lidar/scan while the graph showed
+    the src remap /front/scan, and no finding said the launch file had changed."""
+    import shutil
+
+    from rosio.collect import launch_declared
+
+    root = tmp_path / "bench"
+    shutil.copytree(WS, root)
+    installed = _installed(root, "lx_sensors", SHARED)
+    source = root / "src" / "lx_sensors" / SHARED
+    source.write_text("# edited\n" + source.read_text(encoding="utf-8"), encoding="utf-8")
+    copy = Workspace.discover(
+        (
+            RootSpec(kind="src", path=str(root / "src")),
+            RootSpec(kind="install", path=str(root / "install")),
+        )
+    )
+    index = launch_declared._launch_index(copy)
+    assert index[("lx_sensors", SHARED)] == str(installed)
+    copy.cite(index[("lx_sensors", SHARED)])
+    atlas = extract.run(_config(tmp_path / "out", copy), copy)
+    (stale,) = [item for item in atlas.findings if item.rule == "build.stale"]
+    assert stale.subject == ids.build_file("lx_sensors", SHARED)
+
+
 def test_a_share_read_of_a_file_no_collector_cited_is_ignored(tmp_path: Path, ws: Workspace):
     ws.cite(str(_installed(WS, "lx_bringup", "package.xml")))
     atlas = extract.run(_config(tmp_path / "out", ws), ws)

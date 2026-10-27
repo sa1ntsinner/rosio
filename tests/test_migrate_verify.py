@@ -181,8 +181,11 @@ def test_docker_unavailable_is_a_usage_error(monkeypatch, missing):
         return subprocess.CompletedProcess(args[0], 1, "", "daemon unavailable")
 
     monkeypatch.setattr(verify.subprocess, "run", run)
-    with pytest.raises(UsageError, match="Docker must be installed and running\\."):
+    with pytest.raises(UsageError) as caught:
         verify.build([], Path(), "jazzy")
+    # Docker's own first line names the fix, the WSL integration of Docker Desktop for one.
+    said = "." if missing else ": daemon unavailable"
+    assert str(caught.value) == f"Docker must be installed and running{said}"
 
 
 def test_cli_verify_reports_failure_and_keeps_workspace_unchanged(tmp_path, monkeypatch, capsys):

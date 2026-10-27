@@ -92,7 +92,19 @@ class Bench:
             BRIDGE, CODED, profile=self.profile, values={"name": "io_bridge"}, evidence=[SOURCE]
         )
         self.declared(SUPERVISOR, "motion_supervisor")
-        self.declared(GATED, "map_saver", gated=True)
+        self.declared(GATED, "map_saver")
+        site = ids.build_launchent(PKG, "launch/maps.launch.py", (("Node", "map_saver"),))
+        self.builder.node(site)
+        gate = {"mechanism": "OnProcessExit", "expr": "map_server"}
+        self.builder.fact(site, DECLARED, profile=self.profile, values={"gates": [gate]})
+        self.builder.edge(
+            model.EdgeKind.LAUNCHES.value,
+            site,
+            GATED,
+            key=ids.edge_key(launchent=site, profile=self.profile),
+            layer=DECLARED,
+            profile=self.profile,
+        )
         self.observed(LEFTOVER, "left_over")
         self.observed(TOOLING, "_ros2cli_daemon_1")
         for node_id, role in ((STATIC_A, "aa11bb22"), (STATIC_B, "cc33dd44")):

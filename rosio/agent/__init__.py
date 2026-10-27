@@ -20,11 +20,12 @@ def __getattr__(name: str) -> Any:
         try:
             from rosio.serve import run
         except ImportError as exc:
+            from rosio import extra_command
             from rosio.errors import CollectorError
 
             raise CollectorError(
                 f"the MCP server is not available: {exc}. "
-                "install the extra with: pip install 'rosio[mcp]'",
+                f"install the extra with: {extra_command('mcp')}",
                 collector="serve",
             ) from exc
         return run

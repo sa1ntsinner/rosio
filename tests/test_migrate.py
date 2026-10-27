@@ -875,3 +875,9 @@ def test_the_cli_apply_writes_the_diff_under_out(humble_ws: Path, capsys) -> Non
     diff = (out / "migrate" / "humble-to-lyrical.diff").read_text(encoding="utf-8")
     assert "-cmake_minimum_required(VERSION 3.0.2)" in diff
     assert "+cmake_minimum_required(VERSION 3.8)" in diff
+    capsys.readouterr()
+    command = ["migrate", "apply", str(humble_ws), "--from", "humble", "--to", "lyrical"]
+    assert main([*command, "--out", str(out)]) == 0
+    again = (out / "migrate" / "humble-to-lyrical.diff").read_text(encoding="utf-8")
+    assert again == diff, "a second apply rewrote nothing and must keep the first diff"
+    assert "nothing to rewrite, the earlier diff stays in" in capsys.readouterr().out

@@ -698,6 +698,16 @@ def _record_share_reads(builder: model.AtlasBuilder, ws: Workspace) -> None:
         node.attrs["via_package_share"] = True
         if not read.identical:
             node.attrs["install_copy_differs"] = True
+    # A python module is read from src, and the installed copy is what runs until a build.
+    for node in builder.atlas.by_kind(model.NodeKind.FILE.value):
+        if not node.id.endswith(".py") or node.attrs.get("via_package_share"):
+            continue
+        try:
+            source = ws.abspath(node.id)
+        except ContractError:
+            continue
+        if ws.stale_module(source) is not None:
+            node.attrs["install_copy_differs"] = True
 
 
 # ---------------------------------------------------------------------------

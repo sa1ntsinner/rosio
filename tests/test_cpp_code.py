@@ -285,6 +285,8 @@ def test_missing_extra_names_the_install_line(monkeypatch: pytest.MonkeyPatch) -
         cpp.load_parser()
     message = str(caught.value)
     assert cpp.INSTALL_HINT in message
+    # No release is on PyPI yet, and the line lands in an atlas, so it names no machine path.
+    assert "pip install '<checkout>[cpp]' from a rosio checkout, or 'rosio[cpp]'" in message
     assert "tree-sitter-cpp" in message
     assert message.startswith("coded.cpp_code:")
 
@@ -972,3 +974,57 @@ def test_a_parameters_file_that_refuses_to_load_states_its_refusal_in_attrs(
     assert node.facts == []
     assert node.layers == []
     assert [entry.owner for entry in atlas.unresolved] == [node.id]
+
+
+IMAGE_NODE = """
+DebayerNode::DebayerNode(const rclcpp::NodeOptions & options)
+: rclcpp::Node("debayer_node", options)
+{
+  auto node_base = this->get_node_base_interface();
+  image_topic_ = node_base->resolve_topic_or_service_name("image_raw", false);
+  std::string mono_topic = node_base->resolve_topic_or_service_name("image_mono", false);
+  image_transport::TransportHints hints(*this);
+  sub_raw_ = image_transport::create_subscription(
+    *this, image_topic_, [this](const Image::ConstSharedPtr & msg) {imageCb(msg);},
+    hints.getTransport(), rclcpp::SensorDataQoS());
+  pub_mono_ = image_transport::create_publisher(*this, mono_topic, rclcpp::SystemDefaultsQoS());
+  pub_ = image_transport::create_camera_publisher(this, "left/image_rect");
+  sub_ = image_transport::create_camera_subscription(this, "image", cb, "raw");
+  image_transport::ImageTransport it(shared_from_this());
+  auto legacy = it.advertiseCamera("/cam/image", 1);
+  depth_sub_.subscribe(*this, "depth", hints.getTransport(), rclcpp::SystemDefaultsQoS());
+}
+"""
+
+
+def test_image_transport_calls_bind_their_topic_and_never_the_node():
+    """image_pipeline: every image_transport free function takes the node first."""
+    unit = cpp.parse_text(IMAGE_NODE, path="debayer.cpp")
+    cpp.analyse([unit])
+    rows = {
+        (row["kind"], row.get("name"), row.get("type"))
+        for row in cpp.file_report(unit)["endpoints"]
+    }
+    image, info = "sensor_msgs/msg/Image", "sensor_msgs/msg/CameraInfo"
+    assert rows == {
+        ("subscriber", "image_raw", image),
+        ("publisher", "image_mono", image),
+        ("publisher", "left/image_rect", image),
+        ("publisher", "left/camera_info", info),
+        ("subscriber", "image", image),
+        ("subscriber", "camera_info", info),
+        ("publisher", "/cam/image", image),
+        ("publisher", "/cam/camera_info", info),
+        ("subscriber", "depth", image),
+    }
+    assert "*this" not in json.dumps(cpp.file_report(unit))
+
+
+def test_a_rclcpp_member_publisher_keeps_its_first_argument_as_the_topic():
+    unit = cpp.parse_text(
+        'void N::start() { pub_ = create_publisher<std_msgs::msg::String>("chatter", 10); }',
+        path="n.cpp",
+    )
+    cpp.analyse([unit])
+    (row,) = cpp.file_report(unit)["endpoints"]
+    assert (row["kind"], row["name"]) == ("publisher", "chatter")

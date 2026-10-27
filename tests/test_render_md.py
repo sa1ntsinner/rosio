@@ -285,7 +285,9 @@ def test_the_report_counts_the_dead_parameters_next_to_the_effective_ones(atlas)
 def test_the_report_groups_blind_spots_by_cause_and_never_invents_one(atlas):
     text = render_report(atlas)
 
-    assert "environment_variable" in text
+    # A code is shown as its sentence, the code itself is for --json.
+    assert "an environment variable at run time" in text
+    assert "environment_variable" not in text
     assert "the remap resolves to ..." in text
     assert "2 values could not be resolved" in text
 

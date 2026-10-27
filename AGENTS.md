@@ -974,6 +974,21 @@ of each such entry, and python declarations the reader followed now count under
 instead of its last directory, and states the build beside src as a build, which moved the
 fingerprints of those findings. No release had shipped, so no stored id or waiver existed.
 
+Several finding texts moved in one change without a version bump, and they are named here
+because a fingerprint covers the normalised detail while no finding id moved. `build.stale`
+also fires on a launch file the walk ran from the install tree, which is the copy `ros2 launch`
+runs once a package is built, and on a python module whose installed copy holds different
+bytes, which reuses the attribute `install_copy_differs` on that file; its title and detail
+say which tree the atlas shows. `extract.input_refused` names the line of a yaml syntax error
+and lost a sentence about the rule's own history. `node.ambiguous_identity` over an
+executable that runs several nodes in one process says so and no longer asks for a launch
+name, which would rename all of them. `resolution.below_budget` reports at `info` until the
+configuration states a budget, because under the default nothing in a user's code lifts it.
+The declared `node` fact lost `gated` for the reason `conditions` went in `1.6`: one list of
+composable nodes loaded into a new container or into an existing one wrote both values into
+one slot. The gates stay on each `launchent` fact, and a site whose condition is false in a
+profile no longer counts as a second instance of the node there.
+
 A reader pinned to `1.0` still loads a `1.22` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

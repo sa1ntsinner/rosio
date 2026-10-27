@@ -142,6 +142,7 @@ VARIANT_SEVERITY: dict[str, dict[str, str]] = {
     "strong": {"time.topic_skew": ERROR, "time.drift": ERROR},
     "looked_up": {"frame.not_in_urdf": WARN},
     "shared": {"param.orphan_block": INFO},
+    "unbudgeted": {"resolution.below_budget": INFO},
     "absent": {"model.mesh_missing": WARN},
 }
 """`self_contradiction`: one file that sets one parameter twice with two values is a

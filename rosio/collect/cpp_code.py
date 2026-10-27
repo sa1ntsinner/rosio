@@ -41,7 +41,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from rosio import ids, model, workspace
+from rosio import extra_line, ids, model, workspace
 from rosio.collect import CollectContext, register
 from rosio.errors import CollectorError, ContractError
 from rosio.resolve import wrappers
@@ -59,7 +59,7 @@ execution behind `QueryCursor`. Only the constructor and plain node walking are 
 which is the part that has been stable since 0.22, and `load_parser` accepts both the
 `Parser(language)` and the `set_language` spelling, so the whole 0.22 to 0.26 range works."""
 
-INSTALL_HINT = "pip install 'rosio[cpp]'"
+INSTALL_HINT = extra_line("cpp")
 
 NO_SOURCE = "the workspace holds no C++ source under an editable root"
 """What `inputs_present` says when there is nothing here for this collector to read."""
@@ -72,6 +72,18 @@ SUBSCRIBE_CALLS = frozenset({"create_subscription"})
 SERVICE_CALLS = frozenset({"create_service"})
 CLIENT_CALLS = frozenset({"create_client"})
 TIMER_CALLS = frozenset({"create_wall_timer", "create_timer"})
+CAMERA_CALLS = frozenset({"create_camera_publisher", "create_camera_subscription"})
+IMAGE_CALLS = frozenset({"create_publisher", "create_subscription"}) | CAMERA_CALLS
+IMAGE_MEMBER_CALLS = frozenset({"advertise", "advertiseCamera", "subscribeCamera"})
+"""image_transport takes the node first and the base topic second. The rows in
+`rosio/resolve/wrappers.py` say which topics each form creates."""
+IMAGE_QOS_POSITION = {
+    "image_transport::create_publisher": 2,
+    "image_transport::create_camera_publisher": 2,
+    "image_transport::create_subscription": 4,
+    "image_transport::create_camera_subscription": 4,
+    "image_transport::SubscriberFilter": 3,
+}
 CALLBACK_CALLS = frozenset({"add_on_set_parameters_callback", "add_post_set_parameters_callback"})
 
 DECLARE_CALLS = frozenset(
@@ -82,6 +94,20 @@ PLUGIN_DECLARE_CALLS = frozenset({"declareParameter"})
 """`nav2_costmap_2d::Layer::declareParameter` prefixes the layer instance name itself, so
 the source states a suffix and the full name only exists once the yaml names the layer."""
 READ_CALLS = frozenset({"get_parameter", "get_parameter_or"})
+VALUE_CALLS = frozenset(
+    {
+        "string",
+        "basic_string",
+        "to_string",
+        "c_str",
+        "data",
+        "ParameterValue",
+        "resolve_topic_or_service_name",
+        "resolve_topic_name",
+    }
+)
+"""Calls whose value is their first argument as far as a name goes. A node resolves a topic
+with its own remaps and namespace, which the join applies to the raw name the same way."""
 
 BROADCAST_CALLS = frozenset({"sendTransform"})
 LOOKUP_CALLS = frozenset({"lookupTransform", "canTransform"})
@@ -132,6 +158,7 @@ KNOWN_WRAPPERS: dict[str, dict[str, str]] = {
             "so the source states none"
         ),
     },
+    "image_transport::SubscriberFilter": {"reason": ""},
 }
 """Types this reader recognises as creating a real endpoint no `create_publisher` or
 `create_subscription` call names, with the C++ specific note each one needs. What each
@@ -920,7 +947,7 @@ class _Reader:
                     return Ref(
                         UNRESOLVED, "", expr, origin="parameter", source_name=parameter.value
                     )
-        if name in ("string", "basic_string", "to_string", "c_str", "data", "ParameterValue"):
+        if name in VALUE_CALLS:
             if arguments:
                 return replace(self.resolve(arguments[0]), expr=expr)
             return Ref(UNRESOLVED, "", expr)
@@ -1488,6 +1515,9 @@ class _Reader:
         if name in CALLBACK_CALLS:
             self._callback(name, arguments, node)
             return
+        if name in IMAGE_MEMBER_CALLS and receiver is not None:
+            self._image_endpoints(f"image_transport::ImageTransport::{name}", arguments, node)
+            return
         if name == "subscribe" and receiver is not None:
             self._filter_subscribe(receiver, arguments, node)
             return
@@ -1584,7 +1614,11 @@ class _Reader:
 
     def _endpoint(self, name: str, node: Any, template: Any, arguments: Sequence[Any]) -> bool:
         function = _child(node, "function")
-        action = function is not None and _text(function, self.src).startswith("rclcpp_action::")
+        head = _text(function, self.src) if function is not None else ""
+        if name in CAMERA_CALLS or (name in IMAGE_CALLS and head.startswith("image_transport::")):
+            self._image_endpoints(f"image_transport::{name}", arguments, node)
+            return True
+        action = head.startswith("rclcpp_action::")
         if action and name in ("create_client", "create_server"):
             kind = "action_client" if name == "create_client" else "action_server"
         elif name in PUBLISH_CALLS:
@@ -1599,6 +1633,9 @@ class _Reader:
             return False
         if not arguments:
             return True
+        if not action and len(arguments) > 1 and _is_node_argument(arguments[0], self.src):
+            # The free function spelling, rclcpp::create_publisher(node, topic, qos).
+            arguments = arguments[1:]
         types = _template_types(template, self.src)
         qos = None
         options = ""
@@ -1632,6 +1669,37 @@ class _Reader:
         )
         return True
 
+    def _image_endpoints(self, symbol: str, arguments: Sequence[Any], node: Any) -> None:
+        row = wrappers.lookup(symbol, "cpp")
+        if row is None or row.argument is None or row.argument >= len(arguments):
+            return
+        ref = self.resolve(arguments[row.argument])
+        position = IMAGE_QOS_POSITION.get(symbol, len(arguments))
+        qos = self._qos(arguments[position]) if position < len(arguments) else None
+        for item in row.endpoints:
+            if ref.status == LITERAL:
+                name = replace(ref, value=item.resolve(ref.value))
+            elif item.name_source == "argument":
+                name = ref
+            else:
+                # The sibling of a name nobody can read: the base topic is the blind spot.
+                continue
+            self.unit.endpoints.append(
+                Endpoint(
+                    kind=item.kind,
+                    name=name,
+                    sym=self.sym,
+                    owner_class=self.klass,
+                    line=_line(node),
+                    api=symbol,
+                    type_text=item.type,
+                    qos=qos,
+                    condition=self.condition,
+                    guard=self.guard,
+                    unknown_count="loop" if self._in_loop(node) else "",
+                )
+            )
+
     def _in_loop(self, node: Any) -> bool:
         parent = node.parent
         while parent is not None:
@@ -1663,6 +1731,24 @@ class _Reader:
     def _filter_subscribe(self, receiver: Any, arguments: Sequence[Any], node: Any) -> None:
         member = _text(receiver, self.src)
         wrapper = self.member_types.get(member)
+        if wrapper is None and len(arguments) > 1:
+            # A member declared in a header this file does not walk, told apart by its
+            # arguments: ImageTransport::subscribe(topic, queue_size, ...),
+            # SubscriberFilter::subscribe(node, topic, transport, ...) and
+            # message_filters::Subscriber::subscribe(node, topic, qos).
+            # ponytail: a spelling heuristic, a walk of the class header would know the type.
+            if arguments[1].type == "number_literal":
+                symbol = "image_transport::ImageTransport::subscribe"
+                self._image_endpoints(symbol, arguments, node)
+                return
+            third = _flat(arguments[2], self.src) if len(arguments) > 2 else ""
+            if _is_node_argument(arguments[0], self.src) and (
+                third.startswith('"') or "Transport" in third
+            ):
+                wrapper = "image_transport::SubscriberFilter"
+        if wrapper == "image_transport::SubscriberFilter":
+            self._image_endpoints(wrapper, arguments, node)
+            return
         if wrapper != "message_filters::Subscriber" or len(arguments) < 2:
             return
         message = self.member_types.get(f"{member}::type", "")
@@ -2065,7 +2151,15 @@ def _is_node_argument(node: Any, src: bytes) -> bool:
     if node.type == "this":
         return True
     text = _text(node, src).strip().lstrip("*&")
-    return text in ("this", "node", "node_", "parent", "parent_node")
+    return text in (
+        "this",
+        "node",
+        "node_",
+        "parent",
+        "parent_node",
+        "shared_from_this()",
+        "this->shared_from_this()",
+    )
 
 
 _DEFAULT_BLOCKED = object()

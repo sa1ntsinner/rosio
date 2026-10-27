@@ -392,6 +392,29 @@ def test_two_code_names_for_one_executable_never_merge(builder):
     assert len(findings) == 1
     assert ":~" not in findings[0].say
     assert synthetic_id() in other.atlas.entities
+    # turtlebot3_ros runs two nodes in one process, and a launch name renames both.
+    assert "name the node in the launch file" not in findings[0].fix
+    assert "would rename every node in the process" in findings[0].fix
+    assert "in one process" in findings[0].say
+
+
+def test_a_name_another_instance_owns_still_asks_for_a_launch_name():
+    other = model.AtlasBuilder()
+    _profile(other, "nx_navigation")
+    _coded(other)
+    _declared_node(
+        other,
+        ids.build_node(f"/{EXE}"),
+        REAL,
+        remaps=[],
+        name=EXE,
+        name_source=model.NameSource.LITERAL.value,
+        disc="named",
+    )
+    _declared_node(other, synthetic_id(), REAL, remaps=[], disc="unnamed")
+    join.join(other)
+    (found,) = [item for item in other.atlas.findings if item.rule == "node.ambiguous_identity"]
+    assert found.fix.startswith("name the node in the launch file")
 
 
 def test_one_executable_launched_twice_in_one_profile_keeps_both_nodes():
@@ -411,6 +434,26 @@ def test_one_executable_launched_twice_in_one_profile_keeps_both_nodes():
     assert "topic:/cmd_vel_right" in other.atlas.entities
     findings = [item for item in other.atlas.findings if item.rule == "node.ambiguous_identity"]
     assert len(findings) == 1
+
+
+def test_a_launch_site_off_in_the_profile_is_not_a_second_instance():
+    """image_pipeline loads one list into a new container or into an existing one, and the
+    condition picks exactly one, so the site that never runs states no second node."""
+    other = model.AtlasBuilder()
+    _profile(other, "nx_navigation")
+    _coded(other)
+    live = ids.build_node_synthetic(PKG, EXE, "/", "aaaaaaaa")
+    dead = ids.build_node_synthetic(PKG, EXE, "/", "bbbbbbbb")
+    _declared_node(other, live, REAL, remaps=[], disc="new_container")
+    _declared_node(other, dead, REAL, remaps=[], disc="load_into")
+    site = ids.build_launchent(PKG, "launch/bridge.launch.py", (("Node", f"{EXE}_load_into"),))
+    off = {"mechanism": "IfCondition", "expr": "container != ''", "outcome": "false"}
+    other.fact(site, join.DECLARED, profile=REAL, values={"gates": [off]})
+    report = join.join(other)
+    assert report.ambiguous == 0
+    assert report.superseded == 1
+    assert ids.build_node(f"/{EXE}") in other.atlas.entities
+    assert dead in other.atlas.entities
 
 
 def test_two_conditional_endpoints_on_one_name_are_two_sites(builder):

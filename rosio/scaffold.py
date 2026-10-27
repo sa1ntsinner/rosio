@@ -13,6 +13,7 @@ import ast
 import re
 from collections.abc import Sequence
 from dataclasses import replace
+from fnmatch import fnmatch
 from pathlib import Path
 
 import yaml
@@ -261,6 +262,11 @@ TEST_MARKERS = ("import launch_testing", "from launch_testing", "generate_test_d
 """What a launch_testing file holds. It describes a test run with its own assertions, which
 is not a system anybody starts, and as a profile it only reported its test dependencies."""
 
+TEST_DIRS = frozenset({"test", "tests"})
+TEST_NAME = "*_test*.launch.py"
+"""Where a package keeps its tests by convention, which is left out whatever the file holds:
+robot_localization keeps nine test launch files under test/ that read a bag and a csv."""
+
 FRONTENDS = {".xml": ("launch_xml",), ".yaml": ("launch_yaml",), ".yml": ("launch_yaml",)}
 
 
@@ -274,6 +280,8 @@ def _not_offered(entry: Entrypoint, ros_setup: Sequence[str] = ()) -> bool:
     if entry.verb != "launch" or entry.origin is None:
         return False
     path = Path(entry.origin.path)
+    if TEST_DIRS & {path.parent.name, path.parent.parent.name} or fnmatch(path.name, TEST_NAME):
+        return True
     if path.suffix != ".py":
         wanted = FRONTENDS.get(path.suffix, ("launch_xml", "launch_yaml"))
         found = importable(wanted, ros_setup)

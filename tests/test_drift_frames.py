@@ -905,6 +905,18 @@ def test_remap_unresolved_fires_once_per_site_with_the_raw_name():
     assert found[0].title.startswith("nothing states what kind of endpoint the remap")
 
 
+def test_remap_unresolved_never_asks_for_a_package_the_workspace_holds():
+    """image_pipeline: the fix told the user to add depth_image_proc, which was in src."""
+    builder = _remap_atlas(bound=False)
+    launchent = next(item for item in builder.atlas.entities if item.startswith("launchent:"))
+    builder.fact(launchent, DECLARED, profile=NAV, values={"pkg": "nx_perception"})
+    assert "add the package" in frame_rules.remap_unresolved(builder.build())[0].fix
+    builder.node(ids.build_pkg("nx_perception"))
+    (found,) = frame_rules.remap_unresolved(builder.build())
+    assert "add the package" not in found.fix
+    assert found.fix.startswith("the source of nx_perception is in the workspace")
+
+
 def test_remap_unresolved_is_silent_once_the_join_binds_the_destination():
     assert frame_rules.remap_unresolved(_remap_atlas(bound=True).build()) == []
 
@@ -1381,10 +1393,10 @@ def test_lifecycle_unmanaged_keeps_its_id_across_two_runs():
 # build.stale
 
 
-def _stale_atlas(differs: bool) -> AtlasBuilder:
+def _stale_atlas(differs: bool, shared: bool = True) -> AtlasBuilder:
     builder = _builder()
     file_id = ids.build_file("nx_bringup", "config/nav2_params.yaml")
-    attrs = {"via_package_share": True}
+    attrs = {"via_package_share": True} if shared else {}
     if differs:
         attrs["install_copy_differs"] = True
     builder.node(file_id, attrs=attrs)
@@ -1402,7 +1414,15 @@ def _stale_atlas(differs: bool) -> AtlasBuilder:
 def test_build_stale_fires_once_per_file_whose_two_copies_differ():
     found = build_rules.build_stale(_stale_atlas(differs=True).build())
     assert [item.subject for item in found] == ["file:nx_bringup|config/nav2_params.yaml"]
-    assert "rebuild" in found[0].say
+    assert "shows the installed copy, which is what runs" in found[0].say
+    assert found[0].where[0].root == model.Root.INSTALL.value
+
+
+def test_build_stale_says_a_python_module_was_read_from_src_and_does_not_run_yet():
+    """awk_ws: the default in safety_stop.py was edited in src and only the yaml was reported."""
+    (found,) = build_rules.build_stale(_stale_atlas(differs=True, shared=False).build())
+    assert "shows the src copy, and the installed one is what runs" in found.say
+    assert found.where[0].root == model.Root.SRC.value
 
 
 def test_build_stale_is_silent_when_the_install_copy_still_matches():
@@ -1606,7 +1626,12 @@ def test_below_budget_fires_and_names_the_rate_the_budget_and_the_profile():
     assert [item.subject for item in found] == ["profile:nx_mapping"], "the first profile"
     assert found[0].profiles == [NAV]
     assert "0.692" in found[0].say and "0.950" in found[0].say
-    assert found[0].severity == rules.severity_of("resolution.below_budget")
+    # The default budget only informs: a first run is not red for blind spots no line of
+    # the user's code can fix. A budget the configuration states makes it a warning.
+    assert found[0].severity == "info"
+    (stated,) = build_rules.resolution_below_budget(atlas, budget=0.95)
+    assert stated.severity == rules.severity_of("resolution.below_budget") == "warn"
+    assert stated.id == found[0].id
 
 
 def test_below_budget_counts_one_unresolved_site_in_the_singular():
@@ -1979,6 +2004,47 @@ def test_extract_input_refused_names_the_file_the_reason_and_what_is_missing():
     assert build_rules.REFUSAL_COSTS["urdf_unreadable"] in found[0].say
     assert "not well-formed" in found[0].detail
     assert [row.file for row in found[0].where] == ["file:nx_bringup|urdf/trailer.urdf"]
+
+
+def test_extract_input_refused_names_the_yaml_line_and_the_profile_that_loads_it():
+    """awk_ws: teleop.yaml line 4 was over-indented, and the finding named no line, read like
+    a permissions problem, and claimed every profile."""
+    builder = _builder()
+    teleop = ids.build_file("nx_bringup", "config/teleop.yaml")
+    builder.node(
+        teleop,
+        attrs={
+            "loadable": False,
+            "refused_because": "params_file_unreadable",
+            "refused_detail": "teleop.yaml is not readable as yaml: line 4, column 15: "
+            "mapping values are not allowed here",
+        },
+    )
+    builder.unresolved(
+        Unresolved(
+            want=model.Want.OTHER.value,
+            owner=teleop,
+            expr="teleop.yaml",
+            reason="params_file_unreadable",
+            role="parameters_file",
+            evidence=[Source(file=teleop, line_hint=4)],
+        )
+    )
+    site = ids.build_launchent("nx_bringup", "launch/teleop.launch.py", (("Node", "teleop"),))
+    builder.node(site)
+    builder.fact(
+        site, DECLARED, profile=NAV, values={"file_reads": [{"file": teleop, "role": "params"}]}
+    )
+    (found,) = build_rules.extract_input_refused(builder.build())
+    assert found.title == "nx_bringup/config/teleop.yaml:4 is not valid yaml"
+    assert "line 4, column 15: mapping values are not allowed here" in found.say
+    assert (
+        found.fix == "correct the yaml at line 4, column 15 of nx_bringup/config/teleop.yaml, "
+        "then extract again"
+    )
+    assert found.where[0].line_hint == 4
+    assert found.profiles == [NAV]
+    assert "Until this rule existed" not in found.detail
 
 
 def test_extract_input_refused_is_silent_on_a_file_that_was_read():

@@ -104,7 +104,7 @@ def _short_path(package: str, relpath: str) -> str:
     return relpath if package == ids.REPO_PKG else f"{package}/{relpath}"
 
 
-def site(source: Source | Mapping[str, Any] | None, *, locator: bool = False) -> str:
+def site(source: Source | Mapping[str, Any] | None, *, locator: bool = False, tag: str = "") -> str:
     """One provenance row as a person reads it: the file, the line, and the key."""
     if source is None:
         return ""
@@ -113,11 +113,35 @@ def site(source: Source | Mapping[str, Any] | None, *, locator: bool = False) ->
     line = row.get("line_hint")
     if line is not None:
         text = f"{text}:{line}"
-    if str(row.get("root", "src")) != "src":
+    if tag:
+        text = f"{text} [{tag}]"
+    elif str(row.get("root", "src")) != "src":
         text = f"{text} [{row['root']}]"
     if locator and row.get("locator"):
         text = f"{text} {row['locator']}"
     return text
+
+
+def tree_tag(atlas: Atlas, source: Source | None) -> str:
+    """Which tree a cited value runs from, when the cited file alone would mislead.
+
+    A value read from the install tree while src holds an edit, a python default read from
+    src while the installed copy is what runs, and a package the launch walk read from a
+    released copy all cite a file a reader can open whose line is not what runs now.
+    """
+    if source is None:
+        return ""
+    node = atlas.entities.get(source.file)
+    root = source.root or "src"
+    if node is not None and node.attrs.get("install_copy_differs"):
+        return "install, src differs" if root == "install" else "src, the install copy runs"
+    try:
+        package = ids.parse_file(source.file).package
+    except ContractError:
+        return ""
+    owner = atlas.entities.get(ids.build_pkg(package))
+    tree = str(owner.attrs.get("share_read_from") or "") if owner is not None else ""
+    return f"value read from {tree}" if tree and root == "src" else ""
 
 
 _FILE_TOKEN = re.compile(r"\bfile:[^\s|'\"]+\|[^\s'\"]+")
@@ -430,7 +454,10 @@ def explain(atlas: Atlas, selector: str, *, limit: int = DEFAULT_LIMIT) -> Answe
         pairs = ", ".join(
             f"{key}={_stated(row['value'])}" for key, row in per_key.items() if _said(row["value"])
         )
-        lines.append(f"  effective in {profile_name(profile)}: {_clip(readable(pairs, atlas))}")
+        # Whole, like the fact lines above it: a cut line had no way to the rest but --json.
+        hidden = len(node.effective.get(profile, {})) - len(per_key)
+        more = f", and {hidden} more, --limit shows more" if hidden > 0 else ""
+        lines.append(f"  effective in {profile_name(profile)}: {readable(pairs, atlas)}{more}")
         for key, row in per_key.items():
             if row["where"]:
                 lines.append(f"      {key} from {row['where']}")
@@ -618,7 +645,7 @@ def _unresolved_rows(atlas: Atlas, entity_id: str, limit: int) -> list[dict[str,
         {
             "want": entry.want,
             "expr": readable(entry.expr, atlas),
-            "reason": entry.reason,
+            "reason": reason_text(entry.reason),
             "where": site(entry.evidence[0]) if entry.evidence else "",
         }
         for entry in sorted(atlas.unresolved, key=lambda item: item.id)
@@ -684,18 +711,21 @@ def param(
             key=Candidate.sort_key,
         )
         effective = entity.effective.get(item, {}).get("value")
-        rows = [_candidate_row(row) for row in chain]
+        rows = [_candidate_row(row, tree_tag(atlas, row.source)) for row in chain]
+        tag = tree_tag(atlas, effective.source) if effective else ""
         data["profiles"][item] = {
             "value": effective.value if effective else None,
             "value_type": effective.value_type if effective else None,
-            "winner": site(effective.source, locator=True) if effective else "",
+            "winner": site(effective.source, locator=True, tag=tag) if effective else "",
             "chain": rows,
         }
+        if effective is not None:
+            data["profiles"][item]["read_from"] = tag or effective.source.root or "src"
         lines.append(f"  profile {profile_name(item)}")
         if effective is not None:
             lines.append(
                 f"    effective {_value(effective.value)} ({effective.value_type})"
-                f"   edit {site(effective.source)}"
+                f"   edit {site(effective.source, tag=tag)}"
             )
         for row in rows:
             mark = "wins " if row["wins"] else "     "
@@ -784,14 +814,14 @@ def _no_owner_or_name(atlas: Atlas, selector: str) -> Answer:
     return Answer(verb="param", ok=False, data=data, lines=lines)
 
 
-def _candidate_row(row: Candidate) -> dict[str, Any]:
+def _candidate_row(row: Candidate, tag: str = "") -> dict[str, Any]:
     return {
         "rank": row.rank,
         "wins": row.wins,
         "value": row.value,
         "value_type": row.value_type,
         "mechanism": row.mechanism,
-        "where": site(row.source, locator=True),
+        "where": site(row.source, locator=True, tag=tag),
         "shadow_kind": row.shadow_kind,
         "shadowed_by": row.shadowed_by,
         "applied_by": row.applied_by,
@@ -1858,14 +1888,18 @@ def unresolved(
     by_want: dict[str, dict[str, Any]] = {}
     by_owner: dict[str, int] = {}
     for entry in entries:
-        row = by_want.setdefault(entry.want, {"count": 0, "reasons": {}, "examples": []})
+        row = by_want.setdefault(
+            entry.want, {"count": 0, "reasons": {}, "sentences": {}, "examples": []}
+        )
         row["count"] += 1
         row["reasons"][entry.reason] = row["reasons"].get(entry.reason, 0) + 1
+        said = reason_text(entry.reason)
+        row["sentences"][said] = row["sentences"].get(said, 0) + 1
         if len(row["examples"]) < limit:
             row["examples"].append(
                 {
                     "owner": label(entry.owner),
-                    "expr": readable(entry.expr, atlas),
+                    "expr": _COLLECTOR_PREFIX.sub("", readable(entry.expr, atlas)),
                     "reason": entry.reason,
                     "where": site(entry.evidence[0]) if entry.evidence else "",
                     "resolvable_by": list(entry.resolvable_by),
@@ -1892,7 +1926,7 @@ def unresolved(
         rate = rates.get(key)
         tail = f", {rate:.3f} of this want resolved" if isinstance(rate, (int, float)) else ""
         lines.append(f"  {key}: {row['count']} unresolved{tail}")
-        ranked = sorted(row["reasons"].items(), key=lambda item: (-item[1], item[0]))
+        ranked = sorted(row["sentences"].items(), key=lambda item: (-item[1], item[0]))
         for name, count in ranked[:limit]:
             lines.append(f"    {count:>3}  {name}")
         if len(ranked) > limit:
@@ -1909,6 +1943,45 @@ def unresolved(
         for owner, count in list(data["by_owner"].items())[:limit]:
             lines.append(f"    {count:>3}  {owner}")
     return Answer(verb="unresolved", data=data, lines=lines)
+
+
+REASONS = {
+    "argv_value": "a constructor argument the caller fills in",
+    "branch_dependent": "the branches of an if give it different values",
+    "call_result": "the result of a call rosio does not evaluate",
+    "command_substitution": "the output of a command the launch file runs",
+    "environment_variable": "an environment variable at run time",
+    "executable_entry_unresolved": "no source file defines this executable's entry point",
+    "external_descriptor_file": "a file the node reads at run time",
+    "file_after_build": "a file only colcon build puts in place",
+    "file_missing": "the file it names does not exist",
+    "file_not_installed": "the install tree lacks a file the source holds",
+    "loop_variable": "an element of a loop rosio cannot unroll",
+    "message_field": "a field of a message that arrives at run time",
+    "not_stated_in_source": "the source does not state this name and no remap resolves it",
+    "package_not_found": "a package that is not installed",
+    "params_file_unreadable": "a parameters file rosio could not read",
+    "plugin_manifest_missing": "a plugin manifest the package exports and does not ship",
+    "plugin_manifest_unreadable": "a plugin manifest that is not valid xml",
+    "py_parse_error": "a python file that does not parse",
+    "runtime_attribute_default": "an attribute of an object built at run time",
+    "unbound_name": "a name bound nowhere rosio can see",
+    "urdf_unreadable": "a robot model that is not valid xml",
+    "xacro_argument_unresolved": "a xacro argument the launch walk could not evaluate",
+    "xacro_failed": "xacro refused to expand the model",
+}
+"""One sentence per recorded reason code. The code stays in --json, where a script keys on
+it, and a person reads the sentence."""
+
+_CODE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+")
+_COLLECTOR_PREFIX = re.compile(r"^[a-z]+\.[a-z_]+: ")
+
+
+def reason_text(reason: str) -> str:
+    """A recorded reason as a sentence, whether it was stored as one or as a code."""
+    if not _CODE.fullmatch(reason):
+        return reason
+    return REASONS.get(reason, reason.replace("_", " "))
 
 
 def overall_rate(atlas: Atlas) -> float | None:

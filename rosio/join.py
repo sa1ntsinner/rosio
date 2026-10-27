@@ -1415,7 +1415,7 @@ def _supersede(
         ):
             continue
         if len(names) > 1:
-            _ambiguous(builder, item, names, report)
+            _ambiguous(builder, item, names, report, one_process=True)
             _starts_several(builder, item, names)
             continue
         new_id = _target_id(item, names[0])
@@ -1423,6 +1423,9 @@ def _supersede(
             rows.append((item, names, new_id))
     # One profile launching this executable twice states two runtime nodes for one code name,
     # so neither of them may take it.
+    # A site whose condition is false in the profile starts nothing there, and the load
+    # into an existing container beside a new container is one such pair.
+    rows = [row for row in rows if _launched(atlas, row[0])]
     crowded = {
         key
         for key, count in Counter((item.profile, new_id) for item, _, new_id in rows).items()
@@ -1454,6 +1457,19 @@ def _supersede(
                 remaining.append(entry)
         atlas.unresolved = remaining
         report.superseded += 1
+
+
+def _launched(atlas: model.Atlas, item: Instance) -> bool:
+    from rosio.drift.rules import site_live
+
+    sites = [
+        atlas.entities[edge.src]
+        for edge in atlas.in_edges(item.node_id)
+        if edge.kind == model.EdgeKind.LAUNCHES.value
+        and edge.src in atlas.entities
+        and edge.fact(DECLARED, item.profile) is not None
+    ]
+    return not sites or any(site_live(site, item.profile) for site in sites)
 
 
 def _starts_several(builder: model.AtlasBuilder, item: Instance, names: list[str]) -> None:
@@ -1499,6 +1515,8 @@ def _ambiguous(
     names: list[str],
     report: JoinReport,
     reason: str = "names",
+    *,
+    one_process: bool = False,
 ) -> None:
     disc = ids.digest(reason, *sorted(names))
     where = ids.parse_profile(item.profile) if item.profile else "this profile"
@@ -1531,13 +1549,31 @@ def _ambiguous(
             + ", ".join(sorted(names))
             + ", so rosio kept both identities instead of merging them"
         )
+    fix = "name the node in the launch file, or keep one node name literal in the source"
+    if one_process or reason == "constructions":
+        # A name= in the launch file is a __node remap, which renames every node in the process.
+        detail += (
+            ". The nodes run in one process, so a name, a remap or a parameter file given to "
+            "this launch site reaches all of them, and rosio cannot tell which one it is meant for"
+        )
+        if one_process:
+            say = (
+                f"{item.pkg}/{item.executable} runs the nodes {', '.join(sorted(names))} in one "
+                "process, so rosio cannot tell which of them a remap or parameter of this "
+                "launch site is meant for"
+            )
+        fix = (
+            "leave the launch file name alone, it would rename every node in the process; "
+            "address one node by its own name instead, a yaml block under that name and a "
+            "remap written <node>:<from>:=<to>"
+        )
     finding = model.Finding(
         rule="node.ambiguous_identity",
         severity=model.Severity.WARN.value,
         subject=item.node_id,
         title=f"{item.pkg}/{item.executable} could be more than one node",
         detail=detail,
-        fix="name the node in the launch file, or keep one node name literal in the source",
+        fix=fix,
         say=say,
         discriminator=disc,
         profiles=[item.profile],

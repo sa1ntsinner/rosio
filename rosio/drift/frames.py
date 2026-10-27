@@ -1121,6 +1121,26 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
                 f"writes it for {others} outside every root, so change that one at the "
                 f"include in {where}"
             )
+        packages = sorted(
+            {
+                str(fact.values.get("pkg") or "")
+                for entry, _ in group
+                for fact in atlas.entities[entry.owner].facts
+            }
+            - {""}
+        )
+        held = [name for name in packages if ids.build_pkg(name) in atlas.entities]
+        if held:
+            remedy = (
+                f"the source of {', '.join(held)} is in the workspace and rosio could not read "
+                f"which endpoint it creates for {source}; check that source, or probe the "
+                "running system so the kind is observed"
+            )
+        else:
+            remedy = (
+                f"read the node source for the endpoint behind {source}, or add the package "
+                "that owns it to the workspace so the kind is stated"
+            )
         findings.append(
             Finding(
                 rule="remap.unresolved",
@@ -1133,10 +1153,7 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
                     f"states whether {target} is a topic, a service or an action, and the "
                     "endpoint stays unbound."
                 ),
-                fix=(
-                    f"read the node source for the endpoint behind {source}, or add the package "
-                    f"that owns it to the workspace so the kind is stated{change}"
-                ),
+                fix=f"{remedy}{change}",
                 say=(
                     f"{writer} remaps {source} to {target}{via} and nothing in the workspace "
                     f"states what kind of endpoint {target} is, so the connection is unverified."

@@ -242,9 +242,11 @@ def example(dest):
         from rosbags.rosbag2 import Writer
         from rosbags.typesys import Stores, get_typestore
     except ImportError as exc:
+        from rosio import extra_command
+
         raise RuntimeError(
             "writing a recording needs the rosbags package, install it with: "
-            "pip install 'rosio[stamps]'"
+            + extra_command("stamps")
         ) from exc
     types = get_typestore(Stores.ROS2_HUMBLE)
     store = types.types
@@ -302,7 +304,13 @@ def main(argv=None):
     )
     parser.add_argument("src", nargs="?", help="path to a ROS 1 or ROS 2 bag")
     parser.add_argument("dest", nargs="?", help="path of the rosbag2 to write")
-    parser.add_argument("--pathology", choices=PATHOLOGIES)
+    parser.add_argument(
+        "--pathology",
+        choices=PATHOLOGIES,
+        metavar="NAME",
+        help="the fault to put in: offset, backward, drift, frozen, dropout, zero, or a preset "
+        "offset gps_leap (18 s), tai (37 s), ouster_ptp, septentrio",
+    )
     parser.add_argument(
         "--example",
         metavar="DEST",
@@ -317,7 +325,14 @@ def main(argv=None):
         metavar="X",
         help="seconds, or seconds per second for drift, default per pathology",
     )
-    parser.add_argument("--at", type=float, default=0.5, metavar="FRACTION", help="where to start")
+    parser.add_argument(
+        "--at",
+        type=float,
+        default=0.5,
+        metavar="FRACTION",
+        help="where in the recording the fault starts, 0 the first message and 1 the last, "
+        "default 0.5",
+    )
     parser.add_argument("--length", type=int, metavar="N", help="messages for frozen and zero")
     args = parser.parse_args(argv)
 

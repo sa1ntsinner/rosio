@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -171,6 +172,29 @@ def test_a_missing_xacro_tool_refuses_with_a_reason(
     with pytest.raises(CollectorError) as caught:
         urdf_collect.expand_xacro(str(static_root / "src/fx_desc/xacro/fx_robot.urdf.xacro"))
     assert "xacro tool" in str(caught.value)
+
+
+def test_a_xacro_refusal_drops_the_restated_tail_and_never_cuts_a_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ros2_control_demos rows ended `when processing file: src/ros2_control_demos@master/exa`."""
+    stderr = (
+        "error: No such file or directory: demo/ros2_control/r.xacro [Errno 2] No such file or "
+        "directory: 'demo/ros2_control/r.xacro' when processing file: /home/u/ws/src/d/r.xacro"
+    )
+    done = subprocess.CompletedProcess([], 1, stdout="", stderr=stderr)
+    monkeypatch.setattr(urdf_collect, "xacro_available", lambda: True)
+    monkeypatch.setattr(urdf_collect.subprocess, "run", lambda *_a, **_k: done)
+    with pytest.raises(CollectorError) as caught:
+        urdf_collect.expand_xacro("demo/urdf/r.urdf.xacro")
+    assert str(caught.value).endswith(
+        "xacro refused demo/urdf/r.urdf.xacro: error: No such file or directory: "
+        "demo/ros2_control/r.xacro"
+    )
+    done.stderr = "error: " + "word " * 120
+    with pytest.raises(CollectorError) as caught:
+        urdf_collect.expand_xacro("demo/urdf/r.urdf.xacro")
+    assert str(caught.value).endswith("word...")
 
 
 @pytest.mark.ros

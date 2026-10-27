@@ -137,3 +137,11 @@ def test_a_byte_that_is_not_utf8_leaves_as_a_collector_error(tmp_path):
     path.write_bytes(b"node:\n  ros__parameters:\n    k: \xff\n")
     with pytest.raises(CollectorError):
         yaml_lines.load_file(str(path))
+
+
+def test_a_syntax_error_names_its_line_and_column_and_not_the_parser_input():
+    with pytest.raises(CollectorError) as caught:
+        yaml_lines.load("a:\n  b: 1\n   c: 2\n", path="teleop.yaml")
+    assert str(caught.value) == (
+        "teleop.yaml is not readable as yaml: line 3, column 5: mapping values are not allowed here"
+    )

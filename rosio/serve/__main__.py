@@ -1,7 +1,7 @@
 """`python -m rosio.serve`, the documented way to start the agent surface.
 
     python -m rosio.serve --atlas rosio-out/atlas.json
-    python -m rosio.serve --atlas rosio-out --http --api-key $ROSIO_KEY --host 0.0.0.0
+    ROSIO_API_KEY=... python -m rosio.serve --atlas rosio-out --http --host 0.0.0.0
 
 The first form spawns one process per developer over stdio. The second serves a team from
 one process over streamable HTTP.
@@ -51,7 +51,8 @@ def parser() -> argparse.ArgumentParser:
         default="",
         metavar="KEY",
         help="require this key as Authorization: Bearer <key> or as an x-api-key header. "
-        "required to bind anywhere but loopback",
+        "required to bind anywhere but loopback. default: the ROSIO_API_KEY variable, "
+        "which ps does not show",
     )
     parsed.add_argument(
         "--path", default=DEFAULT_PATH, help=f"http path to serve on, default {DEFAULT_PATH}"

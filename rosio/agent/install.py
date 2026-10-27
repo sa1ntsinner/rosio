@@ -270,10 +270,19 @@ def install(
         a.mechanism == "mcp" and a.status in (CREATED, UPDATED, UNCHANGED) for a in report.actions
     )
     if scope == "project" and not stated and written and not _on_minimal_path("rosio"):
+        from rosio import origin
+
+        tool = f"uv tool install '{origin()}[mcp]'"
+        if any(target.mechanism == "mcp" for target in row.targets_for("user")):
+            other = "or install with --scope user, which registers this interpreter by its path"
+        else:
+            # This platform's user scope writes no server entry, so it is no remedy here.
+            other = (
+                f"or register this interpreter by its absolute path with {row.title}'s own command"
+            )
         report.notes.append(
             "rosio is not on a minimal PATH here, so an assistant may not start the server: "
-            "install it where every shell finds it, or install with --scope user, which "
-            "registers this interpreter by its absolute path"
+            f"put it where every shell finds it with {tool}, {other}"
         )
     return report
 
@@ -478,12 +487,13 @@ def _add_notes(platform: plat.Platform, scope: str, report: Report) -> None:
             f"{platform.key} has no file at {scope} scope, try the other scope: "
             f"{', '.join(s for s in plat.SCOPES if platform.targets_for(s))}"
         )
-    for target in platform.targets_for(scope):
-        if not target.verified:
-            report.notes.append(
-                f"{target.mechanism} path not yet seen read by {platform.key}: {target.note}"
-            )
-    if platform.note:
+    unseen = [target for target in platform.targets_for(scope) if not target.verified]
+    if unseen:
+        report.notes.append(
+            f"{len(unseen)} of these paths not yet seen read by {platform.key}, "
+            "rosio install --list says which"
+        )
+    if platform.note and scope == "user":
         report.notes.append(platform.note)
 
 

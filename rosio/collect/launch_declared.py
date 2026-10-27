@@ -951,7 +951,6 @@ class LaunchDeclaredCollector:
             "pkg": node.pkg,
             "executable": node.executable,
             "form": node.form,
-            "gated": bool(node.gates),
         }
         if identity.name:
             values["name"] = identity.name
@@ -2095,9 +2094,16 @@ def _launch_exec() -> Any:
 
 
 def _launch_index(ws: Workspace) -> dict[tuple[str, str], str]:
+    """Entry point files by package. Once a package is built `ros2 launch` runs its installed
+    copy, so the walk does too, and a src copy edited since the build is a `build.stale`
+    finding instead of a graph that describes neither tree."""
     index: dict[tuple[str, str], str] = {}
     for path in ws.launch_files():
         package, relative = ws.rel(path)
+        found = ws.packages.get(package or "")
+        installed = Path(found.share_path, relative) if found and found.share_path else None
+        if installed is not None and installed.is_file():
+            path = str(installed)
         index.setdefault((package or ids.REPO_PKG, relative), path)
     return index
 

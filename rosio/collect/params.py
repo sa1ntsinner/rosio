@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import ast
 import functools
+import re
 import weakref
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -2263,6 +2264,9 @@ def _walks_for(ctx: CollectContext) -> list[records.LaunchWalk]:
     ]
 
 
+_YAML_LINE = re.compile(r"is not readable as yaml: line (\d+), column")
+
+
 def _refusal(path: str) -> str:
     """Why this path is not a parameters file this collector can read, empty when it is.
 
@@ -2517,7 +2521,9 @@ class ParamsCollector:
             owner = self._refused_file_entity(ctx, path, reason, because) or profile_id
             evidence = []
             if owner.startswith("file:") and exists:
-                evidence.append(ctx.ws.source(ctx.ws.site(path)))
+                line = _YAML_LINE.search(reason)
+                site = ctx.ws.site(path, line_hint=int(line.group(1)) if line else None)
+                evidence.append(ctx.ws.source(site))
             if not exists and reader is not None:
                 evidence.append(ctx.ws.source(reader))
             if expr is not None:

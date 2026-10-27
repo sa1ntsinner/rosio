@@ -262,10 +262,27 @@ def test_recompute_is_a_fixpoint(ws: Workspace) -> None:
     assert once == twice
 
 
+def test_two_sites_of_one_node_with_different_gates_raise_nothing(full: model.Atlas) -> None:
+    """/ouster/os_driver starts from a gated site and an ungated one. A `gated` key on the node
+    fact refused the second write and dropped two launches edges, so the gates stay on each
+    launch site, as `conditions` do (AGENTS 9a)."""
+    rows = [
+        row
+        for entity in full.by_kind("run")
+        for row in entity.attrs.get("exceptions", [])
+        if row.get("exc_type") == "ContractError"
+    ]
+    assert rows == []
+    node = full.entities[ids.build_node("/ouster/os_driver")]
+    assert all("gated" not in fact.values for fact in node.facts)
+
+
 def test_counts_are_stable(full: model.Atlas) -> None:
     counters = full.counters
     assert counters["entities_by_kind"] == {
-        "file": 18,
+        # lidar_driver.yaml is read through the installed sensors_only.launch.py, which is
+        # the copy ros2 launch runs.
+        "file": 19,
         "launchent": 29,
         "launchfile": 18,
         "node": 27,
@@ -277,12 +294,12 @@ def test_counts_are_stable(full: model.Atlas) -> None:
     assert counters["edges_by_kind"] == {
         "contains": 65,
         "gates": 6,
-        "launches": 56,
+        "launches": 58,
         "manages_lifecycle": 2,
         "remaps": 1,
     }
     assert counters["resolution_rate"] == {
-        "node_name": 0.964286,
+        "node_name": 0.965517,
         "other": 0.615385,
         "topic_name": 1.0,
     }
