@@ -16,7 +16,7 @@ from typing import Any
 
 from rosio import ids, query
 from rosio.model import LAYER_ORDER, Atlas, Candidate, Edge, Node
-from rosio.render import clip, heading, joined, plural, share, table
+from rosio.render import clip, heading, joined, plural, rendered_from, share, table
 
 ENDPOINT_KINDS = ("publishes", "subscribes", "serves", "calls")
 YAML_MECHANISMS = ("yaml_base", "yaml_overlay_merge", "yaml_wildcard")
@@ -133,7 +133,8 @@ def _header(atlas: Atlas) -> list[str]:
     )
     lines.append(
         f"{counters.get('entities', 0)} entities, {counters.get('edges', 0)} edges and "
-        f"{len(atlas.findings)} findings, generated from atlas.json alone."
+        f"{len(atlas.findings)} findings, generated from atlas.json alone. "
+        f"{rendered_from(atlas)}."
     )
     passes = counters.get("passes") or {}
     if int(passes.get("attempted") or 0) and not passes.get("complete", True):

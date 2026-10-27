@@ -1498,7 +1498,7 @@ def test_cli_fail_on_violation_reports_a_recorded_problem(tmp_path: Path, capsys
     argv = ["extract", str(WS), "--out", str(tmp_path / "out"), "--profile", "legacy_ros1"]
     assert main(argv) == 0
     assert main([*argv, "--fail-on-violation"]) == EXIT_CONTRACT
-    assert "problems were recorded" in capsys.readouterr().err
+    assert "1 problem recorded during extraction" in capsys.readouterr().err
 
 
 def test_cli_out_flag_wins_over_the_config(tmp_path: Path, ws: Workspace):

@@ -584,6 +584,8 @@ def open_bundle(file: str | Path, *, into: str | Path | None = None, force: bool
             lines.append(f"{finding.severity}: {finding.spoken}")
             lines.extend(f"  edit files/{site(row)}" for row in finding.where)
         named = shlex.quote(str(target / "atlas.json"))
+        if len(atlas.findings) > 3:
+            lines.append(f"and {len(atlas.findings) - 3} more, every one of them:")
         lines.append(f"rosio drift --atlas {named}")
         selector = shlex.quote(atlas.findings[0].id) if atlas.findings else "SELECTOR"
         lines.append(f"rosio explain {selector} --atlas {named}")

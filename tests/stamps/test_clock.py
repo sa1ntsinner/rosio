@@ -48,6 +48,9 @@ def test_offset_direction_is_reported():
     behind = check_epoch_offset(bag(make("/lidar/points", 37.0)))[0]
     assert ahead.message.endswith("stamps ahead of the receiver")
     assert behind.message.endswith("stamps behind the receiver")
+    # the number carries the sign the atlas states, receive minus stamp
+    assert "offset -37.000 s" in ahead.message
+    assert "offset 37.000 s" in behind.message
 
 
 def test_unsynced_epoch():

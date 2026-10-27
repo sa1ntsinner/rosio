@@ -291,7 +291,7 @@ def test_install_writes_the_three_files_claude_code_reads(tmp_path):
     assert doc["mcpServers"]["rosio"] == {
         "type": "stdio",
         "command": sys.executable,
-        "args": ["-m", "rosio", "serve"],
+        "args": ["-m", "rosio", "serve", "--atlas", str(tmp_path / "rosio-out" / "atlas.json")],
     }
 
 
@@ -307,6 +307,34 @@ def test_the_server_entry_starts_this_rosio_on_this_atlas(tmp_path):
     assert entry["args"] == ["-m", "rosio", "serve", "--atlas", str(atlas)]
     ins.install("codex", "user", root=tmp_path, home=tmp_path / "home")
     assert "--atlas" not in (tmp_path / "home/.codex/config.toml").read_text(encoding="utf-8")
+
+
+def test_the_server_entry_names_the_atlas_before_it_is_built(tmp_path):
+    """The client's working directory decided which atlas a server answered from when the
+    project had none yet at install time."""
+    ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
+    entry = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]["rosio"]
+    assert entry["args"][-2:] == ["--atlas", str(tmp_path / "rosio-out" / "atlas.json")]
+
+
+def test_no_server_entry_is_written_when_the_server_could_not_start(tmp_path, monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+
+    def absent(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr("importlib.metadata.version", absent)
+    report = ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
+    assert statuses(report)[str(tmp_path / ".mcp.json")] == ins.SKIPPED
+    assert not (tmp_path / ".mcp.json").exists()
+    assert (tmp_path / "CLAUDE.md").is_file()
+    assert "pip install 'rosio[mcp]'" in report.text()
+
+
+def test_an_unchanged_install_prints_no_notes(tmp_path):
+    first = ins.install("claude-code", "project", root=tmp_path)
+    assert "note:" in first.text()
+    assert "note:" not in ins.install("claude-code", "project", root=tmp_path).text()
 
 
 def test_install_is_idempotent(tmp_path):
@@ -329,7 +357,10 @@ def test_two_roots_get_byte_identical_files(tmp_path):
     one, two = tmp_path / "one", tmp_path / "two"
     ins.install("cursor", "project", root=one)
     ins.install("cursor", "project", root=two)
-    assert snapshot(one) == snapshot(two)
+    # the server entry names each project's own atlas, and nothing else differs
+    assert {k: v.replace(str(one), "@") for k, v in snapshot(one).items()} == {
+        k: v.replace(str(two), "@") for k, v in snapshot(two).items()
+    }
 
 
 def test_the_report_names_the_undo_for_every_file_it_wrote(tmp_path):
@@ -484,7 +515,14 @@ def test_the_opencode_entry_uses_the_shape_that_config_expects(tmp_path):
     doc = json.loads((tmp_path / "opencode.json").read_text(encoding="utf-8"))
     assert doc["mcp"]["rosio"] == {
         "type": "local",
-        "command": [sys.executable, "-m", "rosio", "serve"],
+        "command": [
+            sys.executable,
+            "-m",
+            "rosio",
+            "serve",
+            "--atlas",
+            str(tmp_path / "rosio-out" / "atlas.json"),
+        ],
         "enabled": True,
     }
 

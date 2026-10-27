@@ -9,7 +9,7 @@ Each entry has the same four parts.
 - **What rosio reports.** The check name, the severity, and the wording `rosio stamps` prints. Run `rosio stamps /path/to/bag` on the recording, or `rosio probe --stamps --duration 10` against the live system, and compare.
 - **Reference.** Public issues, dataset documentation and standards text. Every link here was fetched and read while writing this page. Where a claim could not be confirmed in the source, the entry says so instead of quoting.
 
-Several entries end with a `rosio-bagmutate` line. That command injects the same fault into a clean recording of your own, so you can confirm what the failure looks like in your pipeline before you go hunting for it in a real bag. Where no preset reproduces the failure honestly, the entry says that too.
+Several entries end with a `rosio-bagmutate` line. That command injects the same fault into a clean recording of your own, or into the synthetic one `rosio-bagmutate --example clean.bag` writes, so you can confirm what the failure looks like in your pipeline before you go hunting for it in a real bag. Where no preset reproduces the failure honestly, the entry says that too.
 
 A note on how the checks are built. `epoch_offset` compares the header stamp with the time the recorder wrote the message, classifies the difference against known constants, and separately tests whether the stamp is plausible in absolute terms. `inter_topic_skew` compares each topic against the median of the bag. `clock_drift` fits a slope through the offset over time. `monotonic`, `frozen_stamps`, `zero_stamps` and `stamp_gaps` look at one topic's stamp sequence on its own. Whatever the class, the reported severity is `error` when the recording cannot be trusted for fusion and `warning` when it merits a look.
 
@@ -32,7 +32,7 @@ The driver side of this is a configuration parameter. ouster-ros introduced `ptp
 **What rosio reports.** `epoch_offset`, severity `error`, class `tai utc offset`:
 
 ```
-ERROR epoch_offset /os_cloud_node/points: /os_cloud_node/points offset 37.000 s matches the TAI to UTC offset (37 s), check the PTP timescale or a ptp_utc_tai_offset driver setting, stamps ahead of the receiver
+ERROR epoch_offset /os_cloud_node/points: /os_cloud_node/points offset -37.000 s matches the TAI to UTC offset (37 s), check the PTP timescale or a ptp_utc_tai_offset driver setting, stamps ahead of the receiver
 ```
 
 The class matches on magnitude, so either sign lands on `tai utc offset`, and the sign is spelled out in the message. The 74986812 second variant is far outside any leap offset and comes out as class `unsynced epoch`, also an `error`:
@@ -71,7 +71,7 @@ The value is not a constant of nature, it steps whenever a leap second is insert
 **What rosio reports.** `epoch_offset`, severity `error`, class `gps utc leap offset`:
 
 ```
-ERROR epoch_offset /gnss/fix: /gnss/fix offset 18.000 s matches the GPS to UTC leap offset (18 s), the source likely serves GPS time as UTC, stamps ahead of the receiver
+ERROR epoch_offset /gnss/fix: /gnss/fix offset -18.000 s matches the GPS to UTC leap offset (18 s), the source likely serves GPS time as UTC, stamps ahead of the receiver
 ```
 
 Because the classifier works on magnitude, anything from 15 to 25 seconds lands in this class, which covers both the current 18 and the older leap counts that appear in archived recordings.

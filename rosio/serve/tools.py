@@ -22,6 +22,7 @@ from rosio import ids, schema
 from rosio import query as slices
 from rosio.errors import ContractError, UsageError
 from rosio.model import ANY_PROFILE, SCHEMA_MINOR, SEVERITY_ORDER, Atlas, Edge, Finding, Node
+from rosio.render import plural
 
 ATLAS_NAME = "atlas.json"
 DRIFT_CAPABILITY = "drift.findings"
@@ -248,7 +249,7 @@ def overview(atlas: Atlas) -> str:
 
     lines = [
         f"rosio atlas, schema {atlas.schema_version}, "
-        f"{len(atlas.entities)} entities and {len(atlas.edges)} edges",
+        f"{plural(len(atlas.entities), 'entity')} and {plural(len(atlas.edges), 'edge')}",
         f"layers present: {', '.join(present) or 'none'}"
         f"   capabilities: {', '.join(atlas.capabilities) or 'none'}",
         f"profiles ({len(profiles)}): {_named(profiles, top=10, more='more profiles')}",
@@ -263,7 +264,7 @@ def overview(atlas: Atlas) -> str:
         lines.append("drift: the rules never ran over this atlas, so it carries no findings")
     else:
         summary = ", ".join(f"{count} {name}" for name, count in sorted(counts.items())) or "none"
-        lines.append(f"drift: {len(findings)} findings, {summary}")
+        lines.append(f"drift: {plural(len(findings), 'finding')}, {summary}")
         for item in findings[:4]:
             where = slices.site(item.where[0]) if item.where else ""
             lines.append(f"  {item.severity:<5} {item.rule}  {_clip(item.title, 90)}   {where}")
@@ -342,32 +343,34 @@ def drift(
                 f"no finding of rule {wanted_rule} in this atlas",
                 f"  rules that fired: {_ranked(fired, top=12, noun='rules')}",
             ],
-            "call drift with no rule for all of them",
+            "call drift with no only for all of them",
         )
     scope = [
         f"severity {min_severity} or worse" if floor is not None else "",
-        f"rule {wanted_rule}" if wanted_rule else "",
+        f"only {wanted_rule}" if wanted_rule else "",
         f"profile {slices.profile_name(wanted_profile)}" if wanted_profile else "",
     ]
     filters = ", ".join(part for part in scope if part)
     counts = _counted(item.severity for item in rows)
     summary = ", ".join(f"{count} {name}" for name, count in sorted(counts.items())) or "none"
-    head = f"{len(rows)} findings of {len(atlas.findings)}: {summary}"
+    head = f"{plural(len(rows), 'finding')} of {len(atlas.findings)}: {summary}"
     lines = [f"{head}   filters: {filters}" if filters else head]
     kept = rows[: _limit(limit, WIDE_LIMIT)]
     for item in kept:
         lines.append(f"{item.severity:<5} {item.rule}  on {_subject(item)}")
         lines.append(f"      say: {item.spoken}")
-        if item.where:
-            lines.append(f"      edit: {slices.site(item.where[0], locator=True)}")
+        for row in item.where[:2]:
+            lines.append(f"      at: {slices.site(row, locator=True)}")
+        if item.fix:
+            lines.append(f"      fix: {item.fix}")
         lines.append(f"      explain: {item.fingerprint}")
     if len(rows) > len(kept):
-        lines.append(f"  and {len(rows) - len(kept)} more, raise limit or filter by rule")
+        lines.append(f"  and {len(rows) - len(kept)} more, raise limit or filter by only")
     if rows:
         lines.append("call explain with a fingerprint above for the full evidence")
     elif filters:
         lines.append("nothing matches those filters, which is an answer and not a failure")
-    return _fit(lines, "narrow with min_severity=error, rule=<rule> or a smaller limit")
+    return _fit(lines, "narrow with min_severity=error, only=<rule> or a smaller limit")
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +418,11 @@ def explain(atlas: Atlas, selector: str, *, limit: int | None = None) -> str:
     for profile, per_key in data["effective"].items():
         if not per_key or not states_more:
             continue
-        pairs = ", ".join(f"{key}={row['value']!r}" for key, row in list(per_key.items())[:rows])
+        pairs = ", ".join(
+            f"{key}={slices._stated(row['value'])}"
+            for key, row in list(per_key.items())[:rows]
+            if slices._said(row["value"])
+        )
         lines.append(f"  effective in {slices.profile_name(profile)}: {_clip(pairs, 220)}")
         for key, row in list(per_key.items())[:rows]:
             if row["where"]:
@@ -430,7 +437,7 @@ def explain(atlas: Atlas, selector: str, *, limit: int | None = None) -> str:
     for row in data["unresolved"][:3]:
         lines.append(f"  unresolved {row['want']}: {row['expr']} ({row['reason']}) {row['where']}")
     if data["findings"]:
-        lines.append(f"  {len(data['findings'])} findings, call drift for the sentences")
+        lines.append(f"  {plural(len(data['findings']), 'finding')}, call drift for the sentences")
     if node.kind in ("param", "pparam"):
         lines.append("  call param_chain for the candidate chain and the line to edit")
     lines.append("  call neighbours for the full fan in and fan out")
@@ -494,7 +501,7 @@ def neighbours(
     in_edges = _into(atlas, entity_id)
     lines = [
         f"{atlas.entities[entity_id].kind} {slices.label(entity_id)}: "
-        f"{len(out_edges)} edges out, {len(in_edges)} edges in"
+        f"{plural(len(out_edges), 'edge')} out, {plural(len(in_edges), 'edge')} in"
     ]
     kinds = _counted(edge.kind for edge in out_edges + in_edges)
     if wanted and wanted not in kinds:
@@ -592,10 +599,6 @@ def _rules(atlas: Atlas, channel: str, wanted: str) -> list[str]:
         ):
             rules.add(item.rule)
     return sorted(rules)
-
-
-def _many(count: int, noun: str) -> str:
-    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
 @dataclass
@@ -701,11 +704,11 @@ def select_graph(
 
     nodes = sum(1 for entity_id in scope if atlas.entities[entity_id].kind == "node")
     counts = _counted(atlas.entities[entity_id].kind for entity_id in channels)
-    tally = ", ".join(_many(counts.get(kind, 0), kind) for kind in CHANNEL_KINDS)
-    head = f"{_many(nodes, 'node')}, {tally}, {_many(len(shown), 'endpoint')} in {where}"
+    tally = ", ".join(plural(counts.get(kind, 0), kind) for kind in CHANNEL_KINDS)
+    head = f"{plural(nodes, 'node')}, {tally}, {plural(len(shown), 'endpoint')} in {where}"
     if focus_id:
         around = f"{atlas.entities[focus_id].kind} {slices.label(focus_id)}"
-        head = f"around {around} within {_many(hops, 'hop')}: {head}"
+        head = f"around {around} within {plural(hops, 'hop')}: {head}"
         if focus_id not in scope:
             head = f"{around} has no endpoint in {where}"
     return GraphSelection(
@@ -803,17 +806,17 @@ def graph(
         lines.append(f"{slices.label(entity_id)}{typed}{flags}: " + "; ".join(sides))
     if len(chosen.channels) > rows:
         lines.append(
-            f"and {_many(len(chosen.channels) - rows, 'more channel')}, raise "
+            f"and {plural(len(chosen.channels) - rows, 'more channel')}, raise "
             f"{_pass(cli, 'limit')} or pass {_pass(cli, 'focus', '<node>')}"
         )
     if chosen.hidden:
         lines.append(
-            f"{_many(chosen.hidden, 'library endpoint')} left out (tf2_ros, diagnostic_updater "
+            f"{plural(chosen.hidden, 'library endpoint')} left out (tf2_ros, diagnostic_updater "
             f"and similar wrappers), pass {_pass(cli, 'wrappers', 'true')} to list them"
         )
     if chosen.focus_id and chosen.beyond:
         lines.append(
-            f"{_many(chosen.beyond, 'endpoint')} beyond {_many(hops, 'hop')}, "
+            f"{plural(chosen.beyond, 'endpoint')} beyond {plural(hops, 'hop')}, "
             f"raise {_pass(cli, 'depth')} to follow them"
         )
     if not wanted and len(atlas.by_kind("profile")) > 1:
@@ -908,9 +911,9 @@ def diagram(
             arrows.setdefault(ends, set()).update([qos] if qos else [])
     notes = [chosen.head]
     if len(chosen.channels) > rows:
-        notes.append(f"{_many(len(chosen.channels) - rows, 'more channel')} not drawn")
+        notes.append(f"{plural(len(chosen.channels) - rows, 'more channel')} not drawn")
     if chosen.hidden:
-        notes.append(f"{_many(chosen.hidden, 'library endpoint')} left out")
+        notes.append(f"{plural(chosen.hidden, 'library endpoint')} left out")
 
     def name(entity_id: str) -> str:
         return f"{atlas.entities[entity_id].kind[0]}_{ids.digest(entity_id, length=12)}"
@@ -1041,7 +1044,7 @@ def stamps(atlas: Atlas, *, bag: str | None = None, limit: int | None = None) ->
             "add a bag root to rosio.yaml and extract, or run rosio stamps on a recording",
         )
 
-    lines = [f"{len(bags)} recordings with header stamp checks"]
+    lines = [f"{plural(len(bags), 'recording')} with header stamp checks"]
     for entity, verdict in sorted(bags, key=lambda item: item[0].label):
         lines.append(f"{entity.label}: {verdict.get('level', 'unknown')}")
         lines.extend(f"  {hypothesis}" for hypothesis in verdict.get("hypotheses") or [])
@@ -1433,7 +1436,7 @@ def _chain_answer(
     legs = [f"up to {ids.parse_frame(common)}"] if rise else []
     legs += [f"down to {name_s}"] if down else []
     chain = [
-        f"  chain from {name_t} {' and '.join(legs) or 'to itself'}, {_many(len(hops), 'link')}:",
+        f"  chain from {name_t} {' and '.join(legs) or 'to itself'}, {plural(len(hops), 'link')}:",
         *(_hop_line(hop) for hop in hops),
     ]
     casted = [hop for hop in hops if hop.node and not hop.static]
@@ -1477,7 +1480,7 @@ def _chain_answer(
     moving = [hop for hop in hops if hop.values.get("joint_type") in MOVABLE_JOINTS]
     if moving:
         lines.append(
-            f"  {_many(len(moving), 'movable joint')} on the chain, taken at position zero, "
+            f"  {plural(len(moving), 'movable joint')} on the chain, taken at position zero, "
             "so the live value differs whenever a joint moves"
         )
     return ("pose", key), lines + chain
@@ -1593,6 +1596,37 @@ def transform(
 # migrate
 
 
+ROS_PREFIX = Path("/opt/ros")
+
+
+def current_release(start: str | None) -> tuple[str, str]:
+    """The release a migration starts from, and a sentence when it was not stated.
+
+    A server an assistant starts gets a minimal environment, so ROS_DISTRO is usually not
+    set there even on a machine with ROS sourced in every shell. One release installed under
+    /opt/ros is then the answer, and the reply says it was read from there."""
+    import os
+
+    if _text(start):
+        return _text(start), ""
+    if os.environ.get("ROS_DISTRO"):
+        return os.environ["ROS_DISTRO"], ""
+    try:
+        found = sorted(p.name for p in ROS_PREFIX.iterdir() if (p / "setup.bash").is_file())
+    except OSError:
+        found = []
+    if len(found) == 1:
+        return found[0], (
+            f"from {found[0]}, the one release under {ROS_PREFIX}, because ROS_DISTRO is not "
+            "set where this server runs. pass start to name another"
+        )
+    held = f"holds {', '.join(found)}" if found else "holds no release"
+    return "", (
+        f"the current release is unknown: ROS_DISTRO is not set where this server runs and "
+        f"{ROS_PREFIX} {held}. pass start, for example start=humble"
+    )
+
+
 def migrate(
     workspace: str,
     target: str,
@@ -1607,16 +1641,11 @@ def migrate(
     because an agent that retypes them can only add mistakes. This reads source files, not
     the atlas, and edits nothing.
     """
-    import os
-
     from rosio import migrate as release
 
-    source = _text(start) or os.environ.get("ROS_DISTRO", "")
+    source, how = current_release(start)
     if not source:
-        return _fit(
-            ["the current release is unknown: pass start, or source ROS so ROS_DISTRO is set"],
-            "call migrate with start=<release>",
-        )
+        return _fit([how], "call migrate with start=<release>")
     changes, _root = release.plan_workspace(_text(workspace) or ".", source, target)
     wanted = _text(package)
     if wanted:
@@ -1625,9 +1654,11 @@ def migrate(
     by_hand = [change for change in changes if not change.automatic]
     rows = _limit(limit, fallback=MAX_LIMIT)
     lines = [
-        f"{source} -> {target}: {len(changes)} changes, {len(automatic)} exact rewrites, "
-        f"{len(by_hand)} by hand"
+        f"{source} -> {target}: {plural(len(changes), 'change')}, "
+        f"{plural(len(automatic), 'exact rewrite')}, {len(by_hand)} by hand"
     ]
+    if how:
+        lines.append(how)
     if automatic:
         lines.append(
             f"rewrites: run `rosio migrate apply --from {source} --to {target}` once, "
@@ -1650,6 +1681,7 @@ __all__ = [
     "DEFAULT_LIMIT",
     "MAX_BYTES",
     "AtlasSource",
+    "current_release",
     "diagram",
     "drift",
     "explain",

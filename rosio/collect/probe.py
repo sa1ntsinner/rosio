@@ -737,7 +737,7 @@ class ProbeCollector:
             # and never reaches the atlas is a blind spot nobody can find.
             builder.node(run, attrs={"notes": list(system.notes)})
         self._stamp_checks(ctx, run, profile, system)
-        if not system.nodes:
+        if all(item.internal for item in system.nodes):
             builder.declare_layer(
                 LAYER,
                 present=False,
@@ -1091,9 +1091,16 @@ class ProbeCollector:
 
 def _absent_reason(system: ObservedSystem) -> str:
     """Why the layer holds nothing. A probe that never attached and a probe that attached to
-    an empty graph are two different statements, and only one of them is about the system."""
+    an empty graph are two different statements, and only one of them is about the system.
+    A graph of tooling alone is an empty one: written as a layer, it reported every node a
+    profile launches as launched and not running."""
     if system.reached:
-        return "the probe reached the middleware and no node answered"
+        tooling = " but tooling such as a ros2cli daemon" if system.nodes else ""
+        return (
+            f"no node{tooling} answered on domain {system.domain_id or 'unset'}, so nothing "
+            "of this system is running there. check ROS_DOMAIN_ID and ROS_LOCALHOST_ONLY "
+            "against the shell that started it"
+        )
     attach = [item for item in system.exceptions if item.phase == "attach"]
     if attach:
         return f"the probe never attached: {attach[0].exc_type}: {attach[0].message}"

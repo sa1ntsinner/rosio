@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from rosio import ids
-from rosio.errors import UsageError
+from rosio.errors import ContractError, UsageError
 from rosio.model import (
     ANY_PROFILE,
     SEVERITY_ORDER,
@@ -33,6 +33,7 @@ from rosio.model import (
     Source,
     strip_volatile,
 )
+from rosio.render import plural
 
 DEFAULT_LIMIT = 12
 """Rows per section. A reader who needs more asks for one entity at a time."""
@@ -134,6 +135,24 @@ def _value(value: Any) -> str:
     return repr(value)
 
 
+def _stated(value: Any) -> str:
+    """A fact value as a person reads it: an entity id by its label, a list without python
+    quoting. `_value` keeps the quotes a parameter value needs to show an empty string."""
+    if isinstance(value, str) and value.partition(":")[0] in ids.ENTITY_KINDS:
+        try:
+            return label(value)
+        except ContractError:
+            return value
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_stated(item) for item in value) + "]"
+    return _value(value)
+
+
+def _said(value: Any) -> bool:
+    """Whether a fact value says anything. An empty string or list is left out of a line."""
+    return value not in ("", [], (), {}, None)
+
+
 def _clip(text: str, width: int = 200) -> str:
     """Text cut to width at a word boundary, so a reason never ends mid word."""
     if len(text) <= width:
@@ -149,7 +168,7 @@ def _cap(rows: Sequence[Any], limit: int) -> tuple[list[Any], int]:
 
 
 def _more(lines: list[str], hidden: int, what: str) -> None:
-    if hidden:
+    if hidden > 0:
         lines.append(f"  and {hidden} more {what}")
 
 
@@ -292,7 +311,7 @@ def choice_lines(
 ) -> list[str]:
     """The reply when a selector names several entities: each with the id that names it alone."""
     kept, hidden = _cap(list(matches), DEFAULT_LIMIT)
-    lines = [f"{selector!r} names {len(matches)} entities, pick one and pass its id"]
+    lines = [f"{selector!r} names {plural(len(matches), 'entity')}, pick one and pass its id"]
     for entity_id in kept:
         handle = pasteable(entity_id, shell=shell)
         tail = f"   {handle}" if handle else ""
@@ -355,7 +374,9 @@ def explain(atlas: Atlas, selector: str, *, limit: int = DEFAULT_LIMIT) -> Answe
         for where in row["where"]:
             lines.append(f"      {where}")
     for profile, per_key in data["effective"].items():
-        pairs = ", ".join(f"{key}={_value(row['value'])}" for key, row in per_key.items())
+        pairs = ", ".join(
+            f"{key}={_stated(row['value'])}" for key, row in per_key.items() if _said(row["value"])
+        )
         lines.append(f"  effective in {profile_name(profile)}: {_clip(pairs)}")
         for key, row in per_key.items():
             if row["where"]:
@@ -423,7 +444,7 @@ def _explain_rule(atlas: Atlas, rule: str, limit: int) -> Answer:
             lines=[f"{rule}: no finding of this rule in this atlas"],
         )
     kept, hidden = _cap(rows, limit)
-    lines = [f"{rule}: {len(rows)} finding{'' if len(rows) == 1 else 's'}"]
+    lines = [f"{rule}: {plural(len(rows), 'finding')}"]
     for item in kept:
         lines.append(f"  {item.severity:<5} {item.title}")
         if item.say:
@@ -451,8 +472,8 @@ def _ambiguous(verb: str, selector: str, matches: Sequence[str], atlas: Atlas) -
 def _fact_rows(node: Node, limit: int) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for fact in sorted(node.facts, key=lambda item: item.sort_key()):
-        keys = sorted(fact.values)
-        shown = ", ".join(f"{key}={_value(fact.values[key])}" for key in keys[:limit])
+        keys = sorted(key for key in fact.values if _said(fact.values[key]))
+        shown = ", ".join(f"{key}={_stated(fact.values[key])}" for key in keys[:limit])
         if len(keys) > limit:
             shown = f"{shown}, and {len(keys) - limit} more keys"
         rows.append(
@@ -649,6 +670,8 @@ def _no_single_param(atlas: Atlas, node: str, name: str | None, matches: Sequenc
     names the nodes that carry it and the two token form that picks one.
     """
     selector = (node or "").strip() if name is None else f"{node} {name}".strip()
+    if not matches and " " in selector:
+        return _no_owner_or_name(atlas, selector)
     if name is not None or " " in selector:
         return _ambiguous("param", selector, matches, atlas)
     data = {"selector": selector, "matches": list(matches)}
@@ -677,7 +700,7 @@ def _no_single_param(atlas: Atlas, node: str, name: str | None, matches: Sequenc
         )
     kept, hidden = _cap(list(matches), DEFAULT_LIMIT)
     lines = [
-        f"{len(matches)} parameters match {selector!r} and a param answer is about one, "
+        f"{plural(len(matches), 'parameter')} match {selector!r} and a param answer is about one, "
         "so name the node as well"
     ]
     for entity_id in kept:
@@ -687,6 +710,24 @@ def _no_single_param(atlas: Atlas, node: str, name: str | None, matches: Sequenc
         else:
             lines.append(f"  {atlas.entities[entity_id].kind} {label(entity_id)}")
     _more(lines, hidden, "matches")
+    return Answer(verb="param", ok=False, data=data, lines=lines)
+
+
+def _no_owner_or_name(atlas: Atlas, selector: str) -> Answer:
+    """Which half of a node and a name found nothing. One quoted string read as one name."""
+    node, name = selector.split(None, 1)
+    head = node.partition(":")[0]
+    owners = match(atlas, node if head in ids.ENTITY_KINDS else f"node:{node}").ids
+    owners = [item for item in owners if atlas.entities[item].kind == "node"]
+    data = {"selector": selector, "matches": []}
+    if not owners:
+        lines = not_found_lines(atlas, node)
+        lines[0] = f"no node {node} in this atlas, searched nodes"
+        return Answer(verb="param", ok=False, data=data, lines=lines)
+    lines = [
+        f"{label(owners[0])} carries no parameter {name}",
+        f"  explain {label(owners[0])} for the parameters it carries",
+    ]
     return Answer(verb="param", ok=False, data=data, lines=lines)
 
 
@@ -923,7 +964,10 @@ def query(atlas: Atlas, question: str, *, limit: int = DEFAULT_LIMIT) -> Answer:
     ]
     data["edges"] = edge_rows
     data["widened"] = widened
-    lines = [f"{len(matched)} entities match {', '.join(needles) or ', '.join(sorted(kinds))}"]
+    verb = "matches" if len(matched) == 1 else "match"
+    lines = [
+        f"{plural(len(matched), 'entity')} {verb} {', '.join(needles) or ', '.join(sorted(kinds))}"
+    ]
     if widened:
         lines.append(
             f"  nothing of kind {', '.join(sorted(kinds))} carries that name, so every kind "
@@ -1026,7 +1070,7 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
                 "unresolved, see unresolved",
             ],
         )
-    lines = [f"{len(hops)} hops from {label(start)} to {label(end)}", *notes]
+    lines = [f"{plural(len(hops), 'hop')} from {label(start)} to {label(end)}", *notes]
     if not data_route:
         other = sorted({hop["kind"] for hop in hops} - DATA_EDGE_KINDS)
         lines.append(
@@ -1727,14 +1771,17 @@ def unresolved(
         tail = f", {rate:.3f} of this want resolved" if isinstance(rate, (int, float)) else ""
         lines.append(f"  {key}: {row['count']} unresolved{tail}")
         ranked = sorted(row["reasons"].items(), key=lambda item: (-item[1], item[0]))
-        for name, count in ranked[:3]:
-            lines.append(f"    {count:>3}  {_clip(name, 110)}")
-        if len(ranked) > 3:
-            lines.append(f"    and {len(ranked) - 3} more reasons")
-        for example in row["examples"][:3]:
+        for name, count in ranked[:limit]:
+            lines.append(f"    {count:>3}  {name}")
+        if len(ranked) > limit:
+            lines.append(f"    and {len(ranked) - limit} more reasons, --limit shows more")
+        for example in row["examples"]:
             lines.append(f"      {example['expr']}  in {example['owner']}")
             if example["where"]:
                 lines.append(f"        {example['where']}")
+        if row["count"] > len(row["examples"]):
+            hidden = row["count"] - len(row["examples"])
+            lines.append(f"      and {hidden} more, --limit shows more")
     if data["by_owner"]:
         lines.append("  owners")
         for owner, count in list(data["by_owner"].items())[:limit]:
@@ -1760,8 +1807,10 @@ def drift(
     min_severity: str | None = None,
     rule: str | None = None,
     limit: int = DEFAULT_LIMIT,
+    waived: Iterable[str] = (),
 ) -> Answer:
-    """The findings this atlas carries, filterable by severity and by rule."""
+    """The findings this atlas carries, filterable by severity and by rule. A finding a
+    waiver matched carries the mark on its own line, by its id in `waived`."""
     floor = SEVERITY_ORDER.get(min_severity, len(SEVERITY_ORDER)) if min_severity else None
     rows = [
         item
@@ -1775,23 +1824,24 @@ def drift(
         counts[item.severity] = counts.get(item.severity, 0) + 1
         by_rule[item.rule] = by_rule.get(item.rule, 0) + 1
     kept, hidden = _cap(rows, limit)
+    accepted = set(waived)
     data: dict[str, Any] = {
         "total": len(rows),
         "by_severity": counts,
         "by_rule": dict(sorted(by_rule.items())),
-        "findings": [_finding_row(item) for item in kept],
+        "findings": [
+            {**_finding_row(item), **({"waived": True} if item.id in accepted else {})}
+            for item in kept
+        ],
     }
     summary = ", ".join(f"{count} {name}" for name, count in counts.items())
-    lines = [f"{len(rows)} findings: {summary}"]
+    lines = [f"{plural(len(rows), 'finding')}: {summary}"]
     if not rows:
-        lines.append(
-            "  no drift reported"
-            + (f" for rule {rule}" if rule else "")
-            + ". run the drift engine over this atlas if that is unexpected"
-        )
+        lines.append("  no drift reported" + (f" for rule {rule}" if rule else ""))
         return Answer(verb="drift", data=data, lines=lines)
     for row in data["findings"]:
-        lines.append(f"  {row['severity']:<5} {row['rule']}  {row['title']}")
+        mark = "   waived" if row.get("waived") else ""
+        lines.append(f"  {row['severity']:<5} {row['rule']}  {row['title']}{mark}")
         if row["say"]:
             lines.append(f"        {row['say']}")
         for where in row["where"][:2]:
@@ -1799,7 +1849,7 @@ def drift(
         if row["fix"]:
             lines.append(f"        fix: {row['fix']}")
         lines.append(f"        explain {row['fingerprint']}")
-    _more(lines, hidden, "findings")
+    _more(lines, hidden, "findings, --limit shows more")
     lines.append("  explain takes a fingerprint above, a finding id or a rule id")
     return Answer(verb="drift", data=data, lines=lines)
 

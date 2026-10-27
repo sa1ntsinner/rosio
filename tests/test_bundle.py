@@ -104,6 +104,8 @@ def test_open_and_query_with_readable_citations(problem, tmp_path, capsys):
     assert cli.main(["bundle", "open", str(archive), "--into", str(into)]) == 0
     summary = capsys.readouterr().out
     assert "edit files/fx_desc/config/credentials.yaml:1" in summary
+    assert len(original.findings) > 3
+    assert f"and {len(original.findings) - 3} more, every one of them:" in summary
     assert "rosio drift --atlas" in summary
     assert "rosio explain" in summary
     loaded = model.Atlas.loads((into / "atlas.json").read_text())

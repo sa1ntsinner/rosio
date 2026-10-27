@@ -19,9 +19,35 @@ from typing import Any
 
 REPORT_NAME = "ATLAS_REPORT.md"
 DRIFT_NAME = "DRIFT.md"
+HTML_NAME = "atlas.html"
 
 MD_FORMAT = "md"
 HTML_FORMAT = "html"
+
+
+RENDERED_FROM = "Rendered from atlas"
+"""The phrase every rendered file states its atlas's content hash with. `rosio extract`
+reads it back, so a report left behind by an earlier atlas says so instead of describing a
+system that is no longer the one on disk."""
+
+
+def rendered_from(atlas: Any) -> str:
+    return f"{RENDERED_FROM} {atlas.content_hash()}"
+
+
+def stale(out_dir: str | Path, atlas: Any) -> list[str]:
+    """The rendered files in `out_dir` that state another atlas than this one."""
+    current = rendered_from(atlas)
+    out = []
+    for name in (REPORT_NAME, DRIFT_NAME, HTML_NAME):
+        path = Path(out_dir) / name
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if current not in text:
+            out.append(name)
+    return out
 
 
 def heading(level: int, text: str) -> str:
@@ -46,8 +72,15 @@ def table(headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> list[str]:
     return out
 
 
-def plural(count: int, singular: str, suffix: str = "s") -> str:
-    return f"{count} {singular}" if count == 1 else f"{count} {singular}{suffix}"
+def plural(count: int, singular: str, many: str = "") -> str:
+    """A count with its noun, `1 entity` and `2 entities`. The one helper every count
+    printed with a noun goes through, so no output says `1 profiles`."""
+    if count == 1:
+        return f"{count} {singular}"
+    if not many:
+        consonant_y = singular.endswith("y") and singular[-2:-1] not in ("a", "e", "i", "o", "u")
+        many = f"{singular[:-1]}ies" if consonant_y else f"{singular}s"
+    return f"{count} {many}"
 
 
 def share(part: int, whole: int) -> str:
@@ -106,7 +139,9 @@ def write_all(
 __all__ = [
     "DRIFT_NAME",
     "HTML_FORMAT",
+    "HTML_NAME",
     "MD_FORMAT",
+    "RENDERED_FROM",
     "REPORT_NAME",
     "clip",
     "escape_cell",

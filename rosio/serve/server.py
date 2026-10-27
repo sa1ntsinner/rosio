@@ -47,6 +47,31 @@ version check the cli runs behind."""
 
 MCP_INSTALL = f"pip install 'rosio[mcp]', which pins {MCP_EXTRA}"
 
+
+def mcp_problem() -> str:
+    """Why this interpreter cannot serve, in one sentence, or nothing when it can.
+
+    An mcp that is present but outside the range is the case the import guard reads as
+    absent, and telling a user to install something they already have wastes the one
+    message they get. Read from the installed metadata, so nothing is imported."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        found = version("mcp")
+    except PackageNotFoundError:
+        return f"rosio serve needs the mcp package, which is not installed. {MCP_INSTALL}"
+    parts = found.split(".")[:2]
+    if len(parts) < 2 or not all(part.isdigit() for part in parts):
+        return ""
+    if MCP_MIN <= (int(parts[0]), int(parts[1])) < MCP_MAX:
+        return ""
+    return (
+        f"mcp {found} is installed and rosio serve is not exercised against it. "
+        f"the tools are registered from plain functions with postponed annotations, which "
+        f"mcp resolves from {MCP_MIN[0]}.{MCP_MIN[1]} on. {MCP_INSTALL}"
+    )
+
+
 MCP_MISSING = (
     "the mcp package is not installed, so there is no server to run. "
     f"install it with: {MCP_INSTALL}"
@@ -119,11 +144,11 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         profile narrows to one of the systems this atlas covers, named by its slug."""
         return tools.param_chain(source.atlas(), node, name, profile=profile)
 
-    def drift(min_severity: str = "", rule: str = "", profile: str = "", limit: int = 5) -> str:
+    def drift(min_severity: str = "", only: str = "", profile: str = "", limit: int = 5) -> str:
         """Findings ready to quote, each with one sentence, the line to edit and the
         fingerprint explain takes."""
         return tools.drift(
-            source.atlas(), min_severity=min_severity, rule=rule, profile=profile, limit=limit
+            source.atlas(), min_severity=min_severity, rule=only, profile=profile, limit=limit
         )
 
     def explain(selector: str, limit: int = 8) -> str:
@@ -185,8 +210,9 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
     def migrate(to: str, start: str = "", package: str = "", workspace: str = ".") -> str:
         """Everything moving this workspace to another ROS 2 release asks, from measured
         release data and cited rules, never from memory of release notes. to is the target
-        release such as lyrical, start the current one (default ROS_DISTRO). Lists the by hand
-        changes with file and line, and the one command that performs the exact rewrites."""
+        release such as lyrical, start the current one (from is accepted too). Lists the by
+        hand changes with file and line, and the one command that performs the exact
+        rewrites."""
         return tools.migrate(workspace, to, start=start, package=package)
 
     store = source
@@ -211,7 +237,7 @@ ARGUMENTS = {
     "name": "the dotted parameter name such as FollowPath.plugin",
     "profile": "one system this atlas covers, by its slug, as overview lists them",
     "min_severity": f"the lowest severity shown: {', '.join(SEVERITY_ORDER)}",
-    "rule": "one drift rule id such as param.shadowed",
+    "only": "one drift rule id such as param.shadowed",
     "limit": "how many rows to return",
     "selector": "a name such as /planner_server, /scan or base_link, a full id, a finding "
     "fingerprint or id, or a rule id",
@@ -228,12 +254,18 @@ ARGUMENTS = {
     "bag": "one recording, by its directory name",
     "model": "one robot model file, such as urdf/robot.urdf",
     "to": "the target release, such as lyrical",
-    "start": "the current release, default ROS_DISTRO",
+    "start": "the current release, also accepted as from. default ROS_DISTRO, then the one "
+    "release installed under /opt/ros",
     "package": "one package of the workspace",
     "workspace": "the workspace directory, default the server's working directory",
 }
 """What each tool argument means, written into the tool schema. One argument name has one
-meaning across the tools, and the command line spells the same thing the same way."""
+meaning across the tools, and it is the command line's word: `only` is `--only`, `source`
+and `target` are the two ends `rosio path` takes. `--from` is the one word a python name
+cannot spell, so `migrate` takes `start` and accepts `from` through `SPELLINGS`."""
+
+SPELLINGS = {"migrate": {"from": "start"}}
+"""Second spellings a tool accepts for one of its arguments, renamed before validation."""
 
 TRANSFORM_ARGUMENTS = {
     "source": "the frame whose pose is wanted, such as laser_link",
@@ -261,6 +293,26 @@ def described(function: Any) -> Any:
     return function
 
 
+def _takes(tool: str, takes: list[str]) -> str:
+    second = {name: spelled for spelled, name in SPELLINGS.get(tool, {}).items()}
+    named = [f"{name} (or {second[name]})" if name in second else name for name in takes]
+    return f"{tool} takes {', '.join(named) or 'no arguments'}"
+
+
+def strangers(tool: str, arguments: dict, takes: dict[str, bool]) -> str:
+    """The refusal for arguments a tool does not take, or nothing. `takes` maps each argument
+    to whether it is required. A stray argument the schema would drop is refused instead,
+    because a filter that was silently ignored answers a different question."""
+    unknown = sorted(set(arguments) - set(takes))
+    if not unknown:
+        return ""
+    missing = [
+        f"{name} is missing" for name, needed in takes.items() if needed and name not in arguments
+    ]
+    head = f"{', '.join(missing)}, and it" if missing else "it"
+    return f"{tool} was not run: {head} takes no {', '.join(unknown)}. {_takes(tool, list(takes))}"
+
+
 def plain(tool: str, error: Exception, arguments: dict, takes: list[str]) -> str:
     """One sentence for arguments the schema refused, in place of the validator's report."""
     problems = []
@@ -272,10 +324,7 @@ def plain(tool: str, error: Exception, arguments: dict, takes: list[str]) -> str
             problems.append(f"{field_name} {str(row.get('msg', 'is not valid')).lower()}")
     unknown = sorted(set(arguments) - set(takes))
     stranger = f", and it takes no {', '.join(unknown)}" if unknown else ""
-    return (
-        f"{tool} was not run: {', '.join(problems)}{stranger}. "
-        f"{tool} takes {', '.join(takes) or 'no arguments'}"
-    )
+    return f"{tool} was not run: {', '.join(problems)}{stranger}. {_takes(tool, takes)}"
 
 
 # ---------------------------------------------------------------------------
@@ -341,9 +390,24 @@ def build(source: tools.AtlasSource) -> Any:
     refusal = _tool_error()
     functions = [described(function) for function in bindings(source)]
     takes = {item.__name__: list(inspect.signature(item).parameters) for item in functions}
+    needed = {
+        item.__name__: {
+            name: row.default is inspect.Parameter.empty
+            for name, row in inspect.signature(item).parameters.items()
+        }
+        for item in functions
+    }
 
     class Server(factory):
         async def call_tool(self, name: str, arguments: dict, *rest: Any, **named: Any) -> Any:
+            if name in needed:
+                spelled = SPELLINGS.get(name, {})
+                arguments = {
+                    spelled.get(key, key): value for key, value in (arguments or {}).items()
+                }
+                refused = strangers(name, arguments, needed[name])
+                if refused:
+                    raise refusal(refused)
             try:
                 return await super().call_tool(name, arguments, *rest, **named)
             except Exception as exc:
@@ -476,12 +540,15 @@ __all__ = [
     "MCP_MAX",
     "MCP_MIN",
     "MCP_MISSING",
+    "SPELLINGS",
     "UVICORN_EXTRA",
     "Options",
     "bindings",
     "build",
     "guarded",
     "http_app",
+    "mcp_problem",
     "presented",
     "run",
+    "strangers",
 ]

@@ -24,23 +24,25 @@ bytes, so any assistant can use it, including a small local one, with no API key
 
 ## See it
 
-ROS 2 jazzy, stock `nav2_bringup`, composed. Does the controller run on simulated time?
+ROS 2 jazzy, stock `nav2_bringup`, composed: the `rosio.yaml` under
+[Command reference](#command-reference), then `rosio extract /opt/ros/jazzy`. Does the controller
+run on simulated time?
 
 ```
 $ rosio param /controller_server use_sim_time
-
 use_sim_time on /controller_server   state effective
   profile nav2_bringup_composed
-    effective False (bool)   edit nav2_bringup/launch/navigation_launch.py [install]
+    effective False (bool)   edit nav2_bringup/launch/navigation_launch.py:253 [install]
     rank 0 wins launch_inline_dict   False (bool)
-        nav2_bringup/launch/navigation_launch.py [install] SetParameter
+        nav2_bringup/launch/navigation_launch.py:253 [install] SetParameter
 ```
 
 No parameters file sets it. A `SetParameter` in the launch group does, for every component
 the group loads, and that line is the one to edit. Grepping the yaml finds nothing and says
 nothing about why.
 
-What does the system get wrong?
+What does the system get wrong? (The title of each finding; the full output adds the sentence
+to quote, the line to edit, a fix and the fingerprint `rosio explain` takes.)
 
 ```
 $ rosio drift --min-severity warn
@@ -53,19 +55,17 @@ $ rosio drift --min-severity warn
 The first is a real packaging defect: `nav2_theta_star_planner` exports a plugin manifest by a
 name it does not install. The other two are configuration for nodes this profile never starts.
 
-On sources, `examples/rover_ws` is a small rover with five faults planted on purpose:
+On sources, `examples/rover_ws` is a small rover with five faults planted on purpose (the titles
+again):
 
 ```
 $ rosio drift
 5 findings: 1 error, 0 info, 4 warn
   error qos.incompatible  /safety_stop never receives /scan_filtered
-        /safety_stop subscribes to /scan_filtered requesting reliable while /scan_filter publishes it best effort, so the two never connect and no message arrives.
   warn  frame.not_in_urdf  /scan_filter looks up laser_frame, which no robot model has
-        rover_perception/src/scan_filter.cpp:34 looks up the frame laser_frame, which no robot model declares and nothing publishes, so the lookup never succeeds, the model has laser_link.
-  warn  param.set_undeclared  stop_distnce is set for /safety_stop and never declared
-        ... /safety_stop declares stop_distance, which is likely what was meant.
-  warn  param.shadowed  max_range at rover_bringup/config/rover.yaml:4 is overridden
   warn  param.orphan_block  block odometry owns nothing in rover
+  warn  param.set_undeclared  stop_distnce is set for /safety_stop and never declared
+  warn  param.shadowed  max_range at rover_bringup/config/rover.yaml:4 is overridden
 ```
 
 A best effort `SensorDataQoS()` publisher and a reliable subscriber in two languages, a frame
@@ -73,13 +73,14 @@ name one word off, a parameter key one letter off, a yaml value the launch file 
 block for a node nothing starts. Each is a day lost on a real robot; each is one line here.
 `cd examples/rover_ws && rosio extract && rosio drift` reproduces it, with no build.
 
-Is the clock behind a recording sane? Put a known fault into a recording of your own and check
-it (an excerpt):
+Is the clock behind a recording sane? Put a known fault into a clean recording and check it (an
+excerpt). `--example` writes a small synthetic one; a recording of your own works the same way:
 
 ```
-$ rosio-bagmutate my_recording tai_recording --pathology tai --topic /scan
+$ rosio-bagmutate --example clean_recording
+$ rosio-bagmutate clean_recording tai_recording --pathology tai --topic /scan
 $ rosio stamps tai_recording
-ERROR epoch_offset /scan: /scan offset 36.980 s matches the TAI to UTC offset (37 s), check the PTP timescale or a ptp_utc_tai_offset driver setting, stamps ahead of the receiver
+ERROR epoch_offset /scan: /scan offset -36.980 s matches the TAI to UTC offset (37 s), check the PTP timescale or a ptp_utc_tai_offset driver setting, stamps ahead of the receiver
 
 verdict:
   /scan carries a tai utc offset of about 36.980 s while the rest of the system is clean, set the PTP timescale to UTC or correct a ptp_utc_tai_offset style setting on that driver.
@@ -95,7 +96,7 @@ it knows, what each looks like and how to reproduce it are in
 
 ```bash
 python3 -m venv --system-site-packages .venv && source .venv/bin/activate
-pip install "rosio[cpp,stamps]"
+pip install "rosio[cpp,stamps,mcp]"
 source /opt/ros/jazzy/setup.bash
 
 cd ~/ros2_ws
@@ -109,9 +110,11 @@ rosio install claude-code      # register rosio with your assistant
 Every verb reads and writes `rosio-out` in the directory it runs in, and `rosio install` writes
 into it too, so run them from the workspace.
 
-The `--system-site-packages` flag is not optional. Walking a launch tree imports the ROS `launch`
-package, and part of its dependency chain is installed as operating system packages that a plain
-virtual environment hides. Without it rosio refuses to walk anything and says so.
+Walking a launch tree runs `python3` from your PATH, which is the environment's own interpreter
+while it is active. ROS installs part of the `launch` dependency chain as operating system
+packages (`lark`, for one) that a plain virtual environment hides, so an active environment
+without `--system-site-packages` cannot walk anything, and rosio says so at the top of the run.
+`mcp` is the extra that `rosio serve` and the server entry `rosio install` writes need.
 
 `init` also takes an install tree, such as `/opt/ros/jazzy` or a built workspace's `install/`.
 An installed distribution holds a great many launch files, so name the packages you want. Nobody
@@ -219,6 +222,9 @@ rosio serve --http --host 0.0.0.0 --api-key "$KEY" # one server for a team
 
 Twelve tools: `overview`, `param_chain`, `drift`, `explain`, `query`, `path`, `neighbours`,
 `graph`, `unresolved`, `stamps`, `transform`, `migrate`. Every response is capped and says when it truncated and how to narrow the question.
+Arguments carry the command line's names (`only` as in `--only`, `source` and `target` as in
+`rosio path`), except that `migrate` takes `start` for `--from` and accepts `from` too. An
+argument a tool does not take is refused with the names it does.
 The server starts without an atlas, and each tool then names the extract command that builds one.
 A worst case answer is under 4 KB. On very small models prefer the command
 line, where the skill file is 3.3 KB and carries six commands, the waiver file and a worked example.
@@ -273,7 +279,7 @@ rosio drift [--min-severity warn] [--fail-on error] [--only RULE] [--waivers FIL
 rosio param <node> <name> [--profile SLUG]
 rosio explain <entity, finding fingerprint or rule id>
 rosio query <text>
-rosio path <from> <to>
+rosio path <source> <target>
 rosio unresolved [--want topic_name]
 rosio graph [--profile SLUG] [--focus NODE] [--depth N] [--wrappers] [--format text|dot|mermaid]
 rosio diff <atlas-a> <atlas-b>
@@ -312,6 +318,10 @@ roots:
     path: /opt/ros/jazzy
 ros_setup:
   - /opt/ros/jazzy/setup.bash
+ignore:
+  - /include
+  - /opt
+  - /lib/python*
 profiles:
   - slug: nav2_bringup_composed
     entrypoints:
@@ -319,6 +329,9 @@ profiles:
         args:
           use_composition: "True"
 ```
+
+`ignore` keeps the headers, vendored libraries and python modules of the prefix out of the index,
+which rosio reads nothing from.
 
 ## Moving to another ROS 2 release
 

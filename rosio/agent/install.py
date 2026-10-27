@@ -39,6 +39,7 @@ UNCHANGED = "unchanged"
 KEPT = "kept"
 REMOVED = "removed"
 ABSENT = "absent"
+SKIPPED = "skipped"
 PRUNED = "pruned"
 
 WOULD = {CREATED: "create", UPDATED: "update", REMOVED: "remove", PRUNED: "prune"}
@@ -89,7 +90,8 @@ class Report:
             out.append("  nothing to do, this platform has no file at this scope")
         out.extend(action.line(dry_run=self.dry_run) for action in self.actions)
         out.extend(f"  undo: {a.undo}" for a in self.actions if a.undo and a.status != UNCHANGED)
-        out.extend(f"  note: {note}" for note in self.notes)
+        if not self.actions or any(a.status != UNCHANGED for a in self.actions):
+            out.extend(f"  note: {note}" for note in self.notes)
         return out
 
     def text(self) -> str:
@@ -234,18 +236,22 @@ def install(
     """Write every file the platform reads at this scope.
 
     The MCP entry starts the interpreter running this install, by its absolute path, and at
-    project scope on the atlas the project already holds, so neither depends on the PATH or
-    the directory the assistant is started from. A user scope entry serves every project, so
-    it names no atlas."""
+    project scope on the project's atlas by its absolute path, whether or not it is built
+    yet, so neither depends on the PATH or the directory the assistant is started from. A
+    user scope entry serves every project, so it names no atlas. An entry whose server could
+    not start, because this interpreter has no mcp package, is not written."""
     row = plat.get(platform)
     plat.check_scope(scope)
     root = Path(root or Path.cwd()).resolve()
     home = Path(home or Path.home()).resolve()
     command = tuple(command) or plat.serve_command(_atlas(root) if scope == "project" else None)
     report = Report(row.key, scope, root, home, verb="install", dry_run=dry_run)
+    missing = _mcp_missing()
 
     for target, path in _paths(row, scope, root, home):
-        if target.writer == "whole_file":
+        if target.mechanism == "mcp" and missing:
+            report.actions.append(Action(path, target.mechanism, SKIPPED, missing))
+        elif target.writer == "whole_file":
             _install_whole(target, path, report, force=force)
         elif target.writer == "section":
             _install_section(target, path, report, command)
@@ -277,12 +283,20 @@ def _install_whole(target: plat.Target, path: Path, report: Report, *, force: bo
     report.actions.append(Action(path, target.mechanism, status, detail, undo))
 
 
-def _atlas(root: Path) -> Path | None:
+def _atlas(root: Path) -> Path:
     from rosio.config import DEFAULT_OUT_DIR
     from rosio.extract import ATLAS_NAME
 
-    atlas = root / DEFAULT_OUT_DIR / ATLAS_NAME
-    return atlas if atlas.is_file() else None
+    return root / DEFAULT_OUT_DIR / ATLAS_NAME
+
+
+def _mcp_missing() -> str:
+    """Why the server this interpreter would start cannot run, or nothing. An entry for a
+    server that dies on start is a registration the assistant reports as broken."""
+    from rosio.serve.server import mcp_problem
+
+    problem = mcp_problem()
+    return f"not written: {problem}, then install again" if problem else ""
 
 
 def _install_section(

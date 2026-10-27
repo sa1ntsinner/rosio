@@ -703,7 +703,7 @@ def test_the_cli_plan_is_json_for_an_agent_and_text_for_a_person(
 
     assert main(["migrate", "plan", str(humble_ws), "--from", "humble", "--to", "lyrical"]) == 0
     text = capsys.readouterr().out
-    assert text.startswith("rosio migrate humble -> lyrical: 15 changes in 1 packages")
+    assert text.startswith("rosio migrate humble -> lyrical: 15 changes in 1 package,")
     assert "  src/driver/CMakeLists.txt:11  removed in lyrical  ament_target_dependencies()" in text
 
 

@@ -17,9 +17,9 @@ Three properties decide whether a hook survives contact with a real team:
 
 Comparing two revisions builds both of them, which is the same cost twice. A built atlas is
 therefore kept under a digest of what it was built from, so the second comparison touching a
-revision reads it instead. The rules are in `CACHE_RULES` and are printed with every answer:
-there is no incremental rebuild here, and a fast answer a reader cannot check is worse than
-a slow one.
+revision reads it instead. The rules are in `CACHE_RULES`, every answer names the flag that
+prints them, and `--cache-rules` does: there is no incremental rebuild here, and a fast answer
+a reader cannot check is worse than a slow one.
 
 Nothing here writes into a repository that was not named, and an existing hook file that
 rosio did not write is never replaced without `--force`.
@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 from rosio import __version__, ids
 from rosio.errors import UsageError
 from rosio.model import dumps, dumps_line
+from rosio.render import plural
 
 HOOK_EVENTS = ("post-checkout", "post-commit", "post-merge")
 """What the atlas has to survive: a commit, a branch change, and a merge that brought
@@ -364,7 +365,7 @@ def install(
 
     verb = "would install" if dry_run else "installed"
     report.lines = [
-        f"{verb} {len(written)} hooks in {hooks}",
+        f"{verb} {plural(len(written), 'hook')} in {hooks}",
         f"  events {', '.join(written)}",
         f"  rebuild: {' '.join(argv)}",
         f"  interpreter {interpreter} (embedded, no PATH lookup)",
@@ -525,7 +526,7 @@ def uninstall(
         "dry_run": bool(dry_run),
     }
     verb = "would remove" if dry_run else "removed"
-    report.lines = [f"{verb} {len(removed)} hooks from {hooks}"]
+    report.lines = [f"{verb} {plural(len(removed), 'hook')} from {hooks}"]
     if removed:
         report.lines.append(f"  {', '.join(sorted(removed))}")
     if kept:
@@ -970,9 +971,11 @@ CACHE_RULES = (
     "extra is a miss and never a stale read",
 )
 """What the cache holds, what invalidates it, what it does not save, what it is certain
-about and what it is not. Printed under a revision comparison, because a reader deciding
-whether to trust a fast answer needs all five. The last one is what is left after the
-capability set went into the key: two runs in one repository from one interpreter, with
+about and what it is not. Printed under a revision comparison asked with `--cache-rules`,
+because a reader deciding whether to trust a fast answer needs all five, and named on every
+other one, because five paragraphs under every diff were read once and skipped after. The
+last one is what is left after the capability set went into the key: two runs in one
+repository from one interpreter, with
 tree-sitter importable in the first and not in the second, used to produce one key and two
 different atlases, and now produce two keys."""
 
@@ -1257,6 +1260,7 @@ def compare_revisions(
     limit: int = 12,
     keep: str | Path | None = None,
     cache: bool = True,
+    cache_rules: bool = False,
 ):
     """Build two revisions of one workspace and answer what changed between them.
 
@@ -1288,7 +1292,7 @@ def compare_revisions(
     answer.data["builds"] = [left_build, right_build]
     if answer.lines:
         answer.lines[0] = f"diff, {scope}"
-    answer.lines.extend(_build_cost_lines([left_build, right_build]))
+    answer.lines.extend(_build_cost_lines([left_build, right_build], rules=cache_rules))
     return answer
 
 
@@ -1331,12 +1335,15 @@ def revision_atlas(
     }
 
 
-def _build_cost_lines(builds: list[dict[str, Any]]) -> list[str]:
+def _build_cost_lines(builds: list[dict[str, Any]], *, rules: bool = False) -> list[str]:
     lines = []
     for row in builds:
         how = "read from the build cache" if row["cached"] else "built"
         lines.append(f"  {row['revision']}: {how} in {row['volatile']['seconds']}s")
-    lines.extend(f"  {rule}" for rule in CACHE_RULES)
+    if rules:
+        lines.extend(f"  {rule}" for rule in CACHE_RULES)
+    else:
+        lines.append("  --cache-rules says what the build cache keys on and what it cannot know")
     return lines
 
 

@@ -227,13 +227,87 @@ def _any_reader():
     return AnyReader, get_typestore(Stores.LATEST)
 
 
+EXAMPLE_BASE_S = 1750000000.0
+EXAMPLE_MESSAGES = 120
+EXAMPLE_PERIOD_S = 0.1
+EXAMPLE_LATENCY_S = 0.02
+
+
+def example(dest):
+    """A clean recording to put a known fault into: /scan and /imu at 10 Hz for 12 s, every
+    message received 20 ms after its stamp. It is built on the reader's machine, so the
+    README example runs without a recording of one's own and none ships with the package."""
+    try:
+        import numpy
+        from rosbags.rosbag2 import Writer
+        from rosbags.typesys import Stores, get_typestore
+    except ImportError as exc:
+        raise RuntimeError(
+            "writing a recording needs the rosbags package, install it with: "
+            "pip install 'rosio[stamps]'"
+        ) from exc
+    types = get_typestore(Stores.ROS2_HUMBLE)
+    store = types.types
+
+    def header(seconds, frame):
+        whole = int(seconds)
+        stamp = store["builtin_interfaces/msg/Time"](
+            sec=whole, nanosec=round((seconds - whole) * NS)
+        )
+        return store["std_msgs/msg/Header"](stamp=stamp, frame_id=frame)
+
+    def scan(seconds):
+        return store["sensor_msgs/msg/LaserScan"](
+            header=header(seconds, "laser"),
+            angle_min=-1.0,
+            angle_max=1.0,
+            angle_increment=1.0,
+            time_increment=0.0,
+            scan_time=EXAMPLE_PERIOD_S,
+            range_min=0.1,
+            range_max=10.0,
+            ranges=numpy.array([1.0, 2.0, 3.0], dtype=numpy.float32),
+            intensities=numpy.array([], dtype=numpy.float32),
+        )
+
+    def imu(seconds):
+        still = store["geometry_msgs/msg/Vector3"](x=0.0, y=0.0, z=0.0)
+        covariance = numpy.zeros(9, dtype=numpy.float64)
+        return store["sensor_msgs/msg/Imu"](
+            header=header(seconds, "imu"),
+            orientation=store["geometry_msgs/msg/Quaternion"](x=0.0, y=0.0, z=0.0, w=1.0),
+            orientation_covariance=covariance,
+            angular_velocity=still,
+            angular_velocity_covariance=covariance,
+            linear_acceleration=still,
+            linear_acceleration_covariance=covariance,
+        )
+
+    with Writer(Path(dest), version=8) as writer:
+        topics = [
+            (writer.add_connection("/imu", "sensor_msgs/msg/Imu", typestore=types), imu),
+            (writer.add_connection("/scan", "sensor_msgs/msg/LaserScan", typestore=types), scan),
+        ]
+        for index in range(EXAMPLE_MESSAGES):
+            stamp = EXAMPLE_BASE_S + index * EXAMPLE_PERIOD_S
+            for connection, build in topics:
+                data = types.serialize_cdr(build(stamp), connection.msgtype)
+                writer.write(connection, round((stamp + EXAMPLE_LATENCY_S) * NS), data)
+    return dict.fromkeys(("/imu", "/scan"), EXAMPLE_MESSAGES)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="rosio-bagmutate", description="inject known timestamp pathologies into a bag"
     )
-    parser.add_argument("src", help="path to a ROS 1 or ROS 2 bag")
-    parser.add_argument("dest", help="path of the rosbag2 to write")
-    parser.add_argument("--pathology", required=True, choices=PATHOLOGIES)
+    parser.add_argument("src", nargs="?", help="path to a ROS 1 or ROS 2 bag")
+    parser.add_argument("dest", nargs="?", help="path of the rosbag2 to write")
+    parser.add_argument("--pathology", choices=PATHOLOGIES)
+    parser.add_argument(
+        "--example",
+        metavar="DEST",
+        help="write a clean synthetic recording to DEST to put a fault into, and stop",
+    )
     parser.add_argument(
         "--topic", action="append", metavar="TOPIC", help="only mutate this topic, repeatable"
     )
@@ -247,6 +321,17 @@ def main(argv=None):
     parser.add_argument("--length", type=int, metavar="N", help="messages for frozen and zero")
     args = parser.parse_args(argv)
 
+    if args.example:
+        try:
+            written = example(args.example)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"rosio-bagmutate: {exc}", file=sys.stderr)
+            return 2
+        for topic, count in sorted(written.items()):
+            print(f"{topic} clean msgs={count}")
+        return 0
+    if not (args.src and args.dest and args.pathology):
+        parser.error("a source bag, a destination and --pathology are needed, or --example DEST")
     if not 0.0 <= args.at < 1.0:
         print("rosio-bagmutate: --at needs a fraction in [0, 1)", file=sys.stderr)
         return 2

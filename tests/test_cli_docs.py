@@ -221,3 +221,30 @@ def test_the_configuration_page_states_the_defaults_the_code_uses():
         assert f"`{pattern}`" in text
     assert "docs/configuration.md" in scaffold.HEADER
     assert "docs/configuration.md" in doc("README.md")
+
+
+# ---------------------------------------------------------------------------
+# the schema version, wherever a tracked document states it
+
+SCHEMA_STATED = re.compile(r"\b(?:atlas )?schema,? (?:version )?\**`?(\d+\.\d+)\b")
+"""`schema 1.18` as overview prints it, `atlas schema 1.18` as version prints it."""
+
+
+def _stating_documents() -> list[Path]:
+    named = [ROOT / name for name in ("README.md", "AGENTS.md", "ARCHITECTURE.md", "CONTEXT.md")]
+    named += sorted((ROOT / "docs").rglob("*.md"))
+    named += sorted((ROOT / "site" / "output").glob("*.txt"))
+    named += [ROOT / "site" / "index.html", ROOT / "site" / "copy.md"]
+    named += sorted((ROOT / "rosio" / "agent" / "templates").glob("*"))
+    return [path for path in named if path.is_file()]
+
+
+def test_every_document_that_states_the_schema_version_states_the_current_one():
+    """AGENTS section 9a said 1.16 while the tool wrote 1.18, and the site showed 1.13."""
+    stale = [
+        f"{path.relative_to(ROOT)}: {found}"
+        for path in _stating_documents()
+        for found in SCHEMA_STATED.findall(path.read_text(encoding="utf-8"))
+        if found != model.SCHEMA_VERSION
+    ]
+    assert stale == []

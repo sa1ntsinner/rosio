@@ -303,7 +303,7 @@ def test_param_chain_refuses_a_profile_that_does_not_exist(atlas):
 def test_param_chain_says_so_when_the_parameter_is_not_there(atlas):
     text = tools.param_chain(atlas, "/controller_server", "no_such_parameter")
 
-    assert "nothing in this atlas" in text
+    assert "/controller_server carries no parameter no_such_parameter" in text
     assert WINNER not in text
 
 
@@ -321,7 +321,11 @@ def test_drift_gives_the_sentence_to_quote_and_the_line_to_edit(atlas):
 
     assert "param.shadowed" in text
     assert f"say: FollowPath.plugin on /controller_server is {WINNER}" in text
-    assert "edit: nx_bringup/config/nav2_params.yaml:149" in text
+    assert "at: nx_bringup/config/nav2_params.yaml:149" in text
+    # the line to edit is the fix's to name: the first evidence row of a shadowed value is
+    # the line that loses
+    assert "edit:" not in text
+    assert "fix: delete the base line" in text
 
 
 def test_drift_filters_by_severity_rule_and_profile(atlas):
@@ -1143,7 +1147,7 @@ def test_the_tools_take_the_argument_names_the_command_line_uses(atlas_file: Pat
     assert takes["neighbours"] == ["selector", "kind", "direction"]
     assert takes["path"] == ["source", "target"]
     assert takes["query"] == ["question", "limit"]
-    assert takes["drift"] == ["min_severity", "rule", "profile", "limit"]
+    assert takes["drift"] == ["min_severity", "only", "profile", "limit"]
     for names in takes.values():
         assert set(names) <= set(server.ARGUMENTS)
 
@@ -1190,6 +1194,50 @@ def test_arguments_the_schema_refuses_come_back_as_one_plain_sentence(atlas_file
     typed = _refusal(built, "drift", {"limit": "many"})
     assert typed.startswith("drift was not run: limit ")
     assert "pydantic" not in typed and "\n" not in typed
+
+
+def test_an_argument_a_tool_does_not_take_is_refused_even_when_nothing_else_is_wrong(
+    atlas_file: Path,
+):
+    """A filter dropped by the schema returned every finding as though it had applied."""
+    pytest.importorskip("mcp")
+    built = server.build(tools.AtlasSource(atlas_file))
+
+    text = _refusal(built, "drift", {"rule": "param.shadowed"})
+
+    assert text == (
+        "drift was not run: it takes no rule. drift takes min_severity, only, profile, limit"
+    )
+    assert "was not run" not in _refusal(built, "drift", {"only": "param.shadowed"})
+
+
+def test_migrate_takes_the_command_line_word_for_the_current_release(atlas_file: Path):
+    pytest.importorskip("mcp")
+    built = server.build(tools.AtlasSource(atlas_file))
+
+    text = _refusal(built, "migrate", {"to": "jazzy", "from": "humble", "into": "x"})
+
+    assert text.endswith("migrate takes to, start (or from), package, workspace")
+    assert "takes no into" in text
+
+
+def test_the_current_release_comes_from_the_one_under_opt_ros_when_the_environment_has_none(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.delenv("ROS_DISTRO", raising=False)
+    monkeypatch.setattr(tools, "ROS_PREFIX", tmp_path)
+    assert tools.current_release("")[0] == ""
+    assert "holds no release" in tools.current_release("")[1]
+    (tmp_path / "jazzy").mkdir()
+    (tmp_path / "jazzy" / "setup.bash").write_text("", encoding="utf-8")
+    release, how = tools.current_release("")
+    assert release == "jazzy"
+    assert "ROS_DISTRO is not set" in how
+    assert tools.current_release("humble") == ("humble", "")
+    (tmp_path / "rolling").mkdir()
+    (tmp_path / "rolling" / "setup.bash").write_text("", encoding="utf-8")
+    assert tools.current_release("")[0] == ""
+    assert "holds jazzy, rolling" in tools.current_release("")[1]
 
 
 def test_a_refusal_a_tool_raises_reaches_the_caller_as_its_own_sentence(atlas_file: Path):

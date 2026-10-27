@@ -386,6 +386,28 @@ def test_a_system_with_no_node_declares_the_layer_absent(ctx: CollectContext) ->
     assert not [node for node in atlas.entities.values() if node.kind == "node"]
 
 
+def test_a_domain_where_only_tooling_answers_is_an_absent_layer_that_names_the_domain(
+    ctx: CollectContext,
+) -> None:
+    """On an empty domain the probe once observed itself and the ros2cli daemon, and every
+    launched node became a node.declared_not_observed finding."""
+    tooling = probe_collect.ObservedSystem(
+        nodes=[
+            probe_collect.ObservedNode(
+                name="_ros2cli_daemon_42", namespace="/", fqn="/_ros2cli_daemon_42", internal=True
+            )
+        ],
+        domain_id="42",
+    )
+    probe_collect.ProbeCollector(system=tooling).collect(ctx)
+    atlas = ctx.builder.build()
+    layer = atlas.layers[model.Layer.OBSERVED.value]
+    assert layer.present is False
+    assert "domain 42" in layer.reason
+    assert "ROS_DOMAIN_ID and ROS_LOCALHOST_ONLY" in layer.reason
+    assert not [node for node in atlas.entities.values() if node.kind == "node"]
+
+
 def test_a_probe_that_never_attached_does_not_claim_it_reached_the_middleware(
     ctx: CollectContext,
 ) -> None:
@@ -749,9 +771,10 @@ def test_the_probe_attaches_to_an_isolated_domain(monkeypatch: pytest.MonkeyPatc
     system = probe_collect.probe(window=1.0, settle=1.0, ros_setup=setup)
     assert system.reached
     assert system.domain_id == "77"
-    names = [item.name for item in system.nodes]
-    assert "rosio_probe" in names
-    assert all(item.internal for item in system.nodes if item.name == "rosio_probe")
+    # the probe's own node, its services and the topics every rclpy node opens are not
+    # the system, and on an empty domain they were all the observed layer held
+    assert "rosio_probe" not in [item.name for item in system.nodes]
+    assert not [item for item in system.endpoints if item.node == "/rosio_probe"]
 
 
 @pytest.mark.parametrize("order, marker", [("little", b"\x00\x01"), ("big", b"\x00\x00")])
@@ -1041,7 +1064,13 @@ def test_a_node_found_after_the_graph_was_read_still_runs() -> None:
 
     probe = child.Probe({})
     probe.node = SimpleNamespace(
-        get_node_names_and_namespaces=lambda: [("amcl", "/"), ("map_server", "/")]
+        get_node_names_and_namespaces=lambda: [
+            ("amcl", "/"),
+            ("map_server", "/"),
+            ("rosio_probe", "/"),
+        ],
+        get_name=lambda: "rosio_probe",
+        get_namespace=lambda: "/",
     )
     probe._late({"/amcl": {}})
     [late] = probe.system.nodes

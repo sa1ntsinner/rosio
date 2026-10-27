@@ -220,6 +220,23 @@ def test_explain_of_an_unknown_name_says_so_instead_of_guessing(atlas):
     assert "frame or a package" in texts(query.explain(atlas, "not_a_node"))
 
 
+def test_explain_states_values_without_python_quoting_or_raw_ids():
+    builder = model.AtlasBuilder()
+    source = ids.build_file("rover_control", "rover_control/safety_stop.py")
+    builder.node(source)
+    builder.fact(
+        "node:/safety_stop",
+        "coded",
+        values={"coded_sources": [source], "executable": "", "code_name": "safety_stop"},
+    )
+
+    body = texts(query.explain(builder.build(), "/safety_stop"))
+
+    assert "coded_sources=[rover_control/rover_control/safety_stop.py]" in body
+    assert "executable" not in body
+    assert "'" not in body and "file:" not in body
+
+
 def test_explain_of_an_ambiguous_name_lists_the_choices(atlas):
     answer = query.explain(atlas, "cost_penalty")
 
@@ -286,6 +303,27 @@ def _shared_name_atlas() -> model.Atlas:
             ],
         )
     return builder.build()
+
+
+def test_a_count_is_printed_with_the_noun_it_takes():
+    from rosio.render import plural
+
+    assert [plural(1, "entity"), plural(2, "entity"), plural(1, "root"), plural(0, "key")] == [
+        "1 entity",
+        "2 entities",
+        "1 root",
+        "0 keys",
+    ]
+
+
+def test_param_says_which_half_of_the_node_and_the_name_found_nothing(atlas):
+    """One string, '/nonexistent foo', read as one name nobody carries."""
+    missing_node = texts(query.param(atlas, "/nonexistent", "foo"))
+    missing_name = texts(query.param(atlas, "/controller_server", "no_such_key"))
+
+    assert missing_node.startswith("no node /nonexistent in this atlas")
+    assert "'/nonexistent foo'" not in missing_node
+    assert missing_name.startswith("/controller_server carries no parameter no_such_key")
 
 
 def test_param_with_one_token_names_the_nodes_that_carry_it():
@@ -766,6 +804,35 @@ def test_unresolved_filters_by_want(atlas):
     assert query.unresolved(atlas, want="frame_id").data["total"] == 0
 
 
+def test_unresolved_shows_as_many_sites_per_want_as_the_limit_and_counts_the_rest():
+    builder = model.AtlasBuilder()
+    builder.node(LAUNCHER_FILE)
+    for index in range(7):
+        builder.unresolved(
+            Unresolved(
+                want="topic_name",
+                owner=LAUNCHER_FILE,
+                expr=f"topic_{index}",
+                reason="not_stated_in_source",
+                evidence=[Source(file=LAUNCHER_FILE, line_hint=index + 1)],
+            )
+        )
+    atlas = builder.build()
+
+    few = texts(query.unresolved(atlas, limit=3))
+    every = texts(query.unresolved(atlas, limit=100))
+
+    assert (
+        sum(line.strip()[:7] in {f"topic_{i}" for i in range(7)} for line in few.splitlines()) == 3
+    )
+    assert "and 4 more, --limit shows more" in few
+    assert (
+        sum(line.strip()[:7] in {f"topic_{i}" for i in range(7)} for line in every.splitlines())
+        == 7
+    )
+    assert "more, --limit" not in every
+
+
 # ---------------------------------------------------------------------------
 # drift
 
@@ -1079,7 +1146,8 @@ def test_the_build_identity_is_one_line_and_not_a_count_table():
 # unresolved: whole words, and which rate is which
 
 
-def test_a_reason_is_cut_at_a_word_and_each_rate_says_what_it_covers():
+def test_a_reason_is_printed_whole_and_each_rate_says_what_it_covers():
+    """A cut reason could only be read whole through --json."""
     builder = model.AtlasBuilder()
     builder.node(LAUNCHER_FILE)
     reason = "the remap resolves to /cmd_vel_nav, and nothing in the launch walk names " * 3
@@ -1098,7 +1166,6 @@ def test_a_reason_is_cut_at_a_word_and_each_rate_says_what_it_covers():
     body = texts(query.unresolved(atlas))
 
     shown = next(line for line in body.splitlines() if "the remap resolves" in line)
-    assert shown.endswith("...")
-    assert shown[:-3].split()[-1] in reason.split()
+    assert shown.endswith(reason.strip())
     assert "0.750 of every wanted value resolved" in body
     assert "other: 1 unresolved, 0.750 of this want resolved" in body

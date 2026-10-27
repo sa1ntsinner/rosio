@@ -23,6 +23,7 @@ from typing import Any
 from rosio import ids, model
 from rosio.errors import ContractError
 from rosio.model import Atlas, Node
+from rosio.render import HTML_NAME, rendered_from
 
 ASSETS = Path(__file__).parent / "assets"
 
@@ -484,6 +485,7 @@ def render(atlas: Atlas) -> str:
     )
     return (
         "<!doctype html>\n"
+        f"<!-- {rendered_from(atlas)} -->\n"
         '<html lang="en"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         "<title>rosio atlas</title>\n"
@@ -500,7 +502,7 @@ def render(atlas: Atlas) -> str:
 
 def write(atlas: Atlas, out_dir: str | Path) -> Path:
     """Write atlas.html into `out_dir` and return the path."""
-    target = Path(out_dir) / "atlas.html"
+    target = Path(out_dir) / HTML_NAME
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(render(atlas), encoding="utf-8")
     return target

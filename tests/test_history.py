@@ -718,8 +718,13 @@ def test_a_revision_comparison_states_what_the_cache_did_and_what_it_cannot_do(r
     body = answer.text()
     assert [row["cached"] for row in answer.data["builds"]] == [False, True]
     assert "read from the build cache" in body
+    assert "--cache-rules says what the build cache keys on" in body
+    assert not any(rule in body for rule in history.CACHE_RULES)
+    asked = history.compare_revisions(
+        "HEAD", "HEAD", repo=repo, workspace="src", cache_rules=True
+    ).text()
     for rule in history.CACHE_RULES:
-        assert rule in body
+        assert rule in asked
 
 
 def test_the_cache_can_be_switched_off(repo: Path):

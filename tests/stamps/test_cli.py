@@ -20,7 +20,9 @@ def test_without_bag(capsys):
 
 def test_missing_bag(capsys, tmp_path):
     assert main([str(tmp_path / "absent")]) == 2
-    assert "rosio stamps:" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert f"rosio stamps: no recording at {tmp_path / 'absent'}" in err
+    assert "PosixPath" not in err and "WindowsPath" not in err
 
 
 def test_malformed_bag(capsys, tmp_path):

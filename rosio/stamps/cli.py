@@ -7,6 +7,7 @@ import statistics
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict
+from pathlib import Path
 
 from rosio import __version__, model
 
@@ -53,6 +54,9 @@ def run(args: argparse.Namespace) -> int:
         print(f"{PROG}: --limit needs a positive number", file=sys.stderr)
         return 2
 
+    if not Path(args.bag).exists():
+        print(f"{PROG}: no recording at {args.bag}, name a bag directory or file", file=sys.stderr)
+        return 2
     try:
         report = read_topic_series_report(args.bag, topics=args.topics, limit=args.limit)
     except (OSError, RuntimeError, ValueError) as exc:

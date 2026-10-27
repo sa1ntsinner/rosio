@@ -166,11 +166,18 @@ class Probe:
             if now != last:
                 last, quiet_since = now, time.monotonic()
 
+    def _foreign(self, found: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """The graph without the probe's own node. Its endpoints, its services and the
+        parameter events topic every rclpy node opens are this tool, not the system, and on
+        an empty domain they were the whole observed layer."""
+        own = (self.node.get_name(), self.node.get_namespace())
+        return [row for row in found if tuple(row) != own]
+
     def _census(self) -> tuple[Any, ...]:
         """What discovery has delivered so far: node names, and every topic and service
         with how many ends each has."""
         try:
-            nodes = tuple(sorted(self.node.get_node_names_and_namespaces()))
+            nodes = tuple(sorted(self._foreign(self.node.get_node_names_and_namespaces())))
             topics = tuple(
                 (
                     topic,
@@ -194,7 +201,7 @@ class Probe:
 
         out: dict[str, dict[str, Any]] = {}
         try:
-            found = self.node.get_node_names_and_namespaces()
+            found = self._foreign(self.node.get_node_names_and_namespaces())
         except Exception as exc:
             self._failed("graph", exc, "get_node_names_and_namespaces")
             return out
@@ -306,7 +313,7 @@ class Probe:
         it. The list is read a second time and the difference is stated.
         """
         try:
-            found = self.node.get_node_names_and_namespaces()
+            found = self._foreign(self.node.get_node_names_and_namespaces())
         except Exception as exc:
             self._failed("graph", exc, "get_node_names_and_namespaces")
             return

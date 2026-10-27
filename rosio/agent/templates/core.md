@@ -32,22 +32,22 @@ Add `--atlas <path>/atlas.json` when the atlas is not under `./rosio-out`. If th
 atlas yet, build one with `rosio extract <workspace src> --out rosio-out`, which reads
 files only and starts no ROS node.
 
-Worked example, from the `nav2_bringup` that ships with ROS 2 humble, in a profile that runs
-`bringup_launch.py` with `use_sim_time:=false`. Question: does the controller run on
+Worked example, from the `nav2_bringup` that ships with ROS 2 jazzy, in a profile that runs
+`bringup_launch.py` with `use_composition:=True`. Question: does the controller run on
 simulated time?
 
 ```
 $ rosio param /controller_server use_sim_time --profile nav2_bringup_composed
 use_sim_time on /controller_server   state effective
   profile nav2_bringup_composed
-    effective False (bool)   edit nav2_bringup/params/nav2_params.yaml:114 [install]
-    rank 0 wins launch_rewritten_yaml False (bool)
-        nav2_bringup/params/nav2_params.yaml:114 [install] controller_server.ros__parameters.use_sim_time
+    effective False (bool)   edit nav2_bringup/launch/navigation_launch.py:253 [install]
+    rank 0 wins launch_inline_dict   False (bool)
+        nav2_bringup/launch/navigation_launch.py:253 [install] SetParameter
 ```
 
-Line 114 of that file reads `use_sim_time: True`. False is what reaches the node, because
-`navigation_launch.py` rewrites the key from the launch argument before starting anything.
-Grep finds fifteen `use_sim_time` lines there, not the winner.
+No parameters file sets it. Line 253 of `navigation_launch.py` is a `SetParameter` in the
+group that loads the components, and it hands each of them the `use_sim_time` launch
+argument, false unless the caller passes it. Grepping the yaml finds nothing.
 
 Answer from that output and stop. If rosio reports a value as unknown or unresolved, say
 so instead of quoting a number out of a yaml file.

@@ -488,6 +488,18 @@ def test_write_all_writes_both_files_and_returns_them(atlas, tmp_path):
     assert (tmp_path / DRIFT_NAME).read_text().startswith("# Drift")
 
 
+def test_a_rendered_file_names_its_atlas_so_a_stale_one_is_found(atlas, tmp_path):
+    """A report left from an earlier extract described 172 entities beside an atlas of 689."""
+    from rosio.render import stale
+
+    write_all(atlas, out_dir=tmp_path, formats=["md", "html"])
+    for name in (REPORT_NAME, DRIFT_NAME, "atlas.html"):
+        assert f"Rendered from atlas {atlas.content_hash()}" in (tmp_path / name).read_text()
+    assert stale(tmp_path, atlas) == []
+    atlas.findings = []
+    assert stale(tmp_path, atlas) == [REPORT_NAME, DRIFT_NAME, "atlas.html"]
+
+
 def test_an_absent_html_renderer_is_left_out_rather_than_claimed(atlas, tmp_path, monkeypatch):
     """The html page is a separate module. Missing it must not fail the markdown."""
     monkeypatch.delattr(render, "html", raising=False)

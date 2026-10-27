@@ -23,6 +23,7 @@ from collections.abc import Callable, Sequence
 
 from rosio import __version__
 from rosio.errors import EXIT_OK, EXIT_USAGE, RosioError, UsageError, exit_code_for
+from rosio.render import plural
 
 PROG = "rosio"
 
@@ -40,8 +41,8 @@ EPILOG = (
     "then rosio render.\n"
     "Add a recording with extract --bag DIR, and a running system with rosio probe.\n"
     "Every other verb reads atlas.json and never extracts again: pass --atlas FILE or --out DIR.\n"
-    "Exit codes: 0 answered, 2 not answered or bad usage, 3 a collector reached nothing,\n"
-    "4 contract, 5 the drift gate tripped."
+    "Exit codes: 0 answered, 1 stamps found an error, 2 not answered or bad usage,\n"
+    "3 a collector reached nothing, 4 contract, 5 the drift gate tripped."
 )
 
 DRIFT_CAPABILITY = "drift.findings"
@@ -102,6 +103,21 @@ SERVE_PATH = "/mcp"
 everything it loads. A test holds them equal to the server's own."""
 
 
+class _Version(argparse.Action):
+    """`--version`, saying what `rosio version` says. The schema is read when the flag is
+    given, so building the parser imports no model."""
+
+    def __init__(self, option_strings, **named):
+        named.update(dest=argparse.SUPPRESS, default=argparse.SUPPRESS, nargs=0)
+        super().__init__(option_strings, **named)
+
+    def __call__(self, parser, *_given):
+        from rosio.model import SCHEMA_VERSION
+
+        print(f"{PROG} {__version__}, atlas schema {SCHEMA_VERSION}")
+        parser.exit()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -109,7 +125,9 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version=f"{PROG} {__version__}")
+    parser.add_argument(
+        "--version", action=_Version, help="print the version and the atlas schema version"
+    )
     _add_global_flags(parser, root=True)
 
     subparsers = parser.add_subparsers(dest="command", metavar="command")
@@ -374,10 +392,10 @@ def build_parser() -> argparse.ArgumentParser:
         flags=READ_FLAGS,
     )
     path.add_argument(
-        "source", nargs="?", metavar="FROM", help="where to start, a node, topic or frame name"
+        "source", nargs="?", metavar="SOURCE", help="where to start, a node, topic or frame name"
     )
     path.add_argument(
-        "target", nargs="?", metavar="TO", help="where to end, a node, topic or frame name"
+        "target", nargs="?", metavar="TARGET", help="where to end, a node, topic or frame name"
     )
     path.add_argument(
         "--max-hops", type=int, default=12, metavar="N", help="give up after N hops, default 12"
@@ -415,6 +433,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="build two git revisions of one workspace and compare them, given exactly twice",
     )
     diff.add_argument("--repo", metavar="DIR", help="repository the revisions are read from")
+    diff.add_argument(
+        "--cache-rules",
+        action="store_true",
+        help="with --rev, also print what the build cache keys on and what it cannot know",
+    )
     diff.add_argument(
         "--workspace",
         metavar="PATH",
@@ -934,8 +957,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         here = target.parent.absolute() == Path.cwd()
         command += f" --config {target.name if here else target}"
     print(
-        f"{PROG} init: wrote {target} with {len(cfg.roots)} roots and "
-        f"{len(cfg.profiles)} profiles. Edit the profiles, then run: {command}"
+        f"{PROG} init: wrote {target} with {plural(len(cfg.roots), 'root')} and "
+        f"{plural(len(cfg.profiles), 'profile')}. Edit the profiles, then run: {command}"
     )
     return EXIT_OK
 
@@ -971,7 +994,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
     from rosio import extract as extract_mod
     from rosio import model
     from rosio.config import DEFAULT_OUT_DIR, load_config, locate_config, with_install_tree
-    from rosio.errors import EXIT_CONTRACT
+    from rosio.errors import EXIT_CONTRACT, CollectorError
     from rosio.workspace import Workspace
 
     bags = _bag_paths(args)
@@ -999,6 +1022,11 @@ def cmd_extract(args: argparse.Namespace) -> int:
         cfg = with_install_tree(cfg, args.install_tree)
     ws = Workspace.discover(_source_roots(cfg), cfg.ignore)
     say(f"indexed {len(ws.files())} files")
+    if not bags and not _bag_roots(cfg) and not _holds_ros(ws):
+        raise CollectorError(
+            f"no package.xml and no launch file under {workspace.absolute()}, so there is "
+            f"nothing to extract. is this the workspace? run {PROG} extract <workspace>"
+        )
 
     collectors = _collectors(args, extract_mod)
     if collectors is None and layers != sorted({"coded", "declared"}):
@@ -1028,10 +1056,11 @@ def cmd_extract(args: argparse.Namespace) -> int:
     elif not args.quiet:
         print(f"{PROG} extract: {target.absolute()} ({_bytes(target)})")
         _print_summary(report, elapsed)
+        _stale_note(target, atlas)
 
     if args.fail_on_violation and report["exceptions"]:
         print(
-            f"{PROG}: {len(report['exceptions'])} problems were recorded during extraction",
+            f"{PROG}: {plural(len(report['exceptions']), 'problem')} recorded during extraction",
             file=sys.stderr,
         )
         return EXIT_CONTRACT
@@ -1069,13 +1098,23 @@ def _progress(verb: str, *, quiet: bool):
             last = now
             return
         if phase_started is not None:
+            # On a terminal the last step already stands on the line with these numbers, so
+            # the line is ended rather than written a second time.
             done = line(phase_label, phase_started, last)
-            print(f"\r{done}\x1b[K" if terminal else done, file=sys.stderr)
+            print("" if terminal else done, file=sys.stderr)
             phase_started = None
         print(line(label, last, now), file=sys.stderr, flush=True)
         last = now
 
     return say
+
+
+def _holds_ros(ws) -> bool:
+    """Whether a tree holds anything a collector reads first: a package or a launch file. An
+    atlas of nothing written with exit zero read as a clean workspace."""
+    from rosio.workspace import LAUNCH_SUFFIXES
+
+    return bool(ws.packages) or any(name.endswith(LAUNCH_SUFFIXES) for name in ws.files())
 
 
 def _with_overrides(cfg, args: argparse.Namespace, default_out: str):
@@ -1190,17 +1229,54 @@ def _print_summary(report: dict, elapsed: float) -> None:
     print("  findings: " + ", ".join(f"{count} {name}" for name, count in sorted(findings.items())))
     top = sorted(report["findings_by_rule"].items(), key=lambda item: (-item[1], item[0]))[:5]
     if top:
-        print("    " + ", ".join(f"{name} {count}" for name, count in top) + ", run drift")
+        print("    most: " + ", ".join(f"{name} {count}" for name, count in top))
+        print(f"    {PROG} drift prints each one with the line to edit")
     if report["rules_failed"]:
         print(f"    rules that could not be trusted: {', '.join(report['rules_failed'])}")
     problems = report["exceptions"]
     if problems:
         print(f"  problems recorded {len(problems)}:")
-        for row in problems[:5]:
-            print(f"    {row.get('path', '')} {row.get('exc_type', '')}: {row.get('message', '')}")
-        if len(problems) > 5:
-            print(f"    and {len(problems) - 5} more, see the run entities")
+        shown = _problem_lines(problems)
+        for text, count in shown[:5]:
+            print(f"    {text}" + (f", recorded {count} times" if count > 1 else ""))
+        if len(shown) > 5:
+            hidden = sum(count for _, count in shown[5:])
+            print(f"    and {hidden} more, {PROG} extract --json lists every one under exceptions")
     print(f"  wall time {elapsed:.1f}s, measured outside the atlas")
+
+
+OPAQUE = r"OpaqueFunction\(fn[0-9a-f]+\)"
+"""How the launch walk names a function it could not name, by a digest of its code."""
+
+
+def _problem_lines(problems: list) -> list[tuple[str, int]]:
+    """One line per distinct problem with how often it was recorded, in the order recorded.
+    A launch file walked by three profiles raised three identical rows, and the digest a walk
+    gives an unnamed function or the token for a process output is no name to a reader."""
+    import re
+
+    counted: dict[str, int] = {}
+    for row in problems:
+        where = str(row.get("path") or row.get("file") or "")
+        if where.startswith("@collector/"):
+            where = f"the {where.split('/', 1)[1]} collector"
+        elif where == "@launch":
+            where = "the launch walk"
+        text = f"{where} {row.get('exc_type', '')}: {row.get('message', '')}".strip()
+        text = re.sub(OPAQUE, "an OpaqueFunction", text)
+        text = text.replace("@output", "<its output file>")
+        counted[text] = counted.get(text, 0) + 1
+    return list(counted.items())
+
+
+def _stale_note(target, atlas) -> None:
+    """Name the rendered files beside the atlas that describe an earlier one."""
+    from rosio.render import stale
+
+    old = stale(target.parent, atlas)
+    if old:
+        verb = "describes" if len(old) == 1 else "describe"
+        print(f"  {', '.join(old)} {verb} an earlier atlas, {PROG} render brings it up to date")
 
 
 def _counts(by_key: dict) -> str:
@@ -1320,14 +1396,14 @@ def cmd_drift(args: argparse.Namespace) -> int:
         atlas.findings = [item for item in atlas.findings if item.rule in set(wanted)]
     waivers = _waivers(args)
     graded, matched = engine.waive(atlas.findings, [item.key for item in waivers])
-    answer = query.drift(atlas, min_severity=args.min_severity, limit=args.limit)
+    answer = query.drift(atlas, min_severity=args.min_severity, limit=args.limit, waived=matched)
     _report_waivers(answer, waivers, matched, args.limit)
     code = _answer(args, answer)
     if engine.crosses_gate(engine.DriftRun(gated=graded), args.fail_on):
         crossed = [item for item in graded if _at_or_above(item.severity, args.fail_on)]
         rules_hit = sorted({item.rule for item in crossed})
         print(
-            f"{PROG}: {len(crossed)} finding{'' if len(crossed) == 1 else 's'} at "
+            f"{PROG}: {plural(len(crossed), 'finding')} at "
             f"{args.fail_on} or above ({', '.join(rules_hit)}), the gate is "
             f"--fail-on {args.fail_on}",
             file=sys.stderr,
@@ -1474,6 +1550,7 @@ def _diff_revisions(args: argparse.Namespace, revisions: list[str], profiles: li
         repo=args.repo,
         workspace=args.workspace,
         limit=args.limit,
+        cache_rules=args.cache_rules,
     )
     return _answer(args, answer)
 
@@ -1597,6 +1674,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
         print(f"  domain {domain}, window {args.duration:g}s, settle {settle:g}s")
         print(f"  observed: {_counts(seen)}")
         _print_summary(report, elapsed)
+        _stale_note(target, written)
     if not status.present:
         print(
             f"{PROG}: the observed layer is empty ({status.reason or 'nothing was reported'})",
@@ -1744,41 +1822,14 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _mcp_release(text: str) -> tuple[int, int] | None:
-    parts = text.split(".")[:2]
-    if len(parts) < 2 or not all(part.isdigit() for part in parts):
-        return None
-    return int(parts[0]), int(parts[1])
-
-
 def _require_mcp() -> None:
-    """Refuse before a transport opens, naming the command that fixes it.
+    """Refuse before a transport opens, naming the command that fixes it. The check is the
+    server's, read inside the function so building the parser imports nothing from it."""
+    from rosio.serve.server import mcp_problem
 
-    An mcp that is present but outside the range is the case the server's own import guard
-    reads as absent, and telling a user to install something they already have wastes the
-    one message they get.
-
-    The range is the server's, read here rather than restated, and read inside the function
-    so that building the parser still imports nothing from the server package.
-    """
-    from importlib.metadata import PackageNotFoundError, version
-
-    from rosio.serve.server import MCP_INSTALL, MCP_MAX, MCP_MIN
-
-    try:
-        found = version("mcp")
-    except PackageNotFoundError as exc:
-        raise UsageError(
-            f"rosio serve needs the mcp package, which is not installed. {MCP_INSTALL}"
-        ) from exc
-    release = _mcp_release(found)
-    if release is None or MCP_MIN <= release < MCP_MAX:
-        return
-    raise UsageError(
-        f"mcp {found} is installed and rosio serve is not exercised against it. "
-        f"the tools are registered from plain functions with postponed annotations, which "
-        f"mcp resolves from {MCP_MIN[0]}.{MCP_MIN[1]} on. {MCP_INSTALL}"
-    )
+    problem = mcp_problem()
+    if problem:
+        raise UsageError(problem)
 
 
 def cmd_serve(args: argparse.Namespace) -> int:

@@ -163,6 +163,20 @@ def test_version_plain_states_the_schema_it_writes(capsys):
     assert capsys.readouterr().out == f"rosio {__version__}, atlas schema {model.SCHEMA_VERSION}\n"
 
 
+def test_the_version_flag_says_what_the_version_verb_says(capsys):
+    with pytest.raises(SystemExit) as stopped:
+        main(["--version"])
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out == f"rosio {__version__}, atlas schema {model.SCHEMA_VERSION}\n"
+
+
+def test_the_help_names_every_exit_code_a_verb_returns():
+    from rosio.errors import EXIT_COLLECTOR, EXIT_CONTRACT, EXIT_ERROR
+
+    for code in (EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_COLLECTOR, EXIT_CONTRACT, EXIT_DRIFT):
+        assert f"{code} " in cli.EPILOG.split("Exit codes:", 1)[1]
+
+
 def _verb(name: str):
     parser = build_parser()
     verbs = next(
@@ -495,6 +509,9 @@ def test_a_waived_finding_stops_failing_the_gate_and_stays_visible(
     assert "1 of 1 waivers matched" in printed
     assert f"waived {error.id}" in printed
     assert "the base file is generated, ticket 412" in printed
+    (line,) = [row for row in printed.splitlines() if " param.type_changed " in row]
+    assert line.endswith("   waived"), "the finding is marked where it is listed"
+    assert sum(row.endswith("   waived") for row in printed.splitlines()) == 1
 
 
 def test_a_waiver_does_not_silence_the_findings_it_does_not_name(atlas_file: Path, tmp_path: Path):
@@ -1219,3 +1236,64 @@ def test_the_configured_resolution_budget_reaches_the_rule(tmp_path: Path):
         budgets[budget] = [f for f in atlas.findings if f.rule == "resolution.below_budget"]
     assert not budgets[0.0]
     assert budgets[1.0]
+
+
+def test_the_summary_prints_one_line_per_distinct_problem_with_names_a_reader_knows():
+    raised = {
+        "path": "nav2_bringup/launch/tb3_simulation_launch.py",
+        "exc_type": "UnrunProcessOutput",
+        "message": "OpaqueFunction(fn125ecd34): FileNotFoundError on a file the process "
+        "`xacro -o @output world.sdf.xacro` writes when it runs",
+    }
+    refused = {"path": "@collector/params", "exc_type": "ContractError", "message": "m"}
+
+    shown = cli._problem_lines([raised, raised, refused])
+
+    assert shown == [
+        (
+            "nav2_bringup/launch/tb3_simulation_launch.py UnrunProcessOutput: an OpaqueFunction: "
+            "FileNotFoundError on a file the process `xacro -o <its output file> "
+            "world.sdf.xacro` writes when it runs",
+            2,
+        ),
+        ("the params collector ContractError: m", 1),
+    ]
+
+
+def test_a_phase_on_a_terminal_is_written_once(monkeypatch):
+    import io
+
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    stream = Tty()
+    monkeypatch.setattr(sys, "stderr", stream)
+    say = cli._progress("extract", quiet=False)
+    say("launch_declared, profile 1 of 1: rover", step=True)
+    say("cpp_code")
+
+    assert stream.getvalue().count("profile 1 of 1: rover") == 1
+
+
+def test_extract_in_a_directory_with_no_package_and_no_launch_file_refuses(tmp_path: Path, capsys):
+    """An atlas of nothing written with exit zero read as a clean workspace."""
+    from rosio.errors import EXIT_COLLECTOR
+
+    assert main(["extract", str(tmp_path)]) == EXIT_COLLECTOR
+    err = capsys.readouterr().err
+    assert f"no package.xml and no launch file under {tmp_path.absolute()}" in err
+    assert not (tmp_path / "rosio-out").exists()
+
+
+def test_extract_names_the_rendered_files_an_earlier_atlas_left_behind(tmp_path: Path, capsys):
+    shutil.copytree(WS / "src", tmp_path / "src")
+    out = tmp_path / "out"
+    assert main(["extract", str(tmp_path), "--out", str(out)]) == EXIT_OK
+    assert main(["render", "--atlas", str(out / "atlas.json"), "--format", "md"]) == EXIT_OK
+    capsys.readouterr()
+    assert main(["extract", str(tmp_path), "--out", str(out)]) == EXIT_OK
+    assert "an earlier atlas" not in capsys.readouterr().out
+    (out / "DRIFT.md").write_text("Rendered from atlas sha256:0000000000000000", encoding="utf-8")
+    assert main(["extract", str(tmp_path), "--out", str(out)]) == EXIT_OK
+    assert "DRIFT.md describes an earlier atlas, rosio render" in capsys.readouterr().out

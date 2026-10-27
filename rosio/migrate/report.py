@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from rosio.migrate.scan import Change
+from rosio.render import plural
 
 
 def summary(changes: Sequence[Change]) -> dict[str, int]:
@@ -31,8 +32,8 @@ def lines(changes: Sequence[Change], start: str, target: str) -> list[str]:
     if not changes:
         return [f"rosio migrate {start} -> {target}: nothing in this workspace changes"]
     out = [
-        f"rosio migrate {start} -> {target}: {counts['changes']} changes in "
-        f"{counts['packages']} packages, {counts['automatic']} rewritten by apply, "
+        f"rosio migrate {start} -> {target}: {plural(counts['changes'], 'change')} in "
+        f"{plural(counts['packages'], 'package')}, {counts['automatic']} rewritten by apply, "
         f"{counts['by_hand']} by hand",
     ]
     package = None

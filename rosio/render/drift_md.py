@@ -27,7 +27,7 @@ from typing import Any
 from rosio.drift import rules
 from rosio.model import SEVERITY_ORDER, Atlas, Finding
 from rosio.query import label, profile_name, site
-from rosio.render import heading, joined, plural, table
+from rosio.render import heading, joined, plural, rendered_from, table
 
 NO_PROFILE = "not scoped to a profile"
 WHOLE_ATLAS = "the whole atlas"
@@ -145,7 +145,7 @@ def _header(atlas: Atlas, gates: Sequence[dict[str, str]]) -> list[str]:
     profiles = sorted({profile_name(name) for item in items for name in item.profiles})
     lines = [heading(1, "Drift"), ""]
     ran = counters.get("rules_run")
-    lines.append(f"{plural(len(items), 'finding')}: {_summary(counts)}.")
+    lines.append(f"{plural(len(items), 'finding')}: {_summary(counts)}. {rendered_from(atlas)}.")
     lines.append(
         (
             f"{int(ran)} rules ran over this atlas"

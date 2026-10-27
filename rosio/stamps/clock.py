@@ -24,6 +24,8 @@ DRIFT_SEGMENT_SLOPE_FRACTION = 0.5
 
 
 def _median_offset(entry):
+    """Receive time minus stamp, the sign every offset is stated with: negative is a stamp
+    ahead of the receiver."""
     pairs = list(zip(entry.receive_times, entry.stamps, strict=True))
     if not pairs:
         return None
@@ -72,14 +74,14 @@ def classify_offset(topic, offset, stamps):
         return (
             "gps utc leap offset",
             "error",
-            f"{topic} offset {size:.3f} s matches the GPS to UTC leap offset (18 s), "
+            f"{topic} offset {offset:.3f} s matches the GPS to UTC leap offset (18 s), "
             f"the source likely serves GPS time as UTC, {_direction(offset)}",
         )
     if TAI_UTC_MIN_S <= size <= TAI_UTC_MAX_S:
         return (
             "tai utc offset",
             "error",
-            f"{topic} offset {size:.3f} s matches the TAI to UTC offset (37 s), "
+            f"{topic} offset {offset:.3f} s matches the TAI to UTC offset (37 s), "
             f"check the PTP timescale or a ptp_utc_tai_offset driver setting, {_direction(offset)}",
         )
     if offset < -MAX_PLAUSIBLE_LATENCY_S:

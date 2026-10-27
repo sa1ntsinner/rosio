@@ -245,3 +245,25 @@ def test_parameter_list_record_is_refused_by_name():
     with pytest.raises(UnsupportedEncapsulation) as caught:
         _read_ns(record(0x0003, 5, 0))
     assert str(caught.value) == "unsupported encapsulation parameter list CDR 0x0003"
+
+
+def test_the_example_recording_is_clean_and_takes_the_readme_fault(tmp_path, capsys):
+    """No recording ships with the package, so the README example builds its own."""
+    from rosio.stamps.cli import main as stamps
+
+    clean = tmp_path / "clean_recording"
+    assert main(["--example", str(clean)]) == 0
+    assert "/scan clean msgs=120" in capsys.readouterr().out
+    assert [f for f in findings(clean) if f.severity == "error"] == []
+    faulty = tmp_path / "tai_recording"
+    assert main([str(clean), str(faulty), "--pathology", "tai", "--topic", "/scan"]) == 0
+    capsys.readouterr()
+    assert stamps([str(faulty)]) == 1
+    assert "/scan offset -36.980 s matches the TAI to UTC offset" in capsys.readouterr().out
+
+
+def test_a_mutation_without_its_arguments_is_refused(capsys):
+    with pytest.raises(SystemExit) as stopped:
+        main(["only_a_source"])
+    assert stopped.value.code == 2
+    assert "--example DEST" in capsys.readouterr().err
