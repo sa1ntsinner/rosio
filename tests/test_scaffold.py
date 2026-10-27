@@ -533,3 +533,40 @@ def test_init_over_many_launch_files_names_the_ones_nothing_includes(
     assert "--package NAME" in said
     assert "2 files no other launch file includes: bot_bringup/plain.launch.py, " in said
     assert "bot_bringup/robot.launch.xml" in said
+
+
+def test_a_top_level_file_its_simulators_include_stays_offered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """autoware.launch.xml needs map_path and three simulator files include it, each needing
+    map_path as well. It was dropped as include only, while the component it includes with
+    the container name stated is the file that only runs through an include."""
+    from rosio.resolve import launch_exec
+
+    monkeypatch.setattr(launch_exec, "importable", lambda names, ros_setup=(): None)
+    workspace = _markup_workspace(tmp_path)
+    launch = workspace / "src" / "bot_bringup" / "launch"
+    share = "$(find-pkg-share bot_bringup)/launch"
+    (launch / "robot.launch.xml").write_text(
+        '<launch>\n  <arg name="map_path"/>\n'
+        f'  <include file="{share}/sensing.launch.xml">\n'
+        '    <arg name="container" value="pointcloud_container"/>\n  </include>\n'
+        f'  <include file="{share}/map.launch.xml">\n'
+        '    <arg name="map_path" value="$(var map_path)"/>\n  </include>\n</launch>\n',
+        encoding="utf-8",
+    )
+    (launch / "sensing.launch.xml").write_text(
+        '<launch>\n  <arg name="container"/>\n</launch>\n', encoding="utf-8"
+    )
+    (launch / "map.launch.xml").write_text(
+        '<launch>\n  <arg name="map_path"/>\n</launch>\n', encoding="utf-8"
+    )
+    (launch / "simulator.launch.xml").write_text(
+        '<launch>\n  <arg name="map_path"/>\n'
+        f'  <include file="{share}/robot.launch.xml">\n'
+        '    <arg name="map_path" value="$(var map_path)"/>\n  </include>\n</launch>\n',
+        encoding="utf-8",
+    )
+    slugs = [p.slug for p in scaffold.offered(default_config(str(workspace))).profiles]
+    assert "robot" in slugs and "simulator" in slugs
+    assert "sensing" not in slugs and "map" not in slugs

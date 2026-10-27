@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from fnmatch import fnmatch
 from pathlib import Path
@@ -80,12 +80,13 @@ def top_level(cfg: Config) -> list[str]:
     )
 
 
-def _included(profiles: Sequence[ProfileSpec]) -> set[str]:
+def _included(profiles: Sequence[ProfileSpec]) -> dict[str, list[Entrypoint]]:
     """The file names one launch file of the tree includes from another, read from the
     include itself: `PythonLaunchDescriptionSource([..., "rrbot_base.launch.py"])`, the
     variable such a source is handed, or the `file` of an xml or yaml include. A name a
-    comment mentions, or one that ends another name, includes nothing."""
-    out: set[str] = set()
+    comment mentions, or one that ends another name, includes nothing. Each name maps to the
+    entry points that include it."""
+    out: dict[str, list[Entrypoint]] = {}
     for profile in profiles:
         for item in profile.entrypoints:
             if item.verb != "launch" or item.origin is None:
@@ -96,7 +97,9 @@ def _included(profiles: Sequence[ProfileSpec]) -> set[str]:
             except OSError:
                 continue
             spelled = _python_includes(text) if path.suffix == ".py" else _frontend_includes(text)
-            out.update({re.split(r"[/\\]", value.strip())[-1] for value in spelled} - {path.name})
+            names = {re.split(r"[/\\]", value.strip())[-1] for value in spelled} - {path.name}
+            for name in sorted(names):
+                out.setdefault(name, []).append(item)
     return out
 
 
@@ -153,12 +156,26 @@ def _frontend_includes(text: str) -> list[str]:
     )
 
 
-def _include_only(entry: Entrypoint, included: set[str]) -> bool:
-    """A launch file another launch file includes and that cannot start without arguments
-    nobody states: `ros2 launch` refuses it on its own, so as a profile it only raises."""
+def _include_only(entry: Entrypoint, included: Mapping[str, Sequence[Entrypoint]]) -> bool:
+    """A launch file that cannot start without arguments, included by a file that does not
+    ask for them itself: that includer is how it runs, so as a profile it only raises.
+
+    An entry point nothing includes that requires one of the same arguments hands the person
+    the same question, so it is no better a place to start: autoware.launch.xml needs
+    map_path, and so does every simulator file that includes it, so it stays offered. The
+    components it includes are left out, map_path included, because autoware.launch.xml is
+    itself included and is not where a person starts."""
     if entry.verb != "launch" or entry.origin is None:
         return False
-    return Path(entry.origin.path).name in included and bool(_required_arguments(entry))
+    required = set(_required_arguments(entry))
+    if not required:
+        return False
+    return any(
+        Path(includer.origin.path).name in included
+        or not required & set(_required_arguments(includer))
+        for includer in included.get(Path(entry.origin.path).name, ())
+        if includer.origin is not None
+    )
 
 
 def _required_arguments(entry: Entrypoint) -> tuple[str, ...]:

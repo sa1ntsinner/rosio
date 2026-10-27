@@ -1061,6 +1061,16 @@ or `ament_auto_add_library` adds is read as its plain spelling, and an executabl
 name `OUTPUT_NAME` installs it under, so such an executable has a new `exe` id. No release
 had shipped, so no stored id or waiver existed.
 
+Its follow up removed findings and changed no id. `param.set_undeclared` is silent on a node
+that ignores a line every node of the profile reads, a `/**` key or a launch `SetParameter`,
+while another node of the profile declares the name, because that line is not deletable for
+one node. The parameter stays `undeclared` with the note saying the node ignores it.
+`extract.input_refused` is silent on a xacro model no profile loads whose expansion failed only
+because an argument with an empty default named a package (`$(find ${vehicle_model}_description)`),
+which is a template waiting for its argument rather than a broken file. `rosio init` keeps
+offering a launch file other entry points include when one of them that nothing includes asks
+for the same arguments, so a top level file its simulator includes is still a profile.
+
 Inside `1.22` the coded records of a C++ class that is not a node moved, with no new key.
 A class a node class hands itself to (`this`, `shared_from_this()`, or a member or local that
 only ever holds a shared pointer built over `this`), by `std::make_unique`, `std::make_shared`

@@ -614,6 +614,7 @@ def _undeclared_atlas(
     auto_declare: bool | str = False,
     read: bool = False,
     plugins: int = 0,
+    locator: str = "",
 ) -> model.Atlas:
     builder = _builder()
     for other in declared:
@@ -648,7 +649,7 @@ def _undeclared_atlas(
             _candidate(
                 1.0,
                 model.Mechanism.YAML_BASE.value,
-                _source(BASE, f"demo_server.ros__parameters.{name}", 12),
+                _source(BASE, locator or f"demo_server.ros__parameters.{name}", 12),
                 rank=0,
                 wins=True,
             )
@@ -773,6 +774,23 @@ def test_a_name_chosen_by_a_condition_or_a_lookup_could_be_any_name():
         '"sensor.%s" % (sensor_id)',
     ]:
         assert not join.could_name(expr, "max_speed"), expr
+
+
+@pytest.mark.parametrize("locator", ["/**.ros__parameters.wheel_base", "SetParameter"])
+def test_param_set_undeclared_is_silent_on_a_shared_line_another_node_reads(locator):
+    """vehicle_info.launch.py sets wheel_base with SetParameter for every node it starts, and
+    a node that ignores it does not make the line deletable while the planner reads it."""
+    atlas = _undeclared_atlas("wheel_base", locator=locator)
+    assert len(_run(atlas, "param.set_undeclared")) == 1
+    planner = ids.build_node("/planner")
+    atlas = _undeclared_atlas("wheel_base", locator=locator)
+    atlas.entities[ids.build_param(planner, "wheel_base")] = model.Node(
+        id=ids.build_param(planner, "wheel_base"),
+        kind="param",
+        label="wheel_base",
+        facts=[model.LayerFact(layer=CODED, profile=PROFILE, values={"declared_in_code": True})],
+    )
+    assert _run(atlas, "param.set_undeclared") == []
 
 
 def test_a_name_another_profile_declares_is_still_undeclared_in_this_one():

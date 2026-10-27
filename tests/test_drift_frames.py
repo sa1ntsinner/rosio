@@ -2576,3 +2576,12 @@ def test_below_budget_is_one_finding_that_names_the_worst_profiles_first():
     assert set(found.profiles) == {NAV, SIM}
     assert "rosio unresolved" in found.say
     assert "resolution_budget in rosio.yaml" in found.fix
+
+
+def test_extract_input_refused_is_silent_on_a_template_no_profile_loads():
+    """autoware_core_vehicle/urdf/vehicle.xacro builds `$(find ${vehicle_model}_description)`
+    from an empty default, and no launch line loads it: nothing in the workspace runs it."""
+    said = "error: ValueError: '_description' is not a valid package name"
+    assert build_rules.extract_input_refused(_xacro_refused(said)) == []
+    (found,) = build_rules.extract_input_refused(_xacro_refused("error: undefined substitution"))
+    assert found.rule == "extract.input_refused"

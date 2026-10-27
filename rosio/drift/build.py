@@ -1177,23 +1177,29 @@ def extract_input_refused(atlas: Atlas) -> list[Finding]:
     reach it: only a collector that refused an input writes the attribute this reads.
     """
     findings: list[Finding] = []
-    expanded = {
-        str(row.get("file") or "")
+    models = [
+        row
         for site in atlas.by_kind(model.NodeKind.LAUNCHENT.value)
         for fact in site.facts
         for row in fact.values.get("file_reads") or []
-        if row.get("role") == "robot_model" and row.get("xacro_args")
-    }
+        if row.get("role") == "robot_model"
+    ]
+    expanded = {str(row.get("file") or "") for row in models if row.get("xacro_args")}
+    loaded = {str(row.get("file") or "") for row in models}
     for node in sorted(atlas.entities.values(), key=lambda item: item.id):
         because = str(node.attrs.get(REFUSED_KEY) or "")
         if not because or because in (params_collector.NOT_INSTALLED, params_collector.BUILT_ONLY):
             continue
-        if because in XACRO_DEFAULTS and node.id in expanded:
+        detail = str(node.attrs.get("refused_detail") or "")
+        if because in XACRO_DEFAULTS and (
+            node.id in expanded or (node.id not in loaded and _EMPTY_ARGUMENT.search(detail))
+        ):
             # The profile runs the model with the arguments its launch line passes, and that
-            # expansion is what the atlas states. The defaults alone are nobody's model.
+            # expansion is what the atlas states. The defaults alone are nobody's model, and
+            # a template that builds a package name from an empty default and that no profile
+            # loads is a model nothing in the workspace runs.
             continue
         label = _refused_label(node)
-        detail = str(node.attrs.get("refused_detail") or "")
         cost = REFUSAL_COSTS.get(because, UNKNOWN_COST)
         where = _refused_where(atlas, node)
         readers = _refused_readers(atlas, node)
@@ -1232,6 +1238,7 @@ XACRO_DEFAULTS = frozenset({"xacro_failed", "xacro_argument_missing"})
 """Refusals of a model expanded with its own defaults, which a launch line passing arguments
 makes moot."""
 
+_EMPTY_ARGUMENT = re.compile(r"'_\w*' is not a valid package name")
 _MISSING_PACKAGE = re.compile(r"package '([^']+)' (?:is )?not found")
 
 
