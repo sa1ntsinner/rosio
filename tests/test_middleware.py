@@ -734,3 +734,19 @@ def test_one_system_probed_on_dds_and_on_zenoh_is_one_atlas(tmp_path, monkeypatc
         for edge in view["edges"].values()
     )
     assert view == _middleware_view(zenoh)
+
+
+def test_a_process_on_another_domain_is_not_part_of_the_probed_system(tmp_path):
+    root = tmp_path / "proc"
+    process(root, 10, node_argv("here"), b"ROS_DOMAIN_ID=91\0")
+    process(
+        root, 11, node_argv("elsewhere"), b"ROS_DOMAIN_ID=7\0RMW_IMPLEMENTATION=rmw_zenoh_cpp\0"
+    )
+    process(root, 12, node_argv("unset"), b"HOME=/private\0")
+    process(root, 13, node_argv("unreadable"), None)
+    process(root, 14, ["/opt/ros/jazzy/lib/rmw_zenoh_cpp/rmw_zenohd"], b"ROS_DOMAIN_ID=7\0")
+    kept = [row.node_name or row.executable for row in proc.scan(str(root), domain="91")]
+    # unreadable stays, because nothing proves it is elsewhere; a router serves every domain
+    assert sorted(kept) == ["here", "rmw_zenohd", "unreadable"]
+    assert "unset" in [row.node_name for row in proc.scan(str(root), domain="0")]
+    assert len(proc.scan(str(root))) == 5

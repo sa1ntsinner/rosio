@@ -715,7 +715,7 @@ def fake_probe(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
         ).sort()
 
     monkeypatch.setattr(probe_collect, "probe", system)
-    monkeypatch.setattr(proc_collect, "scan", lambda _root=proc_collect.PROC: [])
+    monkeypatch.setattr(proc_collect, "scan", lambda _root=proc_collect.PROC, domain=None: [])
     monkeypatch.setenv("ROS_DOMAIN_ID", "77")
     return asked
 

@@ -24,6 +24,11 @@ The environment states the middleware implementation, or `default` when no imple
 was exported. Unreadable environments stay `unknown`. Zenoh configuration variables carry
 presence only. Router presence is a fact on the run, not on any node.
 
+Only the processes on the probed domain belong to the system. A process whose environment
+states another `ROS_DOMAIN_ID` is left out, an unset one is domain 0 as rcl reads it, and an
+unreadable one is kept because nothing proves it is elsewhere. A Zenoh router serves every
+domain, so it is always kept.
+
 This reads `/proc`, which is Linux. On a system without it the collector raises
 `CollectorError` rather than reporting an empty process table, because no processes and no
 process table are different statements.
@@ -31,6 +36,7 @@ process table are different statements.
 
 from __future__ import annotations
 
+import os
 import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -86,6 +92,7 @@ class RosProcess:
     pid: int = 0
     ppid: int = 0
     rmw: str = "unknown"
+    domain: str = "unknown"
     zenoh_environment: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -175,8 +182,11 @@ def _cli(tokens: Sequence[str], executable: str) -> tuple[str, str]:
     return verb, " ".join(head[2:])
 
 
-def scan(root: str = PROC) -> list[RosProcess]:
-    """ROS nodes, launchers and Zenoh routers, with environments, sorted by argv."""
+def scan(root: str = PROC, domain: str | None = None) -> list[RosProcess]:
+    """ROS nodes, launchers and Zenoh routers, with environments, sorted by argv.
+
+    With a domain, the processes whose environment states another one are left out.
+    """
     table = read_table(root)
     parents = {pid: _parent(root, pid) for pid, _argv in table}
     found = [item for pid, argv in table if (item := parse(argv, pid)) is not None]
@@ -193,8 +203,15 @@ def scan(root: str = PROC) -> list[RosProcess]:
     rows = [
         replace(item, ppid=parent_of(item.pid), **_environment(root, item.pid)) for item in found
     ]
+    if domain is not None:
+        rows = [item for item in rows if item.is_router or item.domain in ("unknown", domain)]
     rows.sort(key=lambda item: (item.fqn or "", item.executable, item.argv))
     return rows
+
+
+def probed_domain() -> str:
+    """The domain this process is on, which `rosio probe` pins before anything runs."""
+    return os.environ.get("ROS_DOMAIN_ID", "").strip() or "0"
 
 
 def _parent(root: str, pid: int) -> int:
@@ -228,6 +245,7 @@ def _environment(root: str, pid: int) -> dict[str, Any]:
     except (OSError, ValueError):
         return {
             "rmw": "unknown",
+            "domain": "unknown",
             "zenoh_environment": tuple((key, "unknown") for key in ZENOH_ENV),
         }
     env = dict(
@@ -235,6 +253,7 @@ def _environment(root: str, pid: int) -> dict[str, Any]:
     )
     return {
         "rmw": env.get("RMW_IMPLEMENTATION", "default"),
+        "domain": env.get("ROS_DOMAIN_ID", "").strip() or "0",
         "zenoh_environment": tuple(
             (key, "present" if key in env else "absent") for key in ZENOH_ENV
         ),
@@ -269,7 +288,11 @@ class ProcCollector:
         self.processes = processes
 
     def collect(self, ctx: CollectContext) -> None:
-        rows = list(self.processes) if self.processes is not None else scan(self.root)
+        rows = (
+            list(self.processes)
+            if self.processes is not None
+            else scan(self.root, domain=probed_domain())
+        )
         builder = ctx.builder
         profile = ids.build_profile(ctx.profile) if ctx.profile else model.ANY_PROFILE
         named = [item for item in rows if item.fqn and item.is_node and not item.is_launcher]

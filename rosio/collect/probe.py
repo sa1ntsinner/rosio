@@ -650,7 +650,7 @@ class ProbeCollector:
         else:
             rows = self.processes
             if rows is None:
-                rows = proc.scan() if proc.available() else []
+                rows = proc.scan(domain=proc.probed_domain()) if proc.available() else []
             for rmw in plan_passes(rows, self.rmws):
                 try:
                     observed = probe(
