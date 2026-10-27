@@ -1,8 +1,13 @@
 # rosio for Zed
 
-Connects Zed to `rosio-lsp` for diagnostics, hover, go to definition, references and
-workspace symbols from a ROS 2 atlas. It also provides an MCP context server through
+Connects Zed to `rosio-lsp` for diagnostics, hover, go to definition, references,
+workspace symbols, inlay hints that say whether a parameter line wins or is shadowed, and
+the quick fixes and migration actions from a ROS 2 atlas. It also provides an MCP context server through
 `rosio serve` over stdio.
+
+The graph, frames, parameters and robot model views of the VS Code extension are webview
+panels, which Zed extensions cannot open. In Zed the same answers come from hover, from
+`rosio graph` and `rosio explain` in a terminal, and from the MCP tools in the assistant.
 
 ## Install
 
