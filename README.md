@@ -205,6 +205,7 @@ rosio serve --http --host 0.0.0.0 --api-key "$KEY" # one server for a team
 
 Twelve tools: `overview`, `param_chain`, `drift`, `explain`, `query`, `path`, `neighbours`,
 `graph`, `unresolved`, `stamps`, `transform`, `migrate`. Every response is capped and says when it truncated and how to narrow the question.
+The server starts without an atlas, and each tool then names the extract command that builds one.
 A worst case answer is under 4 KB. On very small models prefer the command
 line, where the skill file is 3.3 KB and carries six commands, the waiver file and a worked example.
 
@@ -254,9 +255,9 @@ rosio stamps <bag> [--topics T] [--limit N] [--json-verdict] [--stats]
 rosio probe --domain-id 42 [--rmw NAME ...]
 rosio drift [--min-severity warn] [--fail-on error] [--only RULE] [--waivers FILE] [--limit N]
 rosio param <node> <name> [--profile SLUG]
-rosio explain <entity or finding>
+rosio explain <entity, finding fingerprint or rule id>
 rosio query <text>
-rosio path <a> <b>
+rosio path <from> <to>
 rosio unresolved [--want topic_name]
 rosio graph [--profile SLUG] [--focus NODE] [--depth N] [--wrappers] [--format text|dot|mermaid]
 rosio diff <atlas-a> <atlas-b>

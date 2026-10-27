@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from rosio import __version__
-from rosio.errors import UsageError
+from rosio.errors import RosioError, UsageError
+from rosio.model import SEVERITY_ORDER, Want
 from rosio.serve import tools
 
 SERVER_NAME = "rosio"
@@ -118,35 +119,33 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         profile narrows to one of the systems this atlas covers, named by its slug."""
         return tools.param_chain(source.atlas(), node, name, profile=profile)
 
-    def drift(severity: str = "", rule: str = "", profile: str = "", limit: int = 5) -> str:
-        """Findings ready to quote, each with one sentence and the line to edit. severity is
-        error, warn or info and means that level or worse. rule is one rule id such as
-        param.shadowed. profile narrows to one system."""
+    def drift(min_severity: str = "", rule: str = "", profile: str = "", limit: int = 5) -> str:
+        """Findings ready to quote, each with one sentence, the line to edit and the
+        fingerprint explain takes."""
         return tools.drift(
-            source.atlas(), severity=severity, rule=rule, profile=profile, limit=limit
+            source.atlas(), min_severity=min_severity, rule=rule, profile=profile, limit=limit
         )
 
-    def explain(entity: str, limit: int = 8) -> str:
+    def explain(selector: str, limit: int = 8) -> str:
         """One entity in full: its layers, facts, conflicts, effective values and
-        provenance. entity is a name such as /planner_server, /scan or base_link, or a
-        finding id."""
-        return tools.explain(source.atlas(), entity, limit=limit)
+        provenance. Or one finding, or every finding of one rule."""
+        return tools.explain(source.atlas(), selector, limit=limit)
 
-    def query(question: str, budget: int = 8) -> str:
+    def query(question: str, limit: int = 8) -> str:
         """A scoped subgraph for a question in plain words, for example "which nodes
         publish cmd_vel". Matched by name and kind, with no language model, and it says so
-        when it did not understand. budget is how many entities to return."""
-        return tools.query(source.atlas(), question, budget=budget)
+        when it did not understand."""
+        return tools.query(source.atlas(), question, limit=limit)
 
-    def path(a: str, b: str) -> str:
-        """The shortest path between two entities, with the kind and direction of every hop,
-        for example from a node to a frame."""
-        return tools.path(source.atlas(), a, b)
+    def path(source: str, target: str) -> str:
+        """How data gets from one entity to another: the shortest route through topics,
+        services, remaps and TF, with the kind and direction of every hop. A route through
+        lifecycle management or launch is shown only when no data route exists."""
+        return tools.path(store.atlas(), source, target)
 
-    def neighbours(entity: str, kind: str = "", direction: str = "both") -> str:
-        """What one entity is connected to, counted by edge kind. kind narrows to one edge
-        kind such as publishes or has_param, direction is out, in or both."""
-        return tools.neighbours(source.atlas(), entity, kind=kind, direction=direction)
+    def neighbours(selector: str, kind: str = "", direction: str = "both") -> str:
+        """What one entity is connected to, counted by edge kind."""
+        return tools.neighbours(source.atlas(), selector, kind=kind, direction=direction)
 
     def graph(
         profile: str = "", focus: str = "", depth: int = 2, wrappers: bool = False, limit: int = 8
@@ -166,16 +165,13 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
 
     def unresolved(want: str = "", owner: str = "") -> str:
         """The blind spots: values this atlas could not resolve, so a reader can tell a
-        hollow answer from a complete one. want is param_value, topic_name, frame_id,
-        node_name or other. owner narrows to one node, symbol or file."""
+        hollow answer from a complete one."""
         return tools.unresolved(source.atlas(), want=want, owner=owner)
 
     def stamps(bag: str = "", limit: int = 8) -> str:
         """The header stamp verdict of every recording in the atlas, with the topics whose
         clocks step backwards, freeze, jump or sit years off. bag narrows to one recording."""
         return tools.stamps(source.atlas(), bag=bag, limit=limit)
-
-    store = source
 
     def transform(source: str, target: str, profile: str = "", model: str = "") -> str:
         """Where one frame sits relative to another, composed from the robot model joints
@@ -193,6 +189,7 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         changes with file and line, and the one command that performs the exact rewrites."""
         return tools.migrate(workspace, to, start=start, package=package)
 
+    store = source
     return [
         overview,
         param_chain,
@@ -207,6 +204,78 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         transform,
         migrate,
     ]
+
+
+ARGUMENTS = {
+    "node": "a node name such as /controller_server",
+    "name": "the dotted parameter name such as FollowPath.plugin",
+    "profile": "one system this atlas covers, by its slug, as overview lists them",
+    "min_severity": f"the lowest severity shown: {', '.join(SEVERITY_ORDER)}",
+    "rule": "one drift rule id such as param.shadowed",
+    "limit": "how many rows to return",
+    "selector": "a name such as /planner_server, /scan or base_link, a full id, a finding "
+    "fingerprint or id, or a rule id",
+    "question": 'plain words, for example "which nodes publish cmd_vel"',
+    "source": "where to start: a name such as /scan_filter, or a full id",
+    "target": "where to end: a name such as /cmd_vel, or a full id",
+    "kind": "one edge kind such as publishes or has_param",
+    "direction": "out, in or both",
+    "focus": "a node or channel such as /scan_filter, and only its neighbourhood is shown",
+    "depth": "how many hops around focus",
+    "wrappers": "also list library endpoints such as tf2_ros listeners",
+    "want": f"what was wanted: {', '.join(item.value for item in Want)}",
+    "owner": "one node, symbol or file the blind spots belong to",
+    "bag": "one recording, by its directory name",
+    "model": "one robot model file, such as urdf/robot.urdf",
+    "to": "the target release, such as lyrical",
+    "start": "the current release, default ROS_DISTRO",
+    "package": "one package of the workspace",
+    "workspace": "the workspace directory, default the server's working directory",
+}
+"""What each tool argument means, written into the tool schema. One argument name has one
+meaning across the tools, and the command line spells the same thing the same way."""
+
+TRANSFORM_ARGUMENTS = {
+    "source": "the frame whose pose is wanted, such as laser_link",
+    "target": "the frame the pose is stated in, such as base_link",
+}
+
+
+def described(function: Any) -> Any:
+    """The function with each argument's description in its annotation, which is where the
+    mcp package reads a schema description from. pydantic arrives with mcp, so it is
+    imported here and never at module import time."""
+    from typing import Annotated
+
+    from pydantic import Field
+
+    words = {**ARGUMENTS, **TRANSFORM_ARGUMENTS} if function.__name__ == "transform" else ARGUMENTS
+    hints = {"str": str, "int": int, "bool": bool}
+    annotations = {}
+    for name, hint in function.__annotations__.items():
+        kind = hints.get(hint, hint) if isinstance(hint, str) else hint
+        if name in words:
+            kind = Annotated[kind, Field(description=words[name])]
+        annotations[name] = kind
+    function.__annotations__ = annotations
+    return function
+
+
+def plain(tool: str, error: Exception, arguments: dict, takes: list[str]) -> str:
+    """One sentence for arguments the schema refused, in place of the validator's report."""
+    problems = []
+    for row in error.errors():
+        field_name = ".".join(str(part) for part in row.get("loc", ())) or "the arguments"
+        if row.get("type") == "missing":
+            problems.append(f"{field_name} is missing")
+        else:
+            problems.append(f"{field_name} {str(row.get('msg', 'is not valid')).lower()}")
+    unknown = sorted(set(arguments) - set(takes))
+    stranger = f", and it takes no {', '.join(unknown)}" if unknown else ""
+    return (
+        f"{tool} was not run: {', '.join(problems)}{stranger}. "
+        f"{tool} takes {', '.join(takes) or 'no arguments'}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -246,19 +315,53 @@ def _mcp_note() -> str:
     )
 
 
+def _tool_error() -> type[Exception]:
+    try:
+        from mcp.server.mcpserver.exceptions import ToolError
+    except ImportError:
+        from mcp.server.fastmcp.exceptions import ToolError
+    return ToolError
+
+
 def build(source: tools.AtlasSource) -> Any:
-    """The mcp server with the tool set registered. The atlas is read here, so a broken
-    path fails before a transport is opened."""
-    source.atlas()
+    """The mcp server with the tool set registered.
+
+    An atlas that is there is read here, so a broken file fails before a transport is
+    opened. One that is not there yet does not stop the server: every tool that needs it
+    answers with the command that builds it, and the next call after that build is answered
+    from it, because nothing about the server depends on the file until a tool reads it.
+
+    A refusal reaches the caller as its own sentence. A tool that raises one of ours, and
+    arguments the schema refuses, would otherwise come back as the package's generic line
+    or as the validator's multi line report with a link in it.
+    """
+    if source.present:
+        source.atlas()
     factory = _server_class()
+    refusal = _tool_error()
+    functions = [described(function) for function in bindings(source)]
+    takes = {item.__name__: list(inspect.signature(item).parameters) for item in functions}
+
+    class Server(factory):
+        async def call_tool(self, name: str, arguments: dict, *rest: Any, **named: Any) -> Any:
+            try:
+                return await super().call_tool(name, arguments, *rest, **named)
+            except Exception as exc:
+                cause = exc.__cause__
+                if isinstance(cause, RosioError):
+                    raise refusal(str(cause)) from cause
+                if cause is not None and hasattr(cause, "errors") and name in takes:
+                    raise refusal(plain(name, cause, arguments or {}, takes[name])) from cause
+                raise
+
     wanted = {"name": SERVER_NAME, "instructions": INSTRUCTIONS, "version": __version__}
     accepted = inspect.signature(factory).parameters
-    server = factory(**{key: value for key, value in wanted.items() if key in accepted})
+    server = Server(**{key: value for key, value in wanted.items() if key in accepted})
     # the text is the answer, and a structured copy of it beside it doubles what a small
     # context window has to hold
-    plain = "structured_output" in inspect.signature(server.add_tool).parameters
-    for function in bindings(source):
-        extra = {"structured_output": False} if plain else {}
+    structured = "structured_output" in inspect.signature(server.add_tool).parameters
+    for function in functions:
+        extra = {"structured_output": False} if structured else {}
         server.add_tool(function, name=function.__name__, description=_summary(function), **extra)
     return server
 

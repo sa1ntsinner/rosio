@@ -56,6 +56,13 @@ class AtlasSource:
     def loaded(self) -> bool:
         return self._atlas is not None
 
+    @property
+    def present(self) -> bool:
+        """Whether there is a file to read. A server starts without one, and every tool that
+        needs it says how to build it until it is there."""
+        target = self.path / ATLAS_NAME if self.path.is_dir() else self.path
+        return target.is_file()
+
 
 def load(path: str | Path) -> Atlas:
     """Read one atlas.json, validated, with a message a caller can act on.
@@ -74,8 +81,8 @@ def load(path: str | Path) -> Atlas:
         target = target / ATLAS_NAME
     if not target.is_file():
         raise UsageError(
-            f"no atlas at {target}. run: rosio extract <workspace> --out <dir>, "
-            f"then point this server at <dir>/{ATLAS_NAME}"
+            f"no atlas at {target.absolute()} yet. build one with: rosio extract <workspace> "
+            f"--out {target.parent.absolute()}, then ask again"
         )
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
@@ -158,21 +165,19 @@ def _profile_id(atlas: Atlas, profile: str | None) -> str:
 
 
 def _entity(atlas: Atlas, selector: str) -> tuple[str, list[str]]:
-    """One entity id, or an empty id and the lines that say why."""
-    matches = slices.resolve(atlas, selector)
-    if len(matches) == 1:
-        return matches[0], []
-    if not matches:
-        return "", [
-            f"nothing in this atlas is named {selector!r}",
-            "  call query with the plain words, or overview for what this atlas holds",
-        ]
-    lines = [f"{selector!r} names {len(matches)} entities, ask again with one of these"]
-    for entity_id in matches[:DEFAULT_LIMIT]:
-        lines.append(f"  {atlas.entities[entity_id].kind} {slices.label(entity_id)}")
-    if len(matches) > DEFAULT_LIMIT:
-        lines.append(f"  and {len(matches) - DEFAULT_LIMIT} more")
-    return "", lines
+    """One entity id and a note when it was found by substring, or an empty id and the lines
+    that say why. The command line resolves through the same `match`."""
+    found = slices.match(atlas, selector)
+    if len(found.ids) == 1:
+        note = (
+            [slices.substring_note(selector, slices.label(found.ids[0]))]
+            if found.how == "substring"
+            else []
+        )
+        return found.ids[0], note
+    if not found.ids:
+        return "", slices.not_found_lines(atlas, selector)
+    return "", slices.choice_lines(atlas, selector, found.ids, shell=False)
 
 
 def _out(atlas: Atlas, entity_id: str) -> list[Edge]:
@@ -214,7 +219,7 @@ def _named(items: Sequence[str], top: int = DEFAULT_LIMIT, more: str = "more") -
 
 
 def _clip(text: str, width: int) -> str:
-    return text if len(text) <= width else text[: width - 3] + "..."
+    return slices._clip(text, width)
 
 
 def _subject(item: Finding) -> str:
@@ -302,7 +307,7 @@ def param_chain(
 def drift(
     atlas: Atlas,
     *,
-    severity: str | None = None,
+    min_severity: str | None = None,
     rule: str | None = None,
     profile: str | None = None,
     limit: int | None = None,
@@ -315,11 +320,11 @@ def drift(
             f"{DRIFT_CAPABILITY} is what says they ran. extract the workspace again"
         )
     floor = None
-    if _text(severity):
-        floor = SEVERITY_ORDER.get(_text(severity))
+    if _text(min_severity):
+        floor = SEVERITY_ORDER.get(_text(min_severity))
         if floor is None:
             raise UsageError(
-                f"no severity named {severity!r}, use one of: {', '.join(SEVERITY_ORDER)}"
+                f"no severity named {min_severity!r}, use one of: {', '.join(SEVERITY_ORDER)}"
             )
     wanted_rule = _text(rule)
     wanted_profile = _profile_id(atlas, profile)
@@ -340,7 +345,7 @@ def drift(
             "call drift with no rule for all of them",
         )
     scope = [
-        f"severity {severity} or worse" if floor is not None else "",
+        f"severity {min_severity} or worse" if floor is not None else "",
         f"rule {wanted_rule}" if wanted_rule else "",
         f"profile {slices.profile_name(wanted_profile)}" if wanted_profile else "",
     ]
@@ -355,33 +360,38 @@ def drift(
         lines.append(f"      say: {item.spoken}")
         if item.where:
             lines.append(f"      edit: {slices.site(item.where[0], locator=True)}")
+        lines.append(f"      explain: {item.fingerprint}")
     if len(rows) > len(kept):
         lines.append(f"  and {len(rows) - len(kept)} more, raise limit or filter by rule")
     if rows:
-        lines.append("call explain on a subject above for its layers and provenance")
+        lines.append("call explain with a fingerprint above for the full evidence")
     elif filters:
         lines.append("nothing matches those filters, which is an answer and not a failure")
-    return _fit(lines, "narrow with severity=error, rule=<rule> or a smaller limit")
+    return _fit(lines, "narrow with min_severity=error, rule=<rule> or a smaller limit")
 
 
 # ---------------------------------------------------------------------------
 # explain
 
 
-def explain(atlas: Atlas, entity: str, *, limit: int | None = None) -> str:
-    """One entity or one finding in full: layers, facts, effective values and provenance."""
-    selector = _text(entity)
+def explain(atlas: Atlas, selector: str, *, limit: int | None = None) -> str:
+    """One entity, one finding or the findings of one rule in full: layers, facts, effective
+    values and provenance."""
+    selector = _text(selector)
     if not selector:
-        raise UsageError("explain needs an entity, for example /controller_server or /scan")
-    if selector.startswith(("find:", "sha256:")):
-        return _fit(slices.explain(atlas, selector).lines, "that finding is one row")
-    entity_id, complaint = _entity(atlas, selector)
+        raise UsageError("explain needs a selector, for example /controller_server or /scan")
+    if selector.startswith(("find:", "sha256:")) or slices.is_rule(selector):
+        return _fit(
+            slices.explain(atlas, selector, limit=_limit(limit)).lines,
+            "pass a fingerprint for one finding",
+        )
+    entity_id, note = _entity(atlas, selector)
     if not entity_id:
-        return _fit(complaint, "call query with the plain words instead")
+        return _fit(note, "call query with the plain words instead")
     rows = _limit(limit)
     data = slices.explain(atlas, entity_id, limit=rows).data
     node = atlas.entities[entity_id]
-    lines = [f"{data['kind']} {data['label']}"]
+    lines = [f"{data['kind']} {data['label']}", *note]
     handle = _ref(entity_id)
     if handle:
         lines.append(f"  id {handle}")
@@ -431,29 +441,31 @@ def explain(atlas: Atlas, entity: str, *, limit: int | None = None) -> str:
 # query
 
 
-def query(atlas: Atlas, question: str, *, budget: int | None = None) -> str:
+def query(atlas: Atlas, question: str, *, limit: int | None = None) -> str:
     """A scoped subgraph for a question in plain words, matched by name and kind only."""
     if not _text(question):
         raise UsageError('query needs a question, for example "which nodes publish cmd_vel"')
-    answer = slices.query(atlas, question, limit=_limit(budget))
+    answer = slices.query(atlas, question, limit=_limit(limit))
     lines = list(answer.lines)
     if answer.ok and not answer.data.get("kinds") and not answer.data.get("relations"):
         lines.append(
             "  these matched the words by name only. name a kind (node, topic, parameter, "
             "frame) or a relation (publishes, subscribes) to mean something narrower"
         )
-    return _fit(lines, "ask for one name at a time, or lower budget")
+    return _fit(lines, "ask for one name at a time, or lower limit")
 
 
 # ---------------------------------------------------------------------------
 # path
 
 
-def path(atlas: Atlas, a: str, b: str) -> str:
+def path(atlas: Atlas, source: str, target: str) -> str:
     """The shortest path between two entities, with the kind and direction of every hop."""
-    if not _text(a) or not _text(b):
-        raise UsageError("path needs two entities, for example /controller_server and /cmd_vel")
-    answer = slices.path(atlas, _text(a), _text(b))
+    if not _text(source) or not _text(target):
+        raise UsageError(
+            "path needs a source and a target, for example /controller_server and /cmd_vel"
+        )
+    answer = slices.path(atlas, _text(source), _text(target))
     return _fit(answer.lines, "name both ends exactly, an id is accepted")
 
 
@@ -463,14 +475,14 @@ def path(atlas: Atlas, a: str, b: str) -> str:
 
 def neighbours(
     atlas: Atlas,
-    entity: str,
+    selector: str,
     *,
     kind: str | None = None,
     direction: str | None = None,
     limit: int | None = None,
 ) -> str:
     """Fan in and fan out of one entity, counted by edge kind, without scanning."""
-    entity_id, complaint = _entity(atlas, _text(entity))
+    entity_id, complaint = _entity(atlas, _text(selector))
     if not entity_id:
         return _fit(complaint, "call query with the plain words instead")
     way = _text(direction).lower() or "both"
@@ -604,6 +616,8 @@ class GraphSelection:
     by_channel: dict[str, list[Edge]] = field(default_factory=dict)
     hidden: int = 0
     beyond: int = 0
+    nodes: int = 0
+    endpoints: int = 0
 
 
 def select_graph(
@@ -704,7 +718,46 @@ def select_graph(
         by_channel=by_channel,
         hidden=hidden,
         beyond=beyond,
+        nodes=nodes,
+        endpoints=len(shown) + hidden,
     )
+
+
+def _pass(cli: bool, name: str, value: str = "") -> str:
+    """One argument as the caller spells it: `--focus NODE` on the command line and
+    `focus=<node>` in MCP. Without a value, the bare name in either spelling."""
+    if not value:
+        return f"--{name}" if cli else name
+    if not cli:
+        return f"{name}={value}"
+    return f"--{name}" if value == "true" else f"--{name} {value.strip('<>').upper()}"
+
+
+def _why_empty(atlas: Atlas, chosen: GraphSelection, cli: bool) -> str:
+    """One line on why a graph holds no endpoint, from what the atlas states about itself."""
+    raised = set(slices.raised_profiles(atlas))
+    where = slices.profile_name(chosen.wanted) if chosen.wanted else ""
+    if where and where in raised and not chosen.nodes:
+        how = "rosio drift --only launch.raised" if cli else "drift with rule=launch.raised"
+        return f"no node in profile {where}: a launch file raised there, {how} names it"
+    if not any(edge.kind in LINK_KINDS for edge in atlas.edges.values()):
+        if not atlas.by_kind("sym"):
+            reason = (
+                "endpoints come from the C++ and Python sources and from a probe, "
+                "and this atlas read no source"
+            )
+        else:
+            reason = (
+                "no endpoint in the sources it read reached a launched node, "
+                f"{'rosio unresolved' if cli else 'unresolved'} lists the names it could not follow"
+            )
+        return f"no node publishes, subscribes, serves or calls anything here: {reason}"
+    if where:
+        return (
+            f"no endpoint in profile {where}, other profiles have some, "
+            f"drop {_pass(cli, 'profile')} to see them"
+        )
+    return "no endpoint between the nodes of this atlas"
 
 
 def graph(
@@ -715,18 +768,22 @@ def graph(
     depth: int | None = None,
     wrappers: bool = False,
     limit: int | None = None,
+    cli: bool = False,
 ) -> str:
     """Who talks to what: nodes and the topics, services and actions between them.
 
     The same selection as the editor's system graph: endpoint edges between nodes and
     channels of one profile, cut to the neighbourhood of a focus within depth hops. QoS is
     the edge's effective block for the profile and is left out where the atlas states none.
+    `cli` spells every hint as a flag of `rosio graph` instead of a tool argument.
     """
     chosen = select_graph(atlas, profile=profile, focus=focus, depth=depth, wrappers=wrappers)
     if chosen.complaint:
         return _fit(chosen.complaint, chosen.hint)
     wanted, hops = chosen.wanted, chosen.hops
     lines = [chosen.head]
+    if not chosen.endpoints and not chosen.focus_id:
+        lines.append(_why_empty(atlas, chosen, cli))
     rows = _limit(limit)
     for entity_id in chosen.channels[:rows]:
         kind = atlas.entities[entity_id].kind
@@ -746,21 +803,22 @@ def graph(
         lines.append(f"{slices.label(entity_id)}{typed}{flags}: " + "; ".join(sides))
     if len(chosen.channels) > rows:
         lines.append(
-            f"and {_many(len(chosen.channels) - rows, 'more channel')}, raise limit or pass focus"
+            f"and {_many(len(chosen.channels) - rows, 'more channel')}, raise "
+            f"{_pass(cli, 'limit')} or pass {_pass(cli, 'focus', '<node>')}"
         )
     if chosen.hidden:
         lines.append(
             f"{_many(chosen.hidden, 'library endpoint')} left out (tf2_ros, diagnostic_updater "
-            "and similar wrappers), pass wrappers=true to list them"
+            f"and similar wrappers), pass {_pass(cli, 'wrappers', 'true')} to list them"
         )
     if chosen.focus_id and chosen.beyond:
         lines.append(
             f"{_many(chosen.beyond, 'endpoint')} beyond {_many(hops, 'hop')}, "
-            "raise depth to follow them"
+            f"raise {_pass(cli, 'depth')} to follow them"
         )
     if not wanted and len(atlas.by_kind("profile")) > 1:
-        lines.append("these merge every profile, narrow with profile=<name>")
-    return _fit(lines, "pass focus=<node or topic> or a smaller limit")
+        lines.append(f"these merge every profile, narrow with {_pass(cli, 'profile', '<name>')}")
+    return _fit(lines, f"pass {_pass(cli, 'focus', '<node>')} or a smaller {_pass(cli, 'limit')}")
 
 
 # ---------------------------------------------------------------------------
@@ -938,7 +996,7 @@ def unresolved(
     )
     if rates:
         lines.append(
-            "  resolution rate: "
+            "  resolved per want: "
             + ", ".join(f"{name} {value:.2f}" for name, value in list(rates.items())[:8])
         )
     owners = _counted(slices.label(entry.owner) for entry in kept)

@@ -325,15 +325,15 @@ def test_drift_gives_the_sentence_to_quote_and_the_line_to_edit(atlas):
 
 
 def test_drift_filters_by_severity_rule_and_profile(atlas):
-    assert "param.shadowed" not in tools.drift(atlas, severity="error")
-    assert "param.shadowed" in tools.drift(atlas, severity="warn")
+    assert "param.shadowed" not in tools.drift(atlas, min_severity="error")
+    assert "param.shadowed" in tools.drift(atlas, min_severity="warn")
     assert "param.shadowed" in tools.drift(atlas, profile="nx_navigation")
     assert "param.shadowed" not in tools.drift(atlas, profile="nx_sim")
 
 
 def test_drift_refuses_a_severity_that_is_not_one(atlas):
     with pytest.raises(UsageError) as caught:
-        tools.drift(atlas, severity="critical")
+        tools.drift(atlas, min_severity="critical")
 
     assert "error, warn, info" in str(caught.value)
 
@@ -387,8 +387,9 @@ def test_explain_renders_a_finding_when_the_selector_is_one(atlas):
 def test_explain_lists_the_candidates_when_a_name_is_ambiguous(atlas):
     text = tools.explain(atlas, "controller")
 
-    assert "names 3 entities, ask again with one of these" in text
-    assert "/controller_server" in text
+    assert "names 3 entities, pick one and pass its id" in text
+    assert "param:/controller_server|FollowPath.plugin" in text
+    assert ":~" not in text
 
 
 def test_explain_says_so_when_nothing_carries_the_name(atlas):
@@ -1025,7 +1026,7 @@ def test_graph_on_the_command_line_prints_the_tool_answer(tmp_path, capsys):
         (["--limit", "1"], {"limit": 1}),
     ):
         assert main(["graph", "--atlas", str(path), *flags]) == 0
-        assert capsys.readouterr().out == tools.graph(atlas, **options) + "\n"
+        assert capsys.readouterr().out == tools.graph(atlas, **options, cli=True) + "\n"
 
 
 def test_graph_on_the_command_line_exits_with_the_usage_code_when_it_cannot_answer(
@@ -1126,3 +1127,150 @@ def test_graphviz_reads_the_dot_it_is_given():
         )
         assert done.returncode == 0, done.stderr
         assert "<svg" in done.stdout
+
+
+# ---------------------------------------------------------------------------
+# the tool arguments: the command line's names, described, refused in one sentence
+
+
+def test_the_tools_take_the_argument_names_the_command_line_uses(atlas_file: Path):
+    import inspect
+
+    functions = {item.__name__: item for item in server.bindings(tools.AtlasSource(atlas_file))}
+    takes = {name: list(inspect.signature(item).parameters) for name, item in functions.items()}
+
+    assert takes["explain"] == ["selector", "limit"]
+    assert takes["neighbours"] == ["selector", "kind", "direction"]
+    assert takes["path"] == ["source", "target"]
+    assert takes["query"] == ["question", "limit"]
+    assert takes["drift"] == ["min_severity", "rule", "profile", "limit"]
+    for names in takes.values():
+        assert set(names) <= set(server.ARGUMENTS)
+
+
+def _listed(atlas_file: Path) -> dict:
+    built = server.build(tools.AtlasSource(atlas_file))
+    return {tool.name: tool for tool in asyncio.run(built.list_tools())}
+
+
+def _schema(tool) -> dict:
+    return getattr(tool, "input_schema", None) or tool.inputSchema
+
+
+def test_every_tool_argument_carries_a_description_in_its_schema(atlas_file: Path):
+    pytest.importorskip("mcp")
+
+    for name, tool in _listed(atlas_file).items():
+        for argument, schema in _schema(tool).get("properties", {}).items():
+            assert schema.get("description"), f"{name} {argument}"
+    path_schema = _schema(_listed(atlas_file)["path"])
+    assert sorted(path_schema["properties"]) == ["source", "target"]
+    assert sorted(path_schema["required"]) == ["source", "target"]
+
+
+def _refusal(built, name: str, arguments: dict) -> str:
+    try:
+        result = asyncio.run(built.call_tool(name, arguments))
+    except Exception as exc:  # the package raises its own error class
+        return str(exc)
+    content = getattr(result, "content", result)
+    return "".join(getattr(item, "text", "") for item in content)
+
+
+def test_arguments_the_schema_refuses_come_back_as_one_plain_sentence(atlas_file: Path):
+    pytest.importorskip("mcp")
+    built = server.build(tools.AtlasSource(atlas_file))
+
+    text = _refusal(built, "explain", {"entity": "/controller_server"})
+
+    assert text == (
+        "explain was not run: selector is missing, and it takes no entity. "
+        "explain takes selector, limit"
+    )
+    typed = _refusal(built, "drift", {"limit": "many"})
+    assert typed.startswith("drift was not run: limit ")
+    assert "pydantic" not in typed and "\n" not in typed
+
+
+def test_a_refusal_a_tool_raises_reaches_the_caller_as_its_own_sentence(atlas_file: Path):
+    pytest.importorskip("mcp")
+    built = server.build(tools.AtlasSource(atlas_file))
+
+    text = _refusal(built, "drift", {"min_severity": "critical"})
+
+    assert text.startswith("no severity named 'critical'")
+
+
+def test_the_server_starts_without_an_atlas_and_each_tool_says_how_to_build_one(
+    tmp_path: Path, atlas: model.Atlas
+):
+    pytest.importorskip("mcp")
+    target = tmp_path / "rosio-out" / "atlas.json"
+    built = server.build(tools.AtlasSource(target))
+
+    text = _refusal(built, "overview", {})
+
+    assert f"no atlas at {target.absolute()}" in text
+    assert f"rosio extract <workspace> --out {target.parent.absolute()}" in text
+    target.parent.mkdir()
+    target.write_bytes(atlas.to_bytes())
+    assert "nx_navigation" in _refusal(built, "overview", {})
+
+
+def test_a_broken_atlas_still_fails_before_the_server_starts(tmp_path: Path):
+    target = tmp_path / "atlas.json"
+    target.write_text("not json", encoding="utf-8")
+
+    with pytest.raises(UsageError):
+        server.build(tools.AtlasSource(target))
+
+
+# ---------------------------------------------------------------------------
+# graph: hints in the caller's spelling, and an empty graph says why
+
+
+def test_graph_spells_its_hints_for_the_caller():
+    atlas = rover()
+    for answer, cli in ((tools.graph(atlas), False), (tools.graph(atlas, cli=True), True)):
+        assert ("--wrappers" in answer) is cli
+        assert ("wrappers=true" in answer) is not cli
+        assert ("--profile NAME" in answer) is cli
+        assert ("profile=<name>" in answer) is not cli
+
+
+def _no_endpoints(*, raised: bool = False) -> model.Atlas:
+    builder = model.AtlasBuilder(capabilities=[tools.DRIFT_CAPABILITY])
+    builder.add_profile("robot")
+    builder.add_profile("bringup")
+    builder.fact(CONTROLLER, "declared", profile="profile:bringup", values={"pkg": "nav2"})
+    builder.node(CONTROLLER, name_source="literal")
+    if raised:
+        launch = ids.build_launchfile("tb_bringup", "launch/robot.launch.py")
+        builder.node(launch)
+        builder.finding(
+            Finding(
+                rule="launch.raised",
+                severity="error",
+                subject=launch,
+                title="robot.launch.py raised",
+                say="robot.launch.py raised while building its description",
+                profiles=["profile:robot"],
+            )
+        )
+    return builder.build()
+
+
+def test_a_graph_with_no_endpoint_says_why_in_one_line():
+    whole = tools.graph(_no_endpoints()).splitlines()
+    assert whole[1] == (
+        "no node publishes, subscribes, serves or calls anything here: endpoints come from "
+        "the C++ and Python sources and from a probe, and this atlas read no source"
+    )
+    robot = tools.graph(_no_endpoints(raised=True), profile="robot", cli=True)
+    assert robot.splitlines()[1] == (
+        "no node in profile robot: a launch file raised there, "
+        "rosio drift --only launch.raised names it"
+    )
+    assert "drift with rule=launch.raised" in tools.graph(
+        _no_endpoints(raised=True), profile="robot"
+    )

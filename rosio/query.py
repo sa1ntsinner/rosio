@@ -14,6 +14,7 @@ carries the label and the machine structure carries the id.
 from __future__ import annotations
 
 import re
+import shlex
 from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -134,7 +135,12 @@ def _value(value: Any) -> str:
 
 
 def _clip(text: str, width: int = 200) -> str:
-    return text if len(text) <= width else text[: width - 3] + "..."
+    """Text cut to width at a word boundary, so a reason never ends mid word."""
+    if len(text) <= width:
+        return text
+    head = text[: width - 3]
+    cut = head.rsplit(" ", 1)[0] if " " in head else head
+    return cut.rstrip(" ,;") + "..."
 
 
 def _cap(rows: Sequence[Any], limit: int) -> tuple[list[Any], int]:
@@ -151,43 +157,148 @@ def _more(lines: list[str], hidden: int, what: str) -> None:
 # selectors
 
 
-def resolve(atlas: Atlas, selector: str) -> list[str]:
-    """Entity ids a selector names, best match first.
+ROS_NAME_KINDS = frozenset({"node", "topic", "service", "action", "param", "pinst"})
+"""The kinds a leading slash names. A file path also holds `/turtlebot3_node`, and a reader
+who typed a ROS name never meant a header."""
 
-    An exact id wins. Otherwise a `kind:text` selector restricts by kind and a bare word
-    matches a label, so a reader can type `/scan` or `topic:/scan` or the full id.
+MATCH_ORDER = ("label", "suffix", "substring")
+
+_ANCHORS = "/|:. "
+
+
+@dataclass
+class Match:
+    """What a selector named, and how: `id`, `label`, `suffix`, `substring`, or empty."""
+
+    ids: list[str]
+    how: str = ""
+
+
+def match(atlas: Atlas, selector: str, *, profile: str = "") -> Match:
+    """Entity ids a selector names, from the best rank that names any.
+
+    An exact id wins, then an exact label, then a label or id that ends with the selector at
+    a name boundary (`/controller_server` names `/robot1/controller_server` only when nothing
+    is called exactly that), then a label holding it anywhere. A `kind:text` selector keeps to
+    one kind, and a leading slash keeps to ROS names. A profile is applied before the ranks,
+    so the node of that profile answers rather than an ambiguity across profiles.
     """
     text = (selector or "").strip()
     if not text:
         raise UsageError("a selector is needed, for example /planner_server or topic:/scan")
     if text in atlas.entities:
-        return [text]
+        return Match([text], "id")
     for entity_id in sorted(atlas.entities):
         if text in atlas.entities[entity_id].aka:
-            return [entity_id]
+            return Match([entity_id], "id")
     kind = ""
     needle = text
     head, sep, tail = text.partition(":")
     if sep and tail and head in ids.ENTITY_KINDS:
         kind, needle = head, tail
+    ros_only = not kind and needle.startswith("/")
     lowered = needle.lower()
-    exact: list[str] = []
-    partial: list[str] = []
+    ranks: dict[str, list[str]] = {how: [] for how in MATCH_ORDER}
     for entity_id in sorted(atlas.entities):
         node = atlas.entities[entity_id]
-        if kind and node.kind != kind:
+        if (kind and node.kind != kind) or (ros_only and node.kind not in ROS_NAME_KINDS):
             continue
         name = label(entity_id).lower()
-        if name == lowered or entity_id.lower().endswith(lowered):
-            exact.append(entity_id)
+        if name == lowered:
+            ranks["label"].append(entity_id)
+        elif _anchored(name, lowered) or _anchored(entity_id.lower(), lowered):
+            ranks["suffix"].append(entity_id)
         elif lowered in name:
-            partial.append(entity_id)
-    return exact or partial
+            ranks["substring"].append(entity_id)
+    if profile:
+        scoped = {
+            how: [item for item in rows if profile in atlas.entities[item].profiles]
+            for how, rows in ranks.items()
+        }
+        if any(scoped.values()):
+            ranks = scoped
+    for how in MATCH_ORDER:
+        if ranks[how]:
+            return Match(ranks[how], how)
+    return Match([])
 
 
-def _one(atlas: Atlas, selector: str) -> tuple[str | None, list[str]]:
-    matches = resolve(atlas, selector)
-    return (matches[0] if len(matches) == 1 else None), matches
+def _anchored(name: str, needle: str) -> bool:
+    if not name.endswith(needle) or len(name) == len(needle):
+        return False
+    return needle[0] in _ANCHORS or name[-len(needle) - 1] in _ANCHORS
+
+
+def resolve(atlas: Atlas, selector: str, *, profile: str = "") -> list[str]:
+    """Entity ids a selector names, from the best rank that names any. See `match`."""
+    return match(atlas, selector, profile=profile).ids
+
+
+def _one(atlas: Atlas, selector: str) -> tuple[str | None, list[str], str]:
+    found = match(atlas, selector)
+    return (found.ids[0] if len(found.ids) == 1 else None), found.ids, found.how
+
+
+def substring_note(selector: str, found: str) -> str:
+    """The line an answer found by substring carries, so a typo is never answered silently."""
+    return f"  nothing is named {selector!r}, so this answers for {found}, the one name holding it"
+
+
+def raised_profiles(atlas: Atlas) -> list[str]:
+    """Profiles a launch file raised in, which is why a name can be missing from them."""
+    return sorted(
+        {
+            profile_name(name)
+            for item in atlas.findings
+            if item.rule == "launch.raised"
+            for name in item.profiles
+        }
+    )
+
+
+def not_found_lines(atlas: Atlas, selector: str) -> list[str]:
+    """The reply when a selector names nothing, shared by the command line and the tools."""
+    text = selector.strip()
+    slash = text.startswith("/")
+    if slash:
+        lines = [
+            f"nothing in this atlas is named {text!r}, "
+            "searched nodes, topics, services, actions and parameters"
+        ]
+    else:
+        lines = [f"nothing in this atlas is named {text!r}"]
+    raised = raised_profiles(atlas)
+    if raised:
+        lines.append(
+            f"  a launch file raised in {_profiles(raised)}, so names it starts may be missing, "
+            "see the launch.raised findings"
+        )
+    if slash:
+        lines.append("  a leading slash searches ROS names only, drop it to search every kind")
+    else:
+        lines.append("  try a node name, a topic name, a frame or a package, or a full id")
+    return lines
+
+
+def pasteable(entity_id: str, *, shell: bool = True) -> str:
+    """The id a reader pastes back, quoted for a shell. A synthetic id is never offered."""
+    if ids.parse(entity_id).synthetic:
+        return ""
+    return shlex.quote(entity_id) if shell else entity_id
+
+
+def choice_lines(
+    atlas: Atlas, selector: str, matches: Sequence[str], *, shell: bool = True
+) -> list[str]:
+    """The reply when a selector names several entities: each with the id that names it alone."""
+    kept, hidden = _cap(list(matches), DEFAULT_LIMIT)
+    lines = [f"{selector!r} names {len(matches)} entities, pick one and pass its id"]
+    for entity_id in kept:
+        handle = pasteable(entity_id, shell=shell)
+        tail = f"   {handle}" if handle else ""
+        lines.append(f"  {atlas.entities[entity_id].kind} {label(entity_id)}{tail}")
+    _more(lines, hidden, "matches")
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +310,9 @@ def explain(atlas: Atlas, selector: str, *, limit: int = DEFAULT_LIMIT) -> Answe
     text = (selector or "").strip()
     if text.startswith("find:") or text.startswith("sha256:"):
         return _explain_finding(atlas, text)
-    entity_id, matches = _one(atlas, text)
+    if is_rule(text):
+        return _explain_rule(atlas, text, limit)
+    entity_id, matches, how = _one(atlas, text)
     if entity_id is None:
         return _ambiguous("explain", text, matches, atlas)
     node = atlas.entities[entity_id]
@@ -221,7 +334,10 @@ def explain(atlas: Atlas, selector: str, *, limit: int = DEFAULT_LIMIT) -> Answe
         data["state"] = node.state
     if node.aka:
         data["aka"] = list(node.aka)
+    data["matched_by"] = how
     lines = [f"{node.kind} {label(entity_id)}"]
+    if how == "substring":
+        lines.append(substring_note(text, label(entity_id)))
     lines.append(
         f"  layers {', '.join(node.layers) or 'none'}"
         f"   profiles {_profiles(node.profiles)}"
@@ -286,6 +402,39 @@ def _explain_finding(atlas: Atlas, handle: str) -> Answer:
     )
 
 
+def is_rule(text: str) -> bool:
+    """Whether a selector is a drift rule id, current or retired."""
+    from rosio.drift.rules import ALIASES, COMMITTED
+
+    return text in COMMITTED or text in ALIASES
+
+
+def _explain_rule(atlas: Atlas, rule: str, limit: int) -> Answer:
+    """Every finding of one rule, each with the fingerprint that explains it alone."""
+    from rosio.drift.rules import ALIASES
+
+    rule = ALIASES.get(rule, rule)
+    rows = [item for item in sorted(atlas.findings, key=Finding.sort_key) if item.rule == rule]
+    data = {"rule": rule, "total": len(rows), "findings": [_finding_row(item) for item in rows]}
+    if not rows:
+        return Answer(
+            verb="explain",
+            data=data,
+            lines=[f"{rule}: no finding of this rule in this atlas"],
+        )
+    kept, hidden = _cap(rows, limit)
+    lines = [f"{rule}: {len(rows)} finding{'' if len(rows) == 1 else 's'}"]
+    for item in kept:
+        lines.append(f"  {item.severity:<5} {item.title}")
+        if item.say:
+            lines.append(f"        {item.spoken}")
+        for source in item.where[:2]:
+            lines.append(f"        {site(source, locator=True)}")
+        lines.append(f"        explain {item.fingerprint}")
+    _more(lines, hidden, "findings")
+    return Answer(verb="explain", data=data, lines=lines)
+
+
 def _subject_label(item: Finding) -> str:
     if isinstance(item.subject, str):
         return label(item.subject)
@@ -293,21 +442,7 @@ def _subject_label(item: Finding) -> str:
 
 
 def _ambiguous(verb: str, selector: str, matches: Sequence[str], atlas: Atlas) -> Answer:
-    if not matches:
-        return Answer(
-            verb=verb,
-            ok=False,
-            data={"selector": selector, "matches": []},
-            lines=[
-                f"nothing in this atlas is named {selector!r}",
-                "  try a node name, a topic name, a frame or a package, or a full id",
-            ],
-        )
-    kept, hidden = _cap(list(matches), DEFAULT_LIMIT)
-    lines = [f"{selector!r} names {len(matches)} entities, pick one"]
-    for entity_id in kept:
-        lines.append(f"  {atlas.entities[entity_id].kind} {label(entity_id)}")
-    _more(lines, hidden, "matches")
+    lines = choice_lines(atlas, selector, matches) if matches else not_found_lines(atlas, selector)
     return Answer(
         verb=verb, ok=False, data={"selector": selector, "matches": list(matches)}, lines=lines
     )
@@ -445,20 +580,23 @@ def param(
 ) -> Answer:
     """The effective value of one parameter, the winner with its file and line, and the
     full shadowed chain. This is the question an engineer actually asks."""
-    param_id, matches = _param_id(atlas, node, name)
+    wanted = _profile_id(atlas, profile)
+    param_id, matches, how = _param_id(atlas, node, name, wanted)
     if param_id is None:
         return _no_single_param(atlas, node, name, matches)
     entity = atlas.entities[param_id]
     owner = ids.parse_param(param_id).owner if entity.kind == "param" else ""
-    wanted = _profile_id(atlas, profile)
     data: dict[str, Any] = {
         "id": param_id,
         "node": label(owner) if owner else "",
         "name": ids.parse_param(param_id).name if entity.kind == "param" else label(param_id),
         "state": entity.state,
+        "matched_by": how,
         "profiles": {},
     }
     lines = [f"{data['name']} on {data['node'] or label(param_id)}   state {entity.state}"]
+    if how == "substring":
+        lines.append(substring_note(f"{node} {name or ''}".strip(), label(param_id)))
     if entity.state != "effective":
         lines.append("  no effective value: " + _state_note(str(entity.state)))
     profiles = sorted({item.profile for item in entity.candidates} | set(entity.effective))
@@ -580,34 +718,38 @@ def _state_note(state: str) -> str:
     return _STATE_NOTES.get(state, "see the state field")
 
 
-def _param_id(atlas: Atlas, node: str, name: str | None) -> tuple[str | None, list[str]]:
+def _param_id(
+    atlas: Atlas, node: str, name: str | None, profile: str = ""
+) -> tuple[str | None, list[str], str]:
+    """The parameter a node and a name select, with how it was found. A name only some
+    parameter holds is answered and said so, never handed over as if it were exact."""
     text = (node or "").strip()
     if name is None and " " in text:
         text, name = text.split(None, 1)
     if name is None:
-        matches = [
-            item
-            for item in resolve(atlas, text)
-            if atlas.entities[item].kind in ("param", "pparam")
-        ]
-        return (matches[0] if len(matches) == 1 else None), matches
-    owner_matches = [item for item in resolve(atlas, text) if atlas.entities[item].kind == "node"]
+        found = match(atlas, text, profile=profile)
+        matches = [item for item in found.ids if atlas.entities[item].kind in ("param", "pparam")]
+        return (matches[0] if len(matches) == 1 else None), matches, found.how
+    head = text.partition(":")[0]
+    owners = match(atlas, text if head in ids.ENTITY_KINDS else f"node:{text}", profile=profile)
+    owner_ids = [item for item in owners.ids if atlas.entities[item].kind == "node"]
     wanted = ids.normalise_param_name(name)
-    matches: list[str] = []
-    for owner in owner_matches:
-        candidate = ids.build_param(owner, wanted)
-        if candidate in atlas.entities:
-            matches.append(candidate)
+    matches = [
+        ids.build_param(owner, wanted)
+        for owner in owner_ids
+        if ids.build_param(owner, wanted) in atlas.entities
+    ]
+    how = owners.how
     if not matches:
+        how = "substring"
         lowered = wanted.lower()
-        owners = set(owner_matches)
         for entity_id in sorted(atlas.entities):
             if atlas.entities[entity_id].kind != "param":
                 continue
             owner, param_name = ids.parse_param(entity_id)
-            if owner in owners and lowered in param_name.lower():
+            if owner in owner_ids and lowered in param_name.lower():
                 matches.append(entity_id)
-    return (matches[0] if len(matches) == 1 else None), matches
+    return (matches[0] if len(matches) == 1 else None), matches, how
 
 
 def _profile_id(atlas: Atlas, profile: str | None) -> str:
@@ -841,26 +983,37 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
 
     The walk is undirected, because data reaches a subscriber by a publishes edge followed
     by a subscribes edge read backwards, and a reader wants that path. The direction of each
-    hop is stated, so nothing here claims a flow that does not exist.
+    hop is stated, so nothing here claims a flow that does not exist. The walk keeps to data
+    edges first, and a route through lifecycle management, launch or parameters is shown only
+    when no data route exists, and says so.
     """
-    start, start_matches = _one(atlas, source)
+    start, start_matches, start_how = _one(atlas, source)
     if start is None:
         return _ambiguous("path", source, start_matches, atlas)
-    end, end_matches = _one(atlas, target)
+    end, end_matches, end_how = _one(atlas, target)
     if end is None:
         return _ambiguous("path", target, end_matches, atlas)
+    notes = [
+        substring_note(asked, label(found))
+        for asked, found, how in ((source, start, start_how), (target, end, end_how))
+        if how == "substring"
+    ]
     if start == end:
         return Answer(
             verb="path",
-            data={"from": start, "to": end, "hops": [], "found": True},
+            data={"from": start, "to": end, "hops": [], "found": True, "data_route": True},
             lines=[f"{label(start)} is the entity asked for on both ends, no hops"],
         )
-    hops = _shortest(atlas, start, end, max_hops)
+    hops = _shortest(atlas, start, end, max_hops, DATA_EDGE_KINDS)
+    data_route = bool(hops)
+    if not hops:
+        hops = _shortest(atlas, start, end, max_hops)
     data: dict[str, Any] = {
         "from": start,
         "to": end,
         "hops": hops or [],
         "found": bool(hops),
+        "data_route": data_route,
     }
     if not hops:
         return Answer(
@@ -873,7 +1026,13 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
                 "unresolved, see unresolved",
             ],
         )
-    lines = [f"{len(hops)} hops from {label(start)} to {label(end)}"]
+    lines = [f"{len(hops)} hops from {label(start)} to {label(end)}", *notes]
+    if not data_route:
+        other = sorted({hop["kind"] for hop in hops} - DATA_EDGE_KINDS)
+        lines.append(
+            f"  no data route connects them, this one runs through {', '.join(other)}, "
+            "which carries no message between them"
+        )
     lines.append(f"  {label(start)}")
     for hop in hops:
         arrow = "->" if hop["forward"] else "<-"
@@ -881,7 +1040,19 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
     return Answer(verb="path", data=data, lines=lines)
 
 
-def _shortest(atlas: Atlas, start: str, end: str, max_hops: int) -> list[dict[str, Any]]:
+DATA_EDGE_KINDS = frozenset(
+    {"publishes", "subscribes", "serves", "calls", "remaps", "broadcasts_tf"}
+)
+"""The edges data travels along. A path is looked for through these first."""
+
+
+def _shortest(
+    atlas: Atlas,
+    start: str,
+    end: str,
+    max_hops: int,
+    kinds: frozenset[str] | None = None,
+) -> list[dict[str, Any]]:
     if start == end:
         return []
     seen = {start}
@@ -891,6 +1062,8 @@ def _shortest(atlas: Atlas, start: str, end: str, max_hops: int) -> list[dict[st
         if len(trail) >= max_hops:
             continue
         for edge, forward in _neighbours(atlas, current):
+            if kinds is not None and edge.kind not in kinds:
+                continue
             other = edge.dst if forward else edge.src
             if other in seen:
                 continue
@@ -981,7 +1154,7 @@ def diff(
             kept, _hidden = _cap(data[what][key], min(limit, 5))
             for entry in kept:
                 fields = f"   {', '.join(entry['fields'])}" if entry.get("fields") else ""
-                lines.append(f"    {key[:3]} {_clip(entry['label'], 120)}{fields}")
+                lines.append(f"    {key} {_clip(entry['label'], 120)}{fields}")
             _more(lines, counts[key] - len(kept), f"{key} {what}")
     lines.extend(_build_lines(build))
     return Answer(verb="diff", data=data, lines=lines)
@@ -992,19 +1165,15 @@ def _nothing_moved(compared: Mapping[str, Any]) -> bool:
 
 
 def _build_lines(build: Mapping[str, Any]) -> list[str]:
-    """The build identity, apart and last, so it answers its own question and no other."""
-    counts = [(what, build[what]) for what in ("entities", "edges")]
-    if not any(sum(row.values()) for _what, row in counts):
+    """The build identity, apart, last and in one line, so it answers its own question and
+    no other. The counts are in the data."""
+    counts = [build[what] for what in ("entities", "edges")]
+    if not any(sum(row.values()) for row in counts):
         return ["  build identity: one build wrote both sides, nothing here moved"]
-    lines = ["  build identity, which is not a statement about the system"]
-    for what, row in counts:
-        if sum(row.values()):
-            lines.append(
-                f"    {what}: {row['added']} added, {row['removed']} removed, "
-                f"{row['changed']} changed"
-            )
-    lines.append(f"    {BUILD_NOTE}")
-    return lines
+    return [
+        "  build identity moved too (run ids, input digests, root hashes), which says "
+        "nothing about the system"
+    ]
 
 
 def _side(atlas: Atlas, profile: str | None = None) -> dict[str, Any]:
@@ -1015,6 +1184,7 @@ def _side(atlas: Atlas, profile: str | None = None) -> dict[str, Any]:
     """
     wanted = (profile, ANY_PROFILE) if profile else None
     values: dict[tuple, dict[str, Any]] = {}
+    candidates: dict[tuple, dict[str, Any]] = {}
     states: dict[str, str] = {}
     nodes: dict[str, str] = {}
     launch: dict[str, str] = {}
@@ -1032,6 +1202,17 @@ def _side(atlas: Atlas, profile: str | None = None) -> dict[str, Any]:
             continue
         if node.state:
             states[entity_id] = node.state
+        for row in node.candidates:
+            if wanted and row.profile not in wanted:
+                continue
+            spot = (row.source.file, row.source.locator) if row.source else ("", "")
+            seat = (entity_id, *spot) if wanted else (entity_id, row.profile, *spot)
+            candidates[seat] = {
+                "value": row.value,
+                "profile": row.profile,
+                "wins": row.wins,
+                "locator": site(row.source, locator=True),
+            }
         for slot in sorted(node.effective):
             if wanted and slot not in wanted:
                 continue
@@ -1061,6 +1242,7 @@ def _side(atlas: Atlas, profile: str | None = None) -> dict[str, Any]:
         findings[_finding_key(item)] = item
     return {
         "values": values,
+        "candidates": candidates,
         "states": states,
         "nodes": nodes,
         "launch": launch,
@@ -1076,6 +1258,7 @@ def _matters(before: dict[str, Any], after: dict[str, Any], limit: int) -> dict[
     room = max(limit, 1) * 4
     return {
         "values": _value_moves(before, after)[:room],
+        "candidates": _candidate_moves(before, after)[:room],
         "launch": _gone_and_new(before["launch"], after["launch"], room),
         "profiles": _gone_and_new(before["profiles"], after["profiles"], room),
         "nodes": {
@@ -1110,6 +1293,37 @@ def _value_moves(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str
                 "after": now["value"],
                 "value_type": now["value_type"],
                 "where": now["where"],
+                "locator": now["locator"],
+            }
+        )
+    return rows
+
+
+def _candidate_moves(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+    """Lines whose value moved while the effective value stayed, such as an edit to a line
+    another one shadows. The edit is real and it changed nothing, and both are said."""
+    moved_values = {row["id"] for row in _value_moves(before, after)}
+    rows = []
+    for seat in sorted(set(before["candidates"]) & set(after["candidates"]), key=str):
+        was, now = before["candidates"][seat], after["candidates"][seat]
+        if seat[0] in moved_values or (
+            was["value"] == now["value"] and type(was["value"]) is type(now["value"])
+        ):
+            continue
+        effective = [
+            row["value"]
+            for key, row in after["values"].items()
+            if key[0] == seat[0] and row["profile"] in (now["profile"], ANY_PROFILE)
+        ]
+        rows.append(
+            {
+                "id": seat[0],
+                "label": label(seat[0]),
+                "profile": now["profile"],
+                "before": was["value"],
+                "after": now["value"],
+                "wins": now["wins"],
+                "effective": effective[0] if effective else None,
                 "locator": now["locator"],
             }
         )
@@ -1243,7 +1457,7 @@ def _state_moves(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str
 
 
 def _matters_total(matters: Mapping[str, Any]) -> int:
-    total = len(matters["values"]) + len(matters["states"])
+    total = len(matters["values"]) + len(matters["candidates"]) + len(matters["states"])
     for group in ("launch", "profiles", "nodes", "findings"):
         total += sum(len(rows) for rows in matters[group].values())
     return total + sum(len(rows) for rows in matters["topics"].values())
@@ -1254,6 +1468,13 @@ _ENDPOINT_PHRASE = {
     "lost_subscriber": "has no subscriber now",
     "gained_publisher": "has a publisher now",
     "gained_subscriber": "has a subscriber now",
+}
+
+
+_FINDING_PHRASE = {
+    "new": "finding new",
+    "gone": "finding gone",
+    "restated": "finding kept with new numbers,",
 }
 
 
@@ -1274,6 +1495,18 @@ def _matters_lines(matters: Mapping[str, Any], limit: int, ids_below: bool = Tru
             f"  edit {row['locator'] or row['where']}"
         )
     _more(lines, len(matters["values"]) - min(len(matters["values"]), room), "values moved")
+    for row in matters["candidates"][:room]:
+        lines.append(f"  line {_clip(row['label'], 90)}, profile {profile_name(row['profile'])}")
+        stays = "" if row["effective"] is None else f", effective stays {_value(row['effective'])}"
+        role = "the winning line" if row["wins"] else f"a shadowed line{stays}"
+        lines.append(
+            f"    {_value(row['before'])} -> {_value(row['after'])}  at {row['locator']}, {role}"
+        )
+    _more(
+        lines,
+        len(matters["candidates"]) - min(len(matters["candidates"]), room),
+        "lines moved",
+    )
     for group, noun in (("launch", "launch file"), ("profiles", "profile")):
         for what, rows in sorted(matters[group].items()):
             for row in rows[:room]:
@@ -1289,7 +1522,9 @@ def _matters_lines(matters: Mapping[str, Any], limit: int, ids_below: bool = Tru
         _more(lines, len(rows) - min(len(rows), room), f"topics that {_ENDPOINT_PHRASE[what]}")
     for what, rows in sorted(matters["findings"].items()):
         for row in rows[:room]:
-            lines.append(f"  finding {what} {row['severity']} {row['rule']}: {_clip(row['say'])}")
+            lines.append(
+                f"  {_FINDING_PHRASE[what]} {row['severity']} {row['rule']}: {_clip(row['say'])}"
+            )
         _more(lines, len(rows) - min(len(rows), room), f"findings {what}")
     for row in matters["states"][:room]:
         lines.append(
@@ -1480,16 +1715,22 @@ def unresolved(
         ),
         "resolution_rate": dict(sorted(rates.items())),
     }
+    overall = overall_rate(atlas)
+    if overall is not None:
+        data["overall_rate"] = overall
     lines = [f"{len(entries)} unresolved values" + (f", want {want}" if want else "")]
+    if overall is not None:
+        lines[0] += f", {overall:.3f} of every wanted value resolved"
     for key in sorted(by_want):
         row = by_want[key]
-        ranked = sorted(row["reasons"].items(), key=lambda item: (-item[1], item[0]))
-        reasons = ", ".join(f"{_clip(name, 60)} {count}" for name, count in ranked[:3])
-        if len(ranked) > 3:
-            reasons = f"{reasons}, and {len(ranked) - 3} more reasons"
         rate = rates.get(key)
-        tail = f"   resolution rate {rate}" if rate is not None else ""
-        lines.append(f"  {key} {row['count']}: {reasons}{tail}")
+        tail = f", {rate:.3f} of this want resolved" if isinstance(rate, (int, float)) else ""
+        lines.append(f"  {key}: {row['count']} unresolved{tail}")
+        ranked = sorted(row["reasons"].items(), key=lambda item: (-item[1], item[0]))
+        for name, count in ranked[:3]:
+            lines.append(f"    {count:>3}  {_clip(name, 110)}")
+        if len(ranked) > 3:
+            lines.append(f"    and {len(ranked) - 3} more reasons")
         for example in row["examples"][:3]:
             lines.append(f"      {example['expr']}  in {example['owner']}")
             if example["where"]:
@@ -1499,6 +1740,14 @@ def unresolved(
         for owner, count in list(data["by_owner"].items())[:limit]:
             lines.append(f"    {count:>3}  {owner}")
     return Answer(verb="unresolved", data=data, lines=lines)
+
+
+def overall_rate(atlas: Atlas) -> float | None:
+    """Resolved over resolved plus unresolved, summed over every want, as extract prints it."""
+    counters = atlas.counters or {}
+    resolved = sum((counters.get("resolved") or {}).values())
+    wanted = resolved + sum((counters.get("unresolved") or {}).values())
+    return resolved / wanted if wanted else None
 
 
 # ---------------------------------------------------------------------------
@@ -1547,8 +1796,11 @@ def drift(
             lines.append(f"        {row['say']}")
         for where in row["where"][:2]:
             lines.append(f"        {where}")
+        if row["fix"]:
+            lines.append(f"        fix: {row['fix']}")
+        lines.append(f"        explain {row['fingerprint']}")
     _more(lines, hidden, "findings")
-    lines.append("  explain a finding id for the full evidence")
+    lines.append("  explain takes a fingerprint above, a finding id or a rule id")
     return Answer(verb="drift", data=data, lines=lines)
 
 

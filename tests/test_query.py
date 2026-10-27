@@ -216,7 +216,8 @@ def test_explain_of_an_unknown_name_says_so_instead_of_guessing(atlas):
     answer = query.explain(atlas, "/not_a_node")
 
     assert answer.ok is False
-    assert "nothing in this atlas is named" in texts(answer)
+    assert "nothing in this atlas is named '/not_a_node', searched nodes" in texts(answer)
+    assert "frame or a package" in texts(query.explain(atlas, "not_a_node"))
 
 
 def test_explain_of_an_ambiguous_name_lists_the_choices(atlas):
@@ -567,7 +568,7 @@ def test_two_atlases_that_differ_only_in_ids_say_that_nothing_that_matters_moved
 
     assert answer.data["matters_total"] == 0
     assert "nothing a reader asks about moved" in texts(answer)
-    assert "add file" in texts(answer)
+    assert "added file" in texts(answer)
 
 
 def test_two_profiles_of_one_atlas_are_grouped_the_same_way(atlas):
@@ -756,7 +757,7 @@ def test_unresolved_groups_by_want_and_by_owner(atlas):
     assert answer.data["by_want"]["topic_name"]["count"] == 1
     assert list(answer.data["by_owner"].values()) == [1]
     body = texts(answer)
-    assert "topic_name 1" in body
+    assert "topic_name: 1 unresolved" in body
     assert "speed_limit_topic" in body
     assert ":~" not in body
 
@@ -838,3 +839,266 @@ def test_a_profile_with_an_empty_effective_map_is_shown_no_value(atlas):
     assert view["entities"][COST_PENALTY]["effective"] == {}
     other = query._profile_view(atlas, REAL)
     assert other["entities"][COST_PENALTY]["effective"]["value"]["value"] == 7.0
+
+
+# ---------------------------------------------------------------------------
+# selectors: an exact name first, a namespaced one second, a substring last and said so
+
+
+ROBOT = "profile:nx_multi"
+NAMESPACED = ids.build_node("/robot1/controller_server")
+HEADER = ids.build_file("tb_node", "include/tb_node/turtlebot3_node.hpp")
+ROBOT_LAUNCH = ids.build_launchfile("tb_bringup", "launch/robot.launch.py")
+
+
+def _namespaced_atlas() -> model.Atlas:
+    """One node at the root and the same node under a namespace in another profile, each
+    with use_sim_time, plus a header whose path holds a node name and a launch that raised."""
+    builder = model.AtlasBuilder()
+    builder.add_profile("nx_navigation")
+    builder.add_profile("nx_multi")
+    builder.node(PARAMS_FILE)
+    builder.node(HEADER)
+    for owner, profile, value in ((CONTROLLER, REAL, False), (NAMESPACED, ROBOT, True)):
+        builder.fact(owner, "declared", profile=profile, values={"pkg": "nav2_controller"})
+        builder.node(owner, name_source="literal")
+        builder.set_param(
+            ids.build_param(owner, "use_sim_time"),
+            state="effective",
+            candidates=[
+                Candidate(
+                    value=value,
+                    value_type="bool",
+                    mechanism="yaml_base",
+                    source=Source(file=PARAMS_FILE, locator="use_sim_time", line_hint=114),
+                    rank=0,
+                    wins=True,
+                    profile=profile,
+                )
+            ],
+        )
+    builder.node(ROBOT_LAUNCH)
+    builder.finding(
+        Finding(
+            rule="launch.raised",
+            severity="error",
+            subject=ROBOT_LAUNCH,
+            title="robot.launch.py raised",
+            detail="PackageNotFoundError",
+            fix="install the package",
+            say="robot.launch.py raised while building its description",
+            profiles=["profile:robot"],
+        )
+    )
+    return builder.build()
+
+
+def test_an_exact_name_wins_over_the_same_name_under_a_namespace():
+    atlas = _namespaced_atlas()
+
+    assert query.resolve(atlas, "/controller_server") == [CONTROLLER]
+    answer = query.param(atlas, "/controller_server", "use_sim_time")
+    assert answer.ok
+    assert answer.data["id"] == ids.build_param(CONTROLLER, "use_sim_time")
+    assert answer.data["matched_by"] != "substring"
+
+
+def test_a_name_under_a_namespace_is_found_at_a_slash_and_not_inside_a_word():
+    atlas = _namespaced_atlas()
+
+    assert query.match(atlas, "/robot1/controller_server").how == "label"
+    assert query.match(atlas, "robot1/controller_server").ids == [NAMESPACED]
+    assert query.match(atlas, "robot1/controller_server").how == "suffix"
+    assert query.match(atlas, "troller_server").how == "substring"
+
+
+def test_a_profile_narrows_before_an_ambiguity_is_reported():
+    atlas = _namespaced_atlas()
+
+    assert sorted(query.resolve(atlas, "controller_server")) == sorted([CONTROLLER, NAMESPACED])
+    assert query.resolve(atlas, "controller_server", profile=ROBOT) == [NAMESPACED]
+    answer = query.param(atlas, "controller_server", "use_sim_time", profile="nx_multi")
+    assert answer.data["id"] == ids.build_param(NAMESPACED, "use_sim_time")
+    assert answer.data["profiles"][ROBOT]["value"] is True
+
+
+def test_an_ambiguous_selector_prints_the_id_to_paste():
+    atlas = _namespaced_atlas()
+
+    body = texts(query.explain(atlas, "controller_server use_sim_time"))
+
+    assert "pick one and pass its id" in body
+    assert "'param:/robot1/controller_server|use_sim_time'" in body
+
+
+def test_a_parameter_found_by_substring_says_so(atlas):
+    answer = query.param(atlas, "/controller_server", "FollowPath.cost_pen")
+
+    assert answer.ok
+    assert answer.data["matched_by"] == "substring"
+    assert (
+        "nothing is named '/controller_server FollowPath.cost_pen', so this answers for "
+        "/controller_server FollowPath.cost_penalty" in texts(answer)
+    )
+    exact = query.param(atlas, "/controller_server", "FollowPath.cost_penalty")
+    assert "nothing is named" not in texts(exact)
+
+
+def test_a_leading_slash_never_answers_with_a_file_and_names_the_launch_that_raised():
+    atlas = _namespaced_atlas()
+
+    assert query.resolve(atlas, "/turtlebot3_node") == []
+    assert query.resolve(atlas, "turtlebot3_node") == [HEADER]
+    body = texts(query.explain(atlas, "/turtlebot3_node"))
+    assert "searched nodes, topics, services, actions and parameters" in body
+    assert "a launch file raised in robot" in body
+
+
+# ---------------------------------------------------------------------------
+# drift and explain: every finding printed with what explain takes
+
+
+def test_drift_prints_the_fix_and_a_fingerprint_explain_takes(atlas):
+    body = texts(query.drift(atlas))
+    finding = atlas.findings[0]
+
+    assert "fix: delete the base line" in body
+    assert f"explain {finding.fingerprint}" in body
+    assert query.explain(atlas, finding.fingerprint).ok
+
+
+def test_explain_takes_a_rule_id_and_lists_its_findings(atlas):
+    answer = query.explain(atlas, "param.shadowed")
+
+    assert answer.ok
+    assert answer.data["total"] == 1
+    body = texts(answer)
+    assert "param.shadowed: 1 finding" in body
+    assert atlas.findings[0].fingerprint in body
+    quiet = query.explain(atlas, "qos.incompatible")
+    assert quiet.ok
+    assert "no finding of this rule" in texts(quiet)
+
+
+# ---------------------------------------------------------------------------
+# path: how data gets there first
+
+
+RELAY = ids.build_node("/relay")
+CMD_VEL_OUT = ids.build_topic("/cmd_vel_out")
+MANAGER = ids.build_node("/lifecycle_manager")
+
+
+def _routes(*, with_data: bool = True) -> model.Atlas:
+    """A lifecycle manager driving two nodes, which is two hops, and a four hop data route
+    between the same two through a relay."""
+    builder = model.AtlasBuilder()
+    builder.add_profile("nx_navigation")
+    for node in (CONTROLLER, MONITOR, RELAY, MANAGER):
+        builder.fact(node, "declared", profile=REAL, values={"pkg": "nav2"})
+        builder.node(node, name_source="literal")
+    for topic in (CMD_VEL, CMD_VEL_OUT):
+        builder.node(topic)
+    for managed in (CONTROLLER, MONITOR):
+        builder.edge(
+            "manages_lifecycle",
+            MANAGER,
+            managed,
+            key=ids.edge_key(profile=REAL),
+            layer="declared",
+            profile=REAL,
+        )
+    if with_data:
+        for kind, src, dst in (
+            ("publishes", CONTROLLER, CMD_VEL),
+            ("subscribes", RELAY, CMD_VEL),
+            ("publishes", RELAY, CMD_VEL_OUT),
+            ("subscribes", MONITOR, CMD_VEL_OUT),
+        ):
+            builder.edge(
+                kind, src, dst, key=ids.edge_key(profile=REAL), layer="declared", profile=REAL
+            )
+    return builder.build()
+
+
+def test_path_takes_the_data_route_over_a_shorter_lifecycle_one():
+    answer = query.path(_routes(), "/controller_server", "/collision_monitor")
+
+    assert answer.data["data_route"] is True
+    assert [hop["kind"] for hop in answer.data["hops"]] == [
+        "publishes",
+        "subscribes",
+        "publishes",
+        "subscribes",
+    ]
+    assert "manages_lifecycle" not in texts(answer)
+
+
+def test_path_shows_a_lifecycle_route_only_when_no_data_route_exists_and_says_so():
+    answer = query.path(_routes(with_data=False), "/controller_server", "/collision_monitor")
+
+    assert answer.ok
+    assert answer.data["data_route"] is False
+    assert "no data route connects them" in texts(answer)
+    assert "manages_lifecycle" in texts(answer)
+
+
+# ---------------------------------------------------------------------------
+# diff: an edit to a line another line shadows
+
+
+def test_an_edit_to_a_shadowed_line_names_both_values_and_that_the_winner_stayed(atlas):
+    right = build()
+    for candidate in right.entities[COST_PENALTY].candidates:
+        if candidate.profile == REAL and not candidate.wins:
+            candidate.value = 2.5
+    right = _recomputed(right)
+
+    answer = query.diff(atlas, right)
+
+    rows = answer.data["matters"]["candidates"]
+    assert [(row["before"], row["after"], row["effective"]) for row in rows] == [(2.0, 2.5, 1.0)]
+    assert answer.data["matters"]["values"] == []
+    body = texts(answer)
+    assert "2.0 -> 2.5" in body
+    assert "effective stays 1.0" in body
+    assert "nav2_params.yaml:381" in body
+
+
+def test_the_build_identity_is_one_line_and_not_a_count_table():
+    answer = query.diff(_stamped(build(), "aaaa1111"), _stamped(build(penalty=3.0), "bbbb2222"))
+
+    build_lines = [line for line in texts(answer).splitlines() if "build identity" in line]
+    assert len(build_lines) == 1
+    assert "added" not in build_lines[0]
+    assert "One byte anywhere" not in texts(answer)
+    assert answer.data["build"]["entities"]["added"] == 1
+
+
+# ---------------------------------------------------------------------------
+# unresolved: whole words, and which rate is which
+
+
+def test_a_reason_is_cut_at_a_word_and_each_rate_says_what_it_covers():
+    builder = model.AtlasBuilder()
+    builder.node(LAUNCHER_FILE)
+    reason = "the remap resolves to /cmd_vel_nav, and nothing in the launch walk names " * 3
+    builder.unresolved(
+        Unresolved(
+            want="other",
+            owner=LAUNCHER_FILE,
+            expr="cmd_vel:=cmd_vel_nav",
+            reason=reason.strip(),
+            evidence=[Source(file=LAUNCHER_FILE, line_hint=12)],
+        )
+    )
+    builder.count_resolved("other", 3)
+    atlas = builder.build()
+
+    body = texts(query.unresolved(atlas))
+
+    shown = next(line for line in body.splitlines() if "the remap resolves" in line)
+    assert shown.endswith("...")
+    assert shown[:-3].split()[-1] in reason.split()
+    assert "0.750 of every wanted value resolved" in body
+    assert "other: 1 unresolved, 0.750 of this want resolved" in body

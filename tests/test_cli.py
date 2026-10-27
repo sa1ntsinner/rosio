@@ -8,6 +8,7 @@ gate is a different decision from the print filter.
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -146,17 +147,63 @@ def no_extraction(monkeypatch: pytest.MonkeyPatch):
 # the shape of the command line
 
 
-def test_version_json_uses_the_pinned_encoder(capsys):
+def test_version_json_states_the_schema_major_and_minor(capsys):
     assert main(["version", "--json"]) == 0
     text = capsys.readouterr().out
     assert text == model.dumps(
-        {"version": __version__, "atlas_schema_version": ATLAS_SCHEMA_VERSION}
+        {"version": __version__, "atlas_schema_version": model.SCHEMA_VERSION}
     )
+    assert model.SCHEMA_VERSION.startswith(f"{ATLAS_SCHEMA_VERSION}.")
 
 
-def test_version_plain(capsys):
+def test_version_plain_states_the_schema_it_writes(capsys):
     assert main(["version"]) == 0
-    assert capsys.readouterr().out == f"rosio {__version__}\n"
+    assert capsys.readouterr().out == f"rosio {__version__}, atlas schema {model.SCHEMA_VERSION}\n"
+
+
+def _verb(name: str):
+    parser = build_parser()
+    verbs = next(
+        action.choices
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    return verbs[name]
+
+
+def _flags(name: str) -> set[str]:
+    return {option for action in _verb(name)._actions for option in action.option_strings}
+
+
+def test_a_verb_offers_only_the_output_flags_it_reads():
+    assert "--deterministic" in _flags("extract")
+    for verb in ("version", "install", "uninstall"):
+        assert "--deterministic" not in _flags(verb)
+        assert "--out" not in _flags(verb)
+    assert "--json" in _flags("version")
+    assert not {"--json", "--quiet"} & _flags("install")
+    assert {"--out", "--json", "--quiet"} <= _flags("drift")
+    assert "--deterministic" not in _flags("drift")
+
+
+def test_positional_arguments_and_their_choices_are_described():
+    from rosio.agent.platforms import keys as platform_keys
+
+    path_help = _verb("path").format_help()
+    assert "where to start" in path_help and "where to end" in path_help
+    assert "older atlas.json" in _verb("diff").format_help()
+    install_help = "".join(_verb("install").format_help().split())
+    for key in platform_keys():
+        assert key in install_help
+    want_help = "".join(_verb("unresolved").format_help().split())
+    for want in model.Want:
+        assert want.value in want_help
+
+
+def test_the_help_starts_where_the_readme_starts():
+    epilog = " ".join(cli.EPILOG.split())
+    order = [epilog.index(f"rosio {verb}") for verb in ("init", "extract", "drift", "render")]
+    assert order == sorted(order)
 
 
 def test_no_command_prints_help_and_reports_usage(capsys):

@@ -36,7 +36,8 @@ DESCRIPTION = (
 
 EPILOG = (
     "Outputs land under --out: atlas.json (machine first), ATLAS_REPORT.md, DRIFT.md, atlas.html.\n"
-    "Start with: rosio extract <workspace src>, then rosio render, then rosio drift.\n"
+    "Start with: rosio init <workspace>, then rosio extract <workspace>, then rosio drift,\n"
+    "then rosio render.\n"
     "Add a recording with extract --bag DIR, and a running system with rosio probe.\n"
     "Every other verb reads atlas.json and never extracts again: pass --atlas FILE or --out DIR.\n"
     "Exit codes: 0 answered, 2 not answered or bad usage, 3 a collector reached nothing,\n"
@@ -272,6 +273,7 @@ def build_parser() -> argparse.ArgumentParser:
         "because the print threshold and the CI gate are two decisions. --waivers is the "
         "third: a finding this repository has accepted is still printed, with the reason, "
         "and stops being graded.",
+        flags=READ_FLAGS,
     )
     drift.add_argument(
         "--fail-on",
@@ -312,13 +314,15 @@ def build_parser() -> argparse.ArgumentParser:
         "explain one drift finding or one entity in full",
         "Print the evidence behind a single finding: the file and line of the declaration, the "
         "source site in the code, and what the live system reported. An entity selector prints "
-        "that entity in full instead.",
+        "that entity in full instead, and a rule id lists that rule's findings.",
+        flags=READ_FLAGS,
     )
     explain.add_argument(
         "selector",
         nargs="?",
         metavar="SELECTOR",
-        help="finding id, finding fingerprint, or an entity such as /planner_server",
+        help="finding fingerprint or id as drift prints it, a rule id such as "
+        "param.shadowed, or an entity such as /planner_server",
     )
     _add_atlas_flags(explain)
 
@@ -328,6 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
         "show the candidate chain behind a parameter",
         "Print every candidate for a parameter in order, which one wins, which mechanism set "
         "it and which file to edit, plus the ones that lost and why.",
+        flags=READ_FLAGS,
     )
     param.add_argument(
         "selector",
@@ -335,7 +340,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SELECTOR",
         help="node and name, for example /planner_server GridBased.cost_penalty",
     )
-    param.add_argument("--profile", metavar="NAME", help="restrict to one profile")
+    param.add_argument(
+        "--profile", metavar="NAME", help="restrict to one profile, which also picks the node"
+    )
     _add_atlas_flags(param)
 
     query = _sub(
@@ -345,6 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Answer one question against atlas.json, for example every subscriber of a topic or "
         "every parameter a node declares. Matched by name and kind, no language model. "
         "Machine readable with --json.",
+        flags=READ_FLAGS,
     )
     query.add_argument(
         "question",
@@ -358,11 +366,17 @@ def build_parser() -> argparse.ArgumentParser:
         subparsers,
         "path",
         "trace how data gets from one entity to another",
-        "Walk the graph from a source to a sink through topics, remaps and TF, and show every "
-        "hop with the direction it is read in.",
+        "Walk the graph from a source to a sink through topics, services, remaps and TF, and "
+        "show every hop with the direction it is read in. A route through lifecycle "
+        "management or launch is shown only when no data route exists, and says so.",
+        flags=READ_FLAGS,
     )
-    path.add_argument("source", nargs="?", metavar="FROM")
-    path.add_argument("target", nargs="?", metavar="TO")
+    path.add_argument(
+        "source", nargs="?", metavar="FROM", help="where to start, a node, topic or frame name"
+    )
+    path.add_argument(
+        "target", nargs="?", metavar="TO", help="where to end, a node, topic or frame name"
+    )
     path.add_argument(
         "--max-hops", type=int, default=12, metavar="N", help="give up after N hops, default 12"
     )
@@ -375,9 +389,17 @@ def build_parser() -> argparse.ArgumentParser:
         "Diff two atlas.json files and report what appeared, disappeared or changed. Useful in "
         "review to see the graph effect of a branch. Two --profile values compare two profiles "
         "instead, which is how sim and real are told apart.",
+        flags=READ_FLAGS,
     )
-    diff.add_argument("before", nargs="?", metavar="BEFORE")
-    diff.add_argument("after", nargs="?", metavar="AFTER")
+    diff.add_argument(
+        "before",
+        nargs="?",
+        metavar="BEFORE",
+        help="the older atlas.json, or a directory holding one",
+    )
+    diff.add_argument(
+        "after", nargs="?", metavar="AFTER", help="the newer atlas.json, or a directory holding one"
+    )
     diff.add_argument(
         "--profile",
         action="append",
@@ -404,8 +426,16 @@ def build_parser() -> argparse.ArgumentParser:
         "list what extraction could not resolve",
         "Print every blind spot with its site, the raw expression and what was wanted, so a "
         "reader can tell a hollow extraction from a complete one.",
+        flags=READ_FLAGS,
     )
-    unresolved.add_argument("--want", action="append", metavar="WANT", help="restrict to one want")
+    from rosio.model import Want
+
+    unresolved.add_argument(
+        "--want",
+        action="append",
+        metavar="WANT",
+        help="restrict to one want, repeatable: " + ", ".join(item.value for item in Want),
+    )
     _add_atlas_flags(unresolved)
 
     graph = _sub(
@@ -416,6 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
         "states and the rule ids of findings. text is the answer of the MCP graph tool, dot a "
         "Graphviz digraph and mermaid a Mermaid flowchart, data flowing from publisher or "
         "caller to subscriber or server.",
+        flags=READ_FLAGS,
     )
     graph.add_argument("--profile", metavar="NAME", help="restrict to one profile")
     graph.add_argument(
@@ -452,6 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
         "write the human readable outputs from an existing atlas",
         "Render ATLAS_REPORT.md, DRIFT.md and the single file atlas.html from atlas.json. The "
         "html template is vendored, nothing is fetched at run time.",
+        flags=READ_FLAGS,
     )
     render.add_argument(
         "--format",
@@ -468,8 +500,14 @@ def build_parser() -> argparse.ArgumentParser:
         "register rosio with a coding agent",
         "Write the agent side glue (tool or command definitions) so an agent can call the "
         "subcommands and read atlas.json without further setup.",
+        flags=(),
     )
-    install.add_argument("target", nargs="?", metavar="TARGET", help="agent to register with")
+    from rosio.agent.platforms import keys as platform_keys
+
+    assistants = ", ".join(platform_keys())
+    install.add_argument(
+        "target", nargs="?", metavar="TARGET", help=f"assistant to register with: {assistants}"
+    )
     install.add_argument("--list", action="store_true", help="print the platform table and exit")
     _add_agent_flags(install)
     install.add_argument("--force", action="store_true", help="replace content rosio did not write")
@@ -479,8 +517,11 @@ def build_parser() -> argparse.ArgumentParser:
         "uninstall",
         "remove the agent registration written by install",
         "Undo install. Leaves the atlas outputs alone.",
+        flags=(),
     )
-    uninstall.add_argument("target", nargs="?", metavar="TARGET")
+    uninstall.add_argument(
+        "target", nargs="?", metavar="TARGET", help=f"assistant to remove: {assistants}"
+    )
     _add_agent_flags(uninstall)
     uninstall.add_argument(
         "--force", action="store_true", help="delete a managed file rosio did not write"
@@ -493,7 +534,9 @@ def build_parser() -> argparse.ArgumentParser:
         "Serve the atlas as MCP tools, for agents that prefer tools to a shell. stdio by "
         "default, one process per developer, which is what rosio install registers. "
         "--http serves a team from one process and refuses a non loopback bind without a "
-        "key. Needs the mcp extra.",
+        "key. Starts without an atlas, and every tool says how to build one. Needs the mcp "
+        "extra.",
+        flags=("out", "quiet"),
     )
     serve.add_argument(
         "--atlas",
@@ -544,6 +587,7 @@ def build_parser() -> argparse.ArgumentParser:
         "merge, register the merge driver that resolves two rebuilds of atlas.json without "
         "conflict markers, and report what a rebuild costs. A hook never blocks: a failed "
         "rebuild prints one line and exits zero.",
+        flags=(),
     )
     hook.set_defaults(hook_command=None)
     hooks = hook.add_subparsers(dest="hook_command", metavar="action")
@@ -556,6 +600,7 @@ def build_parser() -> argparse.ArgumentParser:
         "interpreter embedded, because a hook started by a graphical client or by CI gets "
         "neither the shell profile nor the PATH the installer had. Registers the merge "
         "driver at the same time, so the two halves are never half configured.",
+        flags=READ_FLAGS,
     )
     hook_install.add_argument("--repo", metavar="DIR", help="repository, default the working one")
     hook_install.add_argument(
@@ -632,7 +677,8 @@ def build_parser() -> argparse.ArgumentParser:
         subparsers,
         "version",
         "print the version and the atlas schema version",
-        "Print the rosio version, and with --json the atlas schema version too.",
+        "Print the rosio version and the major.minor of the atlas schema it writes.",
+        flags=("json",),
     )
 
     init = _sub(
@@ -677,6 +723,7 @@ def build_parser() -> argparse.ArgumentParser:
         "drift, offsets between topics and offsets that match a known clock fault such as the "
         "TAI or GPS leap offset. Needs no workspace and no ROS installation, only the stamps "
         "extra.",
+        flags=("json",),
     )
     from rosio.stamps.cli import add_arguments as add_stamps_arguments
 
@@ -687,16 +734,17 @@ def build_parser() -> argparse.ArgumentParser:
         "bundle",
         "hand a problem over with its evidence",
         "Create a portable archive of an atlas, reports and cited files, or open one.",
+        flags=(),
     )
     actions = bundle.add_subparsers(dest="bundle_command", metavar="action")
     create = actions.add_parser("create", help="write a portable bundle")
-    _add_global_flags(create, root=False)
+    _add_global_flags(create, root=False, flags=READ_FLAGS)
     create.add_argument("workspace", nargs="?", default=".", metavar="PATH")
     create.add_argument("--atlas", metavar="FILE")
     create.add_argument("--include", choices=["findings", "cited"], default="findings")
     create.add_argument("--note", default="", metavar="TEXT")
     opened = actions.add_parser("open", help="unpack a bundle and summarize the problem")
-    _add_global_flags(opened, root=False)
+    _add_global_flags(opened, root=False, flags=("json", "quiet"))
     opened.add_argument("file", metavar="FILE")
     opened.add_argument("--into", metavar="DIR")
     opened.add_argument("--force", action="store_true", help="overwrite existing files")
@@ -711,6 +759,7 @@ def build_parser() -> argparse.ArgumentParser:
         "source. `apply` rewrites the changes that have an exact rewrite and writes the diff; "
         "the rest are listed with one sentence each. `verify` builds copied sources in the "
         "target container and matches errors to the plan.",
+        flags=(),
     )
     steps = move.add_subparsers(dest="migrate_command", metavar="action")
     for action, summary in (
@@ -719,7 +768,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("verify", "build copied sources in the target and compare errors with the plan"),
     ):
         step = steps.add_parser(action, help=summary)
-        _add_global_flags(step, root=False)
+        _add_global_flags(step, root=False, flags=READ_FLAGS)
         step.add_argument("workspace", nargs="?", default=".", metavar="PATH")
         step.add_argument("--config", metavar="FILE", help="rosio.yaml, default the workspace's")
         step.add_argument(
@@ -739,38 +788,51 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_global_flags(parser: argparse.ArgumentParser, *, root: bool) -> None:
-    """The same flags on the top level parser and on every subparser.
+GLOBAL_FLAGS = ("out", "json", "quiet", "deterministic")
+
+READ_FLAGS = ("out", "json", "quiet")
+"""What a verb that reads an atlas uses: where the atlas is, and how to print the answer."""
+
+
+def _add_global_flags(
+    parser: argparse.ArgumentParser, *, root: bool, flags: Sequence[str] = GLOBAL_FLAGS
+) -> None:
+    """The output flags, on the top level parser and on each subparser that uses them.
 
     A subparser writes its own defaults over the namespace the top level parser filled in,
     so only the top level copy carries defaults and the subcommand copy suppresses them.
     Otherwise a flag means one thing before the verb and another thing after it. Every
-    default is None, so "not given" stays distinguishable from "given as false".
+    default is None, so "not given" stays distinguishable from "given as false". A verb
+    lists only the flags it reads, so its help never offers one that changes nothing.
     """
     unset = None if root else argparse.SUPPRESS
-    parser.add_argument(
-        "--out",
-        default=unset,
-        metavar="DIR",
-        help="output directory, default rosio-out",
-    )
-    parser.add_argument(
-        "--json", action="store_true", default=unset, help="print machine readable output"
-    )
-    parser.add_argument("--quiet", action="store_true", default=unset, help="print errors only")
-    parser.add_argument(
-        "--deterministic",
-        action="store_true",
-        default=unset,
-        help="keep output byte stable, drop timestamps and absolute paths (on by default)",
-    )
-    parser.add_argument(
-        "--no-deterministic",
-        dest="deterministic",
-        action="store_false",
-        default=argparse.SUPPRESS,
-        help="allow timestamps and host specific values in the output",
-    )
+    if "out" in flags:
+        parser.add_argument(
+            "--out",
+            default=unset,
+            metavar="DIR",
+            help="output directory, default rosio-out",
+        )
+    if "json" in flags:
+        parser.add_argument(
+            "--json", action="store_true", default=unset, help="print machine readable output"
+        )
+    if "quiet" in flags:
+        parser.add_argument("--quiet", action="store_true", default=unset, help="print errors only")
+    if "deterministic" in flags:
+        parser.add_argument(
+            "--deterministic",
+            action="store_true",
+            default=unset,
+            help="keep output byte stable, drop timestamps and absolute paths (on by default)",
+        )
+        parser.add_argument(
+            "--no-deterministic",
+            dest="deterministic",
+            action="store_false",
+            default=argparse.SUPPRESS,
+            help="allow timestamps and host specific values in the output",
+        )
 
 
 def _add_agent_flags(parser: argparse.ArgumentParser) -> None:
@@ -812,6 +874,7 @@ def _sub(
     name: str,
     summary: str,
     description: str,
+    flags: Sequence[str] = GLOBAL_FLAGS,
 ) -> argparse.ArgumentParser:
     parser = subparsers.add_parser(
         name,
@@ -819,7 +882,7 @@ def _sub(
         description=description,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    _add_global_flags(parser, root=False)
+    _add_global_flags(parser, root=False, flags=flags)
     parser.set_defaults(command=name)
     return parser
 
@@ -829,15 +892,16 @@ def _hook_sub(
     name: str,
     summary: str,
     description: str,
+    flags: Sequence[str] = ("json", "quiet"),
 ) -> argparse.ArgumentParser:
-    """One action under `hook`. The global flags are repeated so --json works after it."""
+    """One action under `hook`. The output flags are repeated so --json works after it."""
     parser = subparsers.add_parser(
         name,
         help=summary,
         description=description,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    _add_global_flags(parser, root=False)
+    _add_global_flags(parser, root=False, flags=flags)
     parser.set_defaults(hook_command=name)
     return parser
 
@@ -876,14 +940,12 @@ def cmd_stamps(args: argparse.Namespace) -> int:
 
 
 def cmd_version(args: argparse.Namespace) -> int:
-    if args.json:
-        from rosio import ATLAS_SCHEMA_VERSION
-        from rosio.model import dumps
+    from rosio.model import SCHEMA_VERSION, dumps
 
-        payload = {"version": __version__, "atlas_schema_version": ATLAS_SCHEMA_VERSION}
-        print(dumps(payload), end="")
+    if args.json:
+        print(dumps({"version": __version__, "atlas_schema_version": SCHEMA_VERSION}), end="")
     else:
-        print(f"{PROG} {__version__}")
+        print(f"{PROG} {__version__}, atlas schema {SCHEMA_VERSION}")
     return EXIT_OK
 
 
@@ -1402,7 +1464,7 @@ def cmd_graph(args: argparse.Namespace) -> int:
         "wrappers": args.wrappers,
     }
     if args.format == "text":
-        text = tools.graph(atlas, **chosen, limit=args.limit) + "\n"
+        text = tools.graph(atlas, **chosen, limit=args.limit, cli=True) + "\n"
         failed = bool(args.focus) and bool(tools.select_graph(atlas, **chosen).complaint)
     else:
         text = tools.diagram(atlas, args.format, **chosen, limit=args.limit)
