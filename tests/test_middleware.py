@@ -750,3 +750,10 @@ def test_a_process_on_another_domain_is_not_part_of_the_probed_system(tmp_path):
     assert sorted(kept) == ["here", "rmw_zenohd", "unreadable"]
     assert "unset" in [row.node_name for row in proc.scan(str(root), domain="0")]
     assert len(proc.scan(str(root))) == 5
+
+
+def test_a_domain_is_compared_as_the_number_rcl_reads(tmp_path):
+    root = tmp_path / "proc"
+    process(root, 10, node_argv("padded"), b"ROS_DOMAIN_ID=07\0")
+    assert [row.node_name for row in proc.scan(str(root), domain="7")] == ["padded"]
+    assert proc.scan(str(root), domain="8") == []

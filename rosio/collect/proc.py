@@ -204,14 +204,21 @@ def scan(root: str = PROC, domain: str | None = None) -> list[RosProcess]:
         replace(item, ppid=parent_of(item.pid), **_environment(root, item.pid)) for item in found
     ]
     if domain is not None:
-        rows = [item for item in rows if item.is_router or item.domain in ("unknown", domain)]
+        wanted = _domain(domain)
+        rows = [item for item in rows if item.is_router or item.domain in ("unknown", wanted)]
     rows.sort(key=lambda item: (item.fqn or "", item.executable, item.argv))
     return rows
 
 
 def probed_domain() -> str:
     """The domain this process is on, which `rosio probe` pins before anything runs."""
-    return os.environ.get("ROS_DOMAIN_ID", "").strip() or "0"
+    return _domain(os.environ.get("ROS_DOMAIN_ID", ""))
+
+
+def _domain(text: str) -> str:
+    """A domain id as rcl reads it: unset is 0, and 07 is 7."""
+    text = text.strip() or "0"
+    return str(int(text)) if text.isdigit() else text
 
 
 def _parent(root: str, pid: int) -> int:
@@ -253,7 +260,7 @@ def _environment(root: str, pid: int) -> dict[str, Any]:
     )
     return {
         "rmw": env.get("RMW_IMPLEMENTATION", "default"),
-        "domain": env.get("ROS_DOMAIN_ID", "").strip() or "0",
+        "domain": _domain(env.get("ROS_DOMAIN_ID", "")),
         "zenoh_environment": tuple(
             (key, "present" if key in env else "absent") for key in ZENOH_ENV
         ),

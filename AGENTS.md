@@ -767,8 +767,8 @@ What was added, in the order it arrived:
   spelled `${namespace}` and that no running system ever names.
 
 * in `1.17`, the node attribute `child_of`, the node that creates this one as it starts (a
-  costmap under the server that owns it), keyed by that node id with the package and the
-  executable or component class from the committed child table. `node.observed_only` stays
+  costmap under the server that owns it), keyed by that node id with the package that ships it, the same whether the
+  server runs as an executable or as a component, so two profiles state one value. `node.observed_only` stays
   silent on a node whose parent the profile launches. An observed node fact may carry
   `via_known_wrapper` from the node table of `rosio/resolve/wrappers.py`, for a whole node a
   library creates beside its owner.

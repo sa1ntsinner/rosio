@@ -3849,7 +3849,9 @@ def test_a_composed_server_creates_its_costmap_too(ws: Workspace):
     [child] = params_collect.child_nodes(composed)
     assert params_collect.owner_name(child) == "/local_costmap/local_costmap"
     assert child.attrs["child_of"] == "node:/controller_server"
-    assert child.attrs["created_by"] == "nav2_controller/nav2_controller::ControllerServer"
+    plain = params_collect.child_nodes(costmap_owner(()))[0]
+    # one server composed in one profile and plain in another states one parent, not two
+    assert child.attrs["created_by"] == plain.attrs["created_by"] == "nav2_controller"
     other = records.ResolvedNode(
         pkg="nav2_controller",
         executable="",

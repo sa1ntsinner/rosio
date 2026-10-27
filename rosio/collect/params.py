@@ -488,7 +488,7 @@ def child_nodes(node: records.ResolvedNode) -> list[records.ResolvedNode]:
                 site=node.site,
                 attrs={
                     "child_of": owner_node_id(node),
-                    "created_by": f"{node.pkg}/{node.executable or node.plugin_class}",
+                    "created_by": node.pkg,
                 },
             )
         )
