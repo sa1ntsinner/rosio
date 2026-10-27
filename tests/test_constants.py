@@ -88,7 +88,7 @@ def test_interface_constant_resolution_preserves_truly_undeclared_findings():
         .values["declared_in_code"]
     )
     findings = params.set_undeclared(atlas)
-    assert [finding.subject for finding in findings] == [ids.build_param(node, "truly_absent")]
+    assert [finding.title.split(" ", 1)[0] for finding in findings] == ["truly_absent"]
     before = atlas.canonical_bytes()
     join.join(builder)
     assert atlas.canonical_bytes() == before

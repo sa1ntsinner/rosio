@@ -35,9 +35,10 @@ from typing import Any
 from rosio import ATLAS_SCHEMA_VERSION, __version__, ids
 from rosio.errors import ContractError
 
-SCHEMA_MINOR = "28"
+SCHEMA_MINOR = "29"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the `remap.matches_nothing` rule, the `launch_set_parameter` mechanism, the
+stored id: the coded file values `name_literals` and, on a python source,
+`node_handoffs`; the `remap.matches_nothing` rule, the `launch_set_parameter` mechanism, the
 `autostart` mechanism of a `manages_lifecycle` edge, the file attribute `similar_files`, and
 the declared `broadcasts_tf` edge of a `static_transform_publisher` with its `static`
 value; the `angle_unreadable` blind spot reason; the `cpp_refused_by_atlas` refusal reason

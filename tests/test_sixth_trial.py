@@ -587,6 +587,7 @@ DOCKED = """    if (docked_) {
       br_->sendTransform(d);
     }
     b_ = create_publisher<std_msgs::msg::String>("out", rclcpp::QoS(1).transient_local());
+    d_ = create_subscription<std_msgs::msg::String>("in", rclcpp::QoS(1).transient_local(), cb);
 """
 MOVING = """    if (moving_) {
       geometry_msgs::msg::TransformStamped t;
@@ -595,11 +596,12 @@ MOVING = """    if (moving_) {
       br_->sendTransform(t);
     }
     a_ = create_publisher<std_msgs::msg::String>("out", 10);
+    c_ = create_subscription<std_msgs::msg::String>("in", 10, cb);
 """
 
 
 @pytest.mark.cpp
-@pytest.mark.parametrize("kind", ["tf_parent", "broadcasts_tf", "publishes"])
+@pytest.mark.parametrize("kind", ["tf_parent", "publishes", "subscribes"])
 def test_a_site_inserted_before_another_moves_no_edge_id(tmp_path: Path, kind: str):
     """Review 5: the first site of one symbol kept the plain key, so a sibling written above
     it took that key and moved the edge id of the one already there."""

@@ -3068,8 +3068,15 @@ def _tf_key(profile: str, symbol: str, values: dict[str, Any]) -> str:
     can never overwrite the first and two identical sites can never become two edges. Line
     numbers stay out of it, which is what keeps the handle stable when a file grows a line.
     """
-    content = ids.digest_fields({key: str(value) for key, value in values.items()})
+    content = ids.digest_fields({key: _stated(value) for key, value in values.items()})
     return ids.edge_key(profile=profile, symbol=symbol, content=content)
+
+
+def _stated(value: Any) -> str:
+    """A value as digest text that does not depend on the order a dict was built in."""
+    if isinstance(value, (dict, list, tuple)):
+        return model.dumps_line(value)
+    return str(value)
 
 
 def _site_edge(
@@ -3092,7 +3099,7 @@ def _site_edge(
     the key, so a site whose content differs never stands for another, and adding one moves
     no key that was there before it.
     """
-    content = ids.digest_fields({name: str(value) for name, value in values.items()})
+    content = ids.digest_fields({name: _stated(value) for name, value in values.items()})
     key = ids.edge_key(site=key, content=content, confidence=confidence)
     builder.edge(
         kind,

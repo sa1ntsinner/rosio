@@ -438,7 +438,7 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             if parsed.name in join.declared_in(declared, parsed.owner, row.profile) | declared.get(
                 (parsed.owner, join.REACHED), set()
             ):
-                needed.add((parsed.name, row.source.file, row.source.locator))
+                needed.add((parsed.name, row.source.file, row.source.locator, row.source.line_hint))
     lines: dict[tuple[str, str, int], list[_Ignored]] = defaultdict(list)
     for node in _params(atlas):
         owner_id = ids.parse_param(node.id).owner
@@ -453,23 +453,38 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             winner = next((row for row in chain if row.wins or row.note == join.IGNORED_NOTE), None)
             if winner is None:
                 continue
-            if (name, winner.source.file, winner.source.locator) in needed:
+            if (
+                name,
+                winner.source.file,
+                winner.source.locator,
+                winner.source.line_hint,
+            ) in needed:
                 continue
             near = _nearest_name(name, join.declared_in(declared, owner_id, profile))
             source = winner.source
             lines[(source.file, source.locator, source.line_hint or 0)].append(
                 _Ignored(profile, node.id, owner_id, name, winner, near, _read_by(owner, profile))
             )
-    # The line number only groups; the id is a digest over the file, the locator and the
-    # names, and two lines that would share one are one place to look.
+    # The line number only groups. A yaml line is named by its key, and a launch action that
+    # hands keys to nodes (a SetParameter loop, an inline dict) by the nodes it hands them to,
+    # so a key added to that action moves no id.
     merged: dict[str, list[_Ignored]] = defaultdict(list)
     for key in sorted(lines):
         rows = lines[key]
         source = rows[0].winner.source
-        merged[ids.digest(source.file, source.locator, *sorted({row.name for row in rows}))].extend(
-            rows
-        )
+        by = "owner" if rows[0].winner.mechanism in _HANDED else "name"
+        parts = sorted({getattr(row, by) for row in rows})
+        merged[ids.digest(source.file, source.locator, *parts)].extend(rows)
     return [_undeclared_line(disc, merged[disc]) for disc in sorted(merged)]
+
+
+_HANDED = frozenset(
+    {
+        model.Mechanism.LAUNCH_SET_PARAMETER.value,
+        model.Mechanism.LAUNCH_INLINE_DICT.value,
+        model.Mechanism.ROS_ARGS_P.value,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -579,7 +594,7 @@ def _undeclared_line(disc: str, rows: list[_Ignored]) -> model.Finding:
     return model.Finding(
         rule="param.set_undeclared",
         severity=rules.severity_of("param.set_undeclared"),
-        subject=head.param if len({row.param for row in rows}) == 1 else source.file,
+        subject=source.file,
         discriminator=disc,
         title=title,
         detail=(
@@ -591,7 +606,7 @@ def _undeclared_line(disc: str, rows: list[_Ignored]) -> model.Finding:
         say=say,
         profiles=profiles,
         layers=[CODED, DECLARED],
-        where=[source],
+        where=sorted({row.winner.source for row in rows}, key=model.Source.sort_key),
     )
 
 

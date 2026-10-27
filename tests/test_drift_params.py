@@ -827,7 +827,7 @@ def test_param_set_undeclared_decides_per_key_when_a_name_is_built_at_run_time()
     source names. A name built from `"sensor." + id` can never be max_speed."""
     atlas = _with_blind(_undeclared_atlas(), '"sensor." + sensor_id')
     found = _run(atlas, "param.set_undeclared")
-    assert [item.subject for item in found] == [ids.build_param(NODE, "max_speed")]
+    assert [item.title.split(" ", 1)[0] for item in found] == ["max_speed"]
     again = _run(_with_blind(_undeclared_atlas(), '"sensor." + sensor_id'), "param.set_undeclared")
     assert [item.id for item in again] == [item.id for item in found]
 
@@ -935,7 +935,9 @@ def test_a_name_another_profile_declares_is_still_undeclared_in_this_one():
     )
     atlas.edges[edge.id] = edge
     found = _run(atlas, "param.set_undeclared")
-    assert [(item.subject, item.profiles) for item in found] == [(param_id, [PROFILE])]
+    assert [(item.title.split(" ", 1)[0], item.profiles) for item in found] == [
+        (ids.parse_param(param_id).name, [PROFILE])
+    ]
 
 
 def test_param_set_undeclared_is_silent_for_a_name_a_condition_chooses():

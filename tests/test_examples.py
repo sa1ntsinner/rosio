@@ -21,7 +21,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 PLANTED = {
     ("qos.incompatible", "topic:/scan_filtered"),
     ("frame.not_in_urdf", "frame:laser_frame"),
-    ("param.set_undeclared", "param:/safety_stop|stop_distnce"),
+    ("param.set_undeclared", "file:rover_bringup|config/rover.yaml"),
     ("param.shadowed", "param:/scan_filter|max_range"),
     ("param.orphan_block", "file:rover_bringup|config/rover.yaml"),
 }

@@ -98,5 +98,6 @@
     "parameters": 0,
     "unresolved": 0,
     "via_known_wrapper": 3
-  }
+  },
+  "name_literals": ["/px/left/points", "/px/right/points", "paired", "px_wrappers"]
 }

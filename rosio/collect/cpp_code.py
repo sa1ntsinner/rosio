@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from rosio import extra_line, ids, model, workspace
-from rosio.collect import CollectContext, register
+from rosio.collect import CollectContext, py_code, register
 from rosio.errors import CollectorError, ContractError
 from rosio.resolve import wrappers
 
@@ -68,8 +68,12 @@ NO_SOURCE = "the workspace holds no C++ source under an editable root"
 # ---------------------------------------------------------------------------
 # what the reader recognises
 
-PUBLISH_CALLS = frozenset({"create_publisher", "create_lifecycle_publisher"})
-SUBSCRIBE_CALLS = frozenset({"create_subscription"})
+PUBLISH_CALLS = frozenset(
+    {"create_publisher", "create_lifecycle_publisher", "create_generic_publisher"}
+)
+SUBSCRIBE_CALLS = frozenset({"create_subscription", "create_generic_subscription"})
+GENERIC_CALLS = frozenset({"create_generic_publisher", "create_generic_subscription"})
+"""Generic endpoints take the type as a string after the name and the qos after the type."""
 SERVICE_CALLS = frozenset({"create_service"})
 CLIENT_CALLS = frozenset({"create_client"})
 PLUGIN_SETUP_METHODS = frozenset({"configure", "initialize"})
@@ -148,6 +152,15 @@ PLAIN_NODE_TYPES = {name: form for name, form in NODE_BASES.items() if "::" in n
 """The node types a free function creates by value: `rclcpp::Node::make_shared("talker")`,
 `std::make_shared<rclcpp::Node>("talker")` or `rclcpp::Node node("talker")`. Only the
 qualified spellings, because a bare `Node` there is as likely a class of the package."""
+
+NODE_INTERFACE = re.compile(r"(?:(?:this|node_?|parent)->)?get_node_\w+_interface\(\)")
+
+NODE_USERS = frozenset(
+    {"bind", "ref", "cref", "move", "forward", "make_pair", "make_tuple", "spin", "spin_some"}
+    | {"spin_until_future_complete", "static_pointer_cast", "dynamic_pointer_cast"}
+    | {"create_server", "create_client"}
+)
+"""Free functions handed a node that create nothing on it, or nothing this reader misses."""
 
 MACROS = frozenset(
     {
@@ -1859,10 +1872,16 @@ class _Reader:
         it, which `_finish_node_helpers` decides once every assignment is read."""
         if not self.klass:
             return
-        if any(_is_node_argument(argument, self.src) for argument in arguments):
+        if any(_is_node_handle(argument, self.src) for argument in arguments):
             if name in ("make_unique", "make_shared", "new") and types:
                 self.unit.node_handoffs.setdefault(self.klass, set()).add(types[0])
-            elif receiver is None and name.isidentifier():
+            elif (
+                receiver is None
+                and name.isidentifier()
+                and name not in NODE_USERS | PUBLISH_CALLS | SUBSCRIBE_CALLS
+                and name not in SERVICE_CALLS | TIMER_CALLS | CAMERA_CALLS | DECLARE_CALLS
+                and name not in READ_CALLS | ACTION_FACTORY_CALLS.keys()
+            ):
                 self.unit.node_handoffs.setdefault(self.klass, set()).add(name + "()")
         handles = self._handles(arguments)
         if handles is None:
@@ -1912,19 +1931,25 @@ class _Reader:
             not action
             and not factory
             and len(arguments) > 1
-            and _is_node_argument(arguments[0], self.src)
+            and _is_node_handle(arguments[0], self.src)
         ):
             # The free function spelling, rclcpp::create_publisher(node, topic, qos).
             arguments = arguments[1:]
         types = _template_types(template, self.src)
+        generic = name in GENERIC_CALLS
+        if generic and len(arguments) > 1 and not types:
+            spelled = self.resolve(arguments[1])
+            if spelled.status == LITERAL and isinstance(spelled.value, str):
+                types = [spelled.value.replace("/", "::")]
         qos = None
         options = ""
         position = 0
-        if kind in ("publisher", "subscriber") and len(arguments) > 1:
-            qos = self._qos(arguments[1])
-        if kind == "subscriber" and len(arguments) > 3:
-            options = _flat(arguments[3], self.src)
-            position = 4
+        at = 2 if generic else 1
+        if kind in ("publisher", "subscriber") and len(arguments) > at:
+            qos = self._qos(arguments[at])
+        if kind == "subscriber" and len(arguments) > at + 2:
+            options = _flat(arguments[at + 2], self.src)
+            position = at + 3
         interface_arity = 8 if name == "create_server" else 5
         name_position = (4 if len(arguments) >= interface_arity else 1) if action else 0
         if factory and function is not None and function.type == "qualified_identifier":
@@ -2508,6 +2533,31 @@ def _is_node_argument(node: Any, src: bytes) -> bool:
         "shared_from_this()",
         "this->shared_from_this()",
     )
+
+
+def _is_node_handle(node: Any, src: bytes) -> bool:
+    """A node handed to a call: the node itself, or one of its interfaces."""
+    text = _text(node, src).strip().lstrip("*&")
+    return (
+        _is_node_argument(node, src)
+        or text in ("weak_from_this()", "this->weak_from_this()")
+        or NODE_INTERFACE.fullmatch(text) is not None
+    )
+
+
+def name_literals(source: bytes) -> list[str]:
+    """Every string literal of a source shaped like a ROS name, a remap could name it."""
+    text = source.decode("utf-8", "replace")
+    return sorted(
+        {
+            value
+            for value in _STRING_LITERAL.findall(text)
+            if len(value) <= 200 and py_code.NAME_LITERAL.fullmatch(value)
+        }
+    )
+
+
+_STRING_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
 
 
 _DEFAULT_BLOCKED = object()
@@ -3562,9 +3612,10 @@ def _member_constructions(units: Sequence[Unit]) -> None:
             for item in unit.endpoints
             if item.api in KNOWN_WRAPPERS and (unit.pkg, item.sym) in defined
         ]
-        for item in moved:
-            defined[(unit.pkg, item.sym)].endpoints.append(item)
         unit.endpoints = [item for item in unit.endpoints if item not in moved]
+        for item in moved:
+            # the line is the header's, and the evidence of the unit it moves to cites the source
+            defined[(unit.pkg, item.sym)].endpoints.append(replace(item, line=None))
 
 
 _MEMBER_TYPES = {"double": float, "int": int, "int64_t": int, "bool": bool, "std::string": str}
@@ -5759,6 +5810,7 @@ class CppCodeCollector:
         builder = ctx.builder
         report = file_report(unit, lookups=lookups, components=components)
         file_id = ws.file_id(unit.path)
+        literals = name_literals(unit.source)
         builder.node(file_id, attrs={"language": "cpp", "loadable": unit.parsed})
         if unit.pkg and unit.pkg != ids.REPO_PKG:
             pkg_id = ids.build_pkg(unit.pkg)
@@ -5779,6 +5831,7 @@ class CppCodeCollector:
                 ],
                 "wrappers": report.get("wrappers", []),
                 "type_aliases": unit.type_aliases,
+                **({"name_literals": literals} if literals else {}),
                 **(
                     {"plugin_loaders": [{"base_class": base} for base in unit.plugin_loaders]}
                     if unit.plugin_loaders

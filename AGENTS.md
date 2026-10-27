@@ -823,7 +823,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.28`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.29`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -1006,6 +1006,12 @@ What was added, in the order it arrived:
   is close to its name (`lidar.yaml` beside a default naming `lidar_params.yaml`); and a declared `broadcasts_tf` edge from a `static_transform_publisher`
   whose frame pair its arguments spell as literals, with the value `static`, so the frames it
   names exist in the declared layer.
+
+* in `1.29`, the coded file values `name_literals`, the string literals of a source shaped
+  like a ROS name, and on a python source `node_handoffs`, the calls and bases outside the
+  file that are handed the node (`InteractiveMarkerServer(self, 'markers')`, a node base
+  another module defines). Both let `remap.matches_nothing` stay silent where a name could
+  come from code nobody read.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace
@@ -1324,8 +1330,9 @@ none of the records it wrote before the refusal, and the pass goes on. A rotatio
 it cited `--roll --pitch --yaw`. No release had shipped, so no stored id or waiver existed.
 
 Inside `1.28` several ids and texts moved besides the new keys. `param.set_undeclared` is one
-finding per line, listing the profiles and the nodes it is handed to, and its subject is the
-parameter when the line sets one name and the file otherwise; its discriminator is a digest
+finding per line, listing the profiles and the nodes it is handed to, and its subject was the
+parameter when the line set one parameter and the file otherwise (always the file from
+`1.29`); its discriminator is a digest
 over the file, the locator and the names, so every such id moved. A key a `SetParameter` hands
 a group is asked to be stopped at that line only when no node of the group reads it, never
 removed from a dictionary. The file list of a `set_undeclared` finding names the node's own
@@ -1336,8 +1343,9 @@ their sorted expressions, which moved those ids. A selector list of `filters` or
 block nested in a selected instance are live, so `plugin.inert_by_design` stopped firing on
 them, and its title names the node that owns the block. `extract.input_refused` over a missing
 parameters file cites the `DeclareLaunchArgument` default that names it, and its fix names a
-file beside it whose name is close. `qos.differ`, `type.differ` and `rate.below_declared` compare one endpoint
-a node states from several sites once, and `endpoint.observed_only` is silent on an observed
+file beside it whose name is close. `qos.differ`, `type.differ` and `rate.below_declared` compare the edges of one endpoint as one
+when each layer states it on one edge at most, and a layer that states it from two sites keeps
+every edge apart, so such an endpoint is not compared with the observed one; and `endpoint.observed_only` is silent on an observed
 endpoint another site of the same node states in source. An rclpy `QoSProfile` built with only
 a depth states the reliable and volatile defaults rclpy gives it. `topic.no_publisher` over an
 observed topic names the remap that moved its publisher away. The observed `executable` of a
@@ -1366,7 +1374,26 @@ the last literal, so a name two branches assign declares neither. A name built b
 literal states the literal in its blind spot expression (`"sensor." + id`), which moved those
 entry ids. No release had shipped, so no stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.28` file: `Atlas.from_json` compares the major
+Inside `1.29` several ids and texts moved besides the new keys. `param.set_undeclared` is
+always about the file that holds the line, so a profile that adds a node no longer moves its
+id, and it cites every line it groups. A yaml line is still named by its key, and a launch
+action that hands keys to nodes (a `SetParameter`, an inline dict, a `-p`) by the nodes it
+hands them to, so the keys of one inline dict are one finding and a key added to the action
+moves no id; a line a node reads silences only itself, where a `SetParameter` read in one
+group silenced the same name in every group of the file. `remap.unresolved` is discriminated
+by the nodes the file itself writes the remaps on and no longer by the remaps, so neither a
+remap added beside another nor an included file writing the same rule moves its id, and every
+such id moved once. A coded site edge whose values hold a
+mapping or a list (a qos block) digests them in the pinned encoding rather than in the order
+they were built, so those edge ids moved once. A wrapper endpoint a header builds and its
+constructor owns no longer carries the header's line beside the source file it cites. An rclpy
+`create_lifecycle_publisher` and an rclcpp `create_generic_publisher` or
+`create_generic_subscription` are endpoints, and a C++ class row no longer lists the API calls
+this reader reads (`create_publisher()`, `bind()`) among its `node_handoffs`, while it now
+lists the free functions and classes handed a node interface (`get_node_topics_interface()`).
+No release had shipped, so no stored id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.29` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -1455,10 +1482,14 @@ file to source, and an install tree beside src that no root names when there is 
 of the node it is written on carries, in every profile that starts the node there, and only
 when the join read that node's whole source and found no topic, service or action name in it
 that the reader could not follow. It stays silent when the node states no endpoint at all,
-when a class of the node's package hands the node to a class no source of the read set
-defines, when the name is a sub topic of one of the node's endpoints (image_transport and
-cuda_blackboard add those), and when any source of the read set spells the name as an
-endpoint, because a helper the join did not bind to the node may create it. It names the node's real endpoint names, the closest one
+when the node's code hands the node (`this`, `self`, a node interface) to a class or a free
+function no source of the read set defines, or builds it on a python base another module
+defines, when a package of the node holds a source the reader refused, when the name is a
+sub topic of one of the node's endpoints (image_transport and cuda_blackboard add those) or
+one every node or every lifecycle node has, when any source of the read set spells the name
+as an endpoint, because a helper the join did not bind to the node may create it, and when a
+source of the node spells the name, or a base of it, as any string literal. A remap scoped to
+a node (`ctrl:status`) is read for the node it names and no other. It names the node's real endpoint names, the closest one
 when one is near, and the line to edit. It is a rule of its own and not a case of
 `remap.unresolved`: that rule is `info` and says nothing states the kind of a name, which is a
 gap in what rosio read, while this one says the code was read and the rule is dead, which is a
@@ -1546,6 +1577,11 @@ point and it is `rosio drift`, never `extract`.
   always printed, and adds the count that matched, each waived finding id with its reason,
   and every key that matched nothing. A finding nobody can see is a finding whose waiver
   nobody ever deletes, and a stale key is the thing that quietly widens a waiver file.
+* **A finding that groups members.** The remaps one file writes on one node, or the keys one
+  launch action hands its nodes, are one finding named by the place and not by its members:
+  a member added beside them keeps the id and moves the fingerprint. A waiver keyed on the id
+  accepts the place, and one keyed on the fingerprint accepts the members it was written
+  against and stops matching when another arrives.
 * **Never an extraction input.** `atlas.json` carries every finding whatever a repository has
   accepted, so a machine with a waiver file and a machine without one write the same bytes,
   and `Config.fingerprint` leaves the key out for that reason. Grading is a decision about a

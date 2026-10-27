@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import operator as _op
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -112,6 +113,7 @@ _PARAM_TYPES = {
 
 _ENDPOINT_CALLS = {
     "create_publisher": ("publisher", 1, 0, 2, "topic", "msg_type"),
+    "create_lifecycle_publisher": ("publisher", 1, 0, 2, "topic", "msg_type"),
     "create_subscription": ("subscriber", 1, 0, 3, "topic", "msg_type"),
     "create_service": ("service_server", 1, 0, None, "srv_name", "srv_type"),
     "create_client": ("service_client", 1, 0, None, "srv_name", "srv_type"),
@@ -139,6 +141,36 @@ action into five endpoints with no name. Signatures on humble: `rclpy/action/ser
 `rclpy/action/client.py:114`, `message_filters/__init__.py:61`."""
 
 _LOOKUP_CALLS = ("lookup_transform", "can_transform")
+
+_NODE_ARGUMENTS = frozenset({"self", "node", "parent", "parent_node"})
+_NODE_USERS = frozenset(
+    {
+        "spin",
+        "spin_once",
+        "spin_until_future_complete",
+        "add_node",
+        "remove_node",
+        "destroy_node",
+        "isinstance",
+        "issubclass",
+        "super",
+        "print",
+        "id",
+        "getattr",
+        "setattr",
+        "hasattr",
+        "type",
+        "repr",
+        "str",
+        "ref",
+    }
+)
+"""Calls that take a node and create nothing on it, so handing it to them hides no name."""
+
+_PLAIN_BASES = frozenset({"abc", "typing", "enum", "dataclasses", "object", "rclpy"})
+
+NAME_LITERAL = re.compile(r"[~/]?[A-Za-z_]\w*(?:/[A-Za-z_]\w*)*/?", re.ASCII)
+"""A string literal shaped like a ROS name, which a remap could be written against."""
 
 _CREATE_NODE = "rclpy.create_node"
 AUTO_DECLARE_OPTIONS = frozenset(
@@ -401,6 +433,7 @@ class PyFile:
         self.node_arguments: dict[str, str] = {}
         self.class_lines: dict[str, int | None] = {}
         self.unresolved: list[dict[str, Any]] = []
+        self.handoffs: set[str] = set()
         self.resolved_counts: dict[str, int] = dict.fromkeys(WANTS, 0)
         self._seen: dict[int, Val] = {}
         self._text: dict[int, str] = {}
@@ -630,6 +663,19 @@ class PyFile:
                         self.node_classes[node.name] = parent
                         changed = True
                         break
+        for node in pending:
+            if node.name not in self.node_classes:
+                continue
+            for base in node.bases:
+                full = self._defined_name(_dotted(base))
+                if (
+                    full
+                    and full not in _NODE_BASES
+                    and full.partition(".")[0] not in _PLAIN_BASES
+                    and full.rpartition(".")[0] != self.module
+                ):
+                    # a node base or mixin another module defines may create any endpoint
+                    self.handoffs.add(full)
         for node in self.tree.body:
             if isinstance(node, ast.ClassDef) and node.name in self.node_classes:
                 self.defined_bases[base_key(self.package, self._qual(node.name))] = (
@@ -1704,7 +1750,24 @@ class PyFile:
             self._eval(arg, ctx)
         for keyword in node.keywords:
             self._eval(keyword.value, ctx)
+        if tail not in _NODE_USERS and any(
+            isinstance(arg, ast.Name) and arg.id in _NODE_ARGUMENTS
+            for arg in [*node.args, *(keyword.value for keyword in node.keywords)]
+        ):
+            self.handoffs.add(self._defined_name(dotted) or text.partition("(")[0])
         return Val(expr=text, reason="call_result")
+
+    def _defined_name(self, dotted: str) -> str:
+        """A call or base spelled here, as the module that defines it would spell it."""
+        head = dotted.partition(".")[0]
+        if head in self.imports:
+            return self._resolve_dotted(dotted)
+        top = {
+            stmt.name
+            for stmt in self.tree.body
+            if isinstance(stmt, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        return self._qual(dotted) if head in top else dotted
 
     @staticmethod
     def _looks_like_action(node: ast.Call) -> bool:
@@ -2539,6 +2602,18 @@ class PyFile:
         candidates = self._candidates()
         if candidates:
             record["wrapper_candidates"] = candidates
+        if self.handoffs:
+            record["node_handoffs"] = sorted(self.handoffs)
+        literals = {
+            node.value
+            for node in ast.walk(self.tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and len(node.value) <= 200
+            and NAME_LITERAL.fullmatch(node.value)
+        }
+        if literals:
+            record["name_literals"] = sorted(literals)
         if self.param_reads:
             record["parameter_reads"] = sorted(
                 self.param_reads, key=lambda item: (item["name"], item["owner_symbol"])
@@ -3073,6 +3148,7 @@ class PyCodeCollector:
             "counts": record["counts"],
             "executables": record["executables"],
             "wrappers": record.get("wrappers", []),
+            **{key: record[key] for key in ("node_handoffs", "name_literals") if key in record},
         }
         builder.fact(
             file_id,

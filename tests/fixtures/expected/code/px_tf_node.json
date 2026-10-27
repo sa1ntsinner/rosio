@@ -258,5 +258,6 @@
     "tf_lookups": 4,
     "unresolved": 2,
     "via_known_wrapper": 4
-  }
+  },
+  "name_literals": ["/px/points", "base_footprint", "base_frame", "base_link", "map", "odom", "odom_frame", "publish_tf", "px_lidar", "px_tf", "sensor_frame"]
 }

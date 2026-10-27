@@ -194,21 +194,20 @@ def test_a_depth_only_qos_profile_requests_reliable_and_meets_a_sensor_data_publ
 # N3, one node stating one endpoint from two sites
 
 
-def test_two_sites_of_one_endpoint_are_compared_with_the_observed_one_once():
-    from rosio.drift import topics
+def _one_endpoint(coded_sites: tuple[str, ...], coded_depth: int, observed_depth: int):
     from tests.test_drift_graph import CODED, OBSERVED, Bench, qos
 
     bench = Bench()
     node = ids.build_node("/io_bridge")
     publishes = model.EdgeKind.PUBLISHES.value
-    for key in ("site_a", "site_b"):
+    for key in coded_sites:
         bench.endpoint(
             publishes,
             node,
             "/twice",
             CODED,
             key=key,
-            values={"qos": qos(history="keep_last", depth=10)},
+            values={"qos": qos(history="keep_last", depth=coded_depth)},
         )
     bench.endpoint(
         publishes,
@@ -216,7 +215,7 @@ def test_two_sites_of_one_endpoint_are_compared_with_the_observed_one_once():
         "/twice",
         OBSERVED,
         key="seen",
-        values={"qos": qos(history="keep_last", depth=10)},
+        values={"qos": qos(history="keep_last", depth=observed_depth)},
     )
     bench.endpoint(
         model.EdgeKind.SUBSCRIBES.value,
@@ -226,10 +225,30 @@ def test_two_sites_of_one_endpoint_are_compared_with_the_observed_one_once():
         key="twice_in",
     )
     bench.builder.recompute()
+    return bench.atlas
+
+
+def test_a_source_site_and_the_observed_edge_of_one_endpoint_are_compared_once():
+    from rosio.drift import topics
+
     twice = ids.build_topic("/twice")
-    assert [item for item in topics.qos_differ(bench.atlas) if twice in item.subject_key] == []
+    found = [
+        item
+        for item in topics.qos_differ(_one_endpoint(("site_a",), 10, 5))
+        if twice in item.subject_key
+    ]
+    assert len(found) == 1
+    assert "depth" in found[0].detail
+
+
+def test_two_sites_of_one_endpoint_leave_the_observed_one_unreported():
+    from rosio.drift import topics
+
+    twice = ids.build_topic("/twice")
+    atlas = _one_endpoint(("site_a", "site_b"), 10, 10)
+    assert [item for item in topics.qos_differ(atlas) if twice in item.subject_key] == []
     assert [
-        item for item in topics.endpoint_observed_only(bench.atlas) if twice in item.subject_key
+        item for item in topics.endpoint_observed_only(atlas) if twice in item.subject_key
     ] == []
 
 
@@ -684,6 +703,388 @@ def test_a_remap_a_helper_somewhere_could_match_is_not_dead(tmp_path: Path):
     )
     atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
     assert findings(atlas, "remap.matches_nothing") == []
+
+
+# ---------------------------------------------------------------------------
+# review 13: a dead remap is said only of a node whose endpoint set is known
+
+
+def _node_source(name: str, body: str, imports: str = "", base: str = "Node") -> str:
+    return (
+        "from rclpy.node import Node\n"
+        "from rclpy.lifecycle import LifecycleNode\n"
+        "from std_msgs.msg import String\n"
+        f"{imports}"
+        f"class N({base}):\n"
+        "    def __init__(self):\n"
+        f"        super().__init__('{name}')\n"
+        "        self.create_publisher(String, 'status', 10)\n"
+        f"{body}"
+        "def main():\n"
+        "    pass\n"
+    )
+
+
+def _python_dead(tmp_path: Path, body: str, remap: str, imports="", base="Node", extra=None):
+    files = {
+        "p/__init__.py": "",
+        "p/ctrl.py": _node_source("ctrl", body, imports, base),
+        "setup.py": SETUP.format("'ctrl = p.ctrl:main'"),
+        "run.launch.py": launch(
+            f'Node(package="p", executable="ctrl", name="ctrl", remappings=[{remap}])'
+        ),
+        **(extra or {}),
+    }
+    package(tmp_path, "p", files)
+    atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
+    return atlas, findings(atlas, "remap.matches_nothing")
+
+
+HELPER_DYNAMIC = (
+    "def make_subs(n):\n    n.create_subscription(String, n.prefix + 'scan', None, 10)\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("body", "remap", "imports", "base", "extra"),
+    [
+        ("", '("ctrl:status", "/x")', "", "Node", None),
+        (
+            "        self.create_lifecycle_publisher(String, 'out', 10)\n",
+            '("out", "/x")',
+            "",
+            "LifecycleNode",
+            None,
+        ),
+        (
+            "        self.srv = InteractiveMarkerServer(self, 'markers')\n",
+            '("markers/feedback", "/x")',
+            "from interactive_markers import InteractiveMarkerServer\n",
+            "Node",
+            None,
+        ),
+        (
+            "        self.h = SomeLib(self)\n",
+            '("odom", "/robot/odom")',
+            "from some_ros_lib import SomeLib\n",
+            "Node",
+            None,
+        ),
+        (
+            "        Helper(self)\n",
+            '("scan", "/lidar")',
+            "from p.helper import Helper\n",
+            "Node",
+            {
+                "p/helper.py": "class Helper:\n    def __init__(self, n):\n        print 'x'\n"
+                "        n.create_subscription(String, 'scan', None, 10)\n"
+            },
+        ),
+        (
+            "        make_subs(self)\n",
+            '("scan", "/lidar")',
+            "from p.util import make_subs\n",
+            "Node",
+            {"p/util.py": HELPER_DYNAMIC},
+        ),
+        ("", '("~/change_state", "/x")', "", "LifecycleNode", None),
+        ("", '("~/get_type_description", "/x")', "", "Node", None),
+        (
+            "        getattr(self, 'create_subscription')(String, 'scan', None, 10)\n",
+            '("scan", "/lidar")',
+            "",
+            "Node",
+            None,
+        ),
+        (
+            "        extra.setup(self.handle)\n",
+            '("scan", "/lidar")',
+            "from p import extra\n",
+            "Node",
+            {"p/extra.py": "def setup(n):\n    print 'refused'\n"},
+        ),
+        (
+            "",
+            '("scan", "/lidar")',
+            "from p.base import Base\n",
+            "Base",
+            {
+                "p/base.py": "from rclpy.node import Node\nclass Base(Node):\n"
+                "    def __init__(self, n):\n        super().__init__(n)\n"
+                "        self.create_subscription(String, self.prefix + 'scan', None, 10)\n"
+            },
+        ),
+    ],
+    ids=[
+        "node_scoped",
+        "lifecycle_publisher",
+        "interactive_markers",
+        "unread_library",
+        "refused_helper",
+        "helper_builds_name",
+        "lifecycle_service",
+        "type_description",
+        "literal_backstop",
+        "refused_module",
+        "base_builds_name",
+    ],
+)
+def test_a_remap_a_node_could_take_through_unread_code_is_not_dead(
+    tmp_path: Path, body, remap, imports, base, extra
+):
+    _atlas, found = _python_dead(tmp_path, body, remap, imports, base, extra)
+    assert found == []
+
+
+def test_a_remap_scoped_to_the_node_it_is_written_on_is_still_dead(tmp_path: Path):
+    _atlas, found = _python_dead(tmp_path, "", '("ctrl:statos", "/x")')
+    assert len(found) == 1
+    assert "status" in found[0].say
+
+
+def test_a_python_handoff_and_its_literals_are_stated_on_the_file(tmp_path: Path):
+    atlas, _found = _python_dead(
+        tmp_path,
+        "        self.h = SomeLib(self)\n",
+        '("odom", "/x")',
+        "from some_ros_lib import SomeLib\n",
+    )
+    values = atlas.entities["file:p|p/ctrl.py"].fact("coded").values
+    assert values["node_handoffs"] == ["some_ros_lib.SomeLib"]
+    assert "status" in values["name_literals"]
+
+
+CPP_SERVER = """#include <rclcpp/rclcpp.hpp>
+namespace demo {
+class Server : public rclcpp::Node {
+public:
+  explicit Server(const rclcpp::NodeOptions & o) : Node("server", o) {
+    pub_ = create_publisher<std_msgs::msg::String>("status", 10);
+    BODY
+  }
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+};
+}
+#include <rclcpp_components/register_node_macro.hpp>
+RCLCPP_COMPONENTS_REGISTER_NODE(demo::Server)
+"""
+
+
+def _cpp_dead(tmp_path: Path, body: str, remap: str) -> list[model.Finding]:
+    from tests.test_sixth_trial import launch as component_launch
+
+    package(
+        tmp_path,
+        "p",
+        {
+            "CMakeLists.txt": "project(p)\nadd_library(server SHARED src/server.cpp)\n"
+            'rclcpp_components_register_nodes(server "demo::Server")\n',
+            "src/server.cpp": CPP_SERVER.replace("BODY", body),
+            "run.launch.py": component_launch(
+                'ComposableNodeContainer(name="box", namespace="", package="rclcpp_components",'
+                ' executable="component_container", composable_node_descriptions=['
+                'ComposableNode(package="p", plugin="demo::Server", name="server", '
+                f"remappings=[{remap}])])"
+            ),
+        },
+    )
+    atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
+    return findings(atlas, "remap.matches_nothing")
+
+
+@pytest.mark.cpp
+@pytest.mark.parametrize(
+    ("body", "remap"),
+    [
+        (
+            'gen_ = create_generic_subscription("in", "std_msgs/msg/String", rclcpp::QoS(10), '
+            "[](std::shared_ptr<rclcpp::SerializedMessage>) {});",
+            '("in", "/x")',
+        ),
+        ('other_lib::attach_diagnostics(this, "diag_in");', '("diag_in", "/x")'),
+        ("", '("server:status", "/x")'),
+        (
+            "helper_ = std::make_shared<other_lib::Helper>(get_node_topics_interface());",
+            '("odom", "/x")',
+        ),
+        ('filter_.attach(this, "scan_in");', '("scan_in", "/x")'),
+    ],
+    ids=["generic", "free_function", "node_scoped", "node_interface", "literal_backstop"],
+)
+def test_a_cpp_remap_a_node_could_take_through_unread_code_is_not_dead(
+    tmp_path: Path, body: str, remap: str
+):
+    assert _cpp_dead(tmp_path, body, remap) == []
+
+
+@pytest.mark.cpp
+def test_a_cpp_remap_no_source_could_take_is_still_dead(tmp_path: Path):
+    body = "rclcpp::spin_some(this->get_node_base_interface());"
+    assert len(_cpp_dead(tmp_path, body, '("stat", "/x")')) == 1
+
+
+# ---------------------------------------------------------------------------
+# review 13: the ids of grouped findings
+
+
+def _undeclared(tmp_path: Path, profiles: list[tuple[str, str]]) -> list[model.Finding]:
+    cfg = Config(
+        roots=(RootSpec("src", str(tmp_path / "src")),),
+        profiles=tuple(
+            ProfileSpec(name, entrypoints=(Entrypoint("launch", "p", entry),))
+            for name, entry in profiles
+        ),
+        out_dir=str(tmp_path / "out"),
+        deterministic=True,
+    )
+    atlas = extract.run(cfg, Workspace.discover(cfg.roots))
+    return findings(atlas, "param.set_undeclared")
+
+
+def test_a_profile_that_adds_a_node_moves_no_set_undeclared_id(tmp_path: Path):
+    yaml_path = '__import__("os").path.join(__import__("os").path.dirname(__file__), "p.yaml")'
+    package(
+        tmp_path,
+        "p",
+        {
+            "p/__init__.py": "",
+            "p/a.py": python_node("a", "        self.declare_parameter('rate', 1.0)\n"),
+            "p/b.py": python_node("b", "        self.declare_parameter('rate', 1.0)\n"),
+            "setup.py": SETUP.format("'a = p.a:main', 'b = p.b:main'"),
+            "p.yaml": "/**:\n  ros__parameters:\n    bogus: 1\n",
+            "one.launch.py": launch(
+                f'Node(package="p", executable="a", name="a", parameters=[{yaml_path}])'
+            ),
+            "two.launch.py": launch(
+                f'Node(package="p", executable="b", name="b", parameters=[{yaml_path}])'
+            ),
+        },
+    )
+    (one,) = _undeclared(tmp_path, [("p1", "one.launch.py")])
+    (both,) = _undeclared(tmp_path, [("p1", "one.launch.py"), ("p2", "two.launch.py")])
+    assert one.id == both.id
+    assert one.subject == "file:p|p.yaml"
+    assert one.fingerprint != both.fingerprint
+
+
+GROUPS = """from launch import LaunchDescription
+from launch.actions import GroupAction
+from launch_ros.actions import Node, SetParameter
+def generate_launch_description():
+    return LaunchDescription([
+        GroupAction([
+            SetParameter(name='{first}', value=1.0),
+            Node(package='p', executable='a', name='a'),
+        ]),
+        GroupAction([
+            SetParameter(name='{second}', value=1.0),
+            Node(package='p', executable='b', name='b'),
+        ]),
+    ])
+"""
+
+
+def _groups(tmp_path: Path, first: str, second: str) -> list[model.Finding]:
+    package(
+        tmp_path,
+        "p",
+        {
+            "p/__init__.py": "",
+            "p/a.py": python_node("a", "        self.declare_parameter('rate', 1.0)\n"),
+            "p/b.py": python_node("b", "        self.declare_parameter('gain', 1.0)\n"),
+            "setup.py": SETUP.format("'a = p.a:main', 'b = p.b:main'"),
+            "run.launch.py": GROUPS.format(first=first, second=second),
+        },
+    )
+    atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
+    return findings(atlas, "param.set_undeclared")
+
+
+def test_a_set_parameter_one_group_reads_is_still_reported_in_another(tmp_path: Path):
+    (found,) = _groups(tmp_path, "rate", "rate")
+    assert "/b" in found.detail and "/a " not in found.detail
+    assert [row.line_hint for row in found.where] == [11]
+
+
+def test_two_set_parameter_lines_of_one_name_are_two_findings(tmp_path: Path):
+    found = _groups(tmp_path, "speed", "speed")
+    assert sorted([row.line_hint for row in item.where] for item in found) == [[7], [11]]
+
+
+def _one_node(root: Path, node: str) -> model.Atlas:
+    package(
+        root,
+        "p",
+        {
+            "p/__init__.py": "",
+            "p/a.py": python_node("a", "        self.declare_parameter('rate', 1.0)\n"),
+            "setup.py": SETUP.format("'a = p.a:main'"),
+            "run.launch.py": launch(node),
+        },
+    )
+    return run_twice(config(root, Entrypoint("launch", "p", "run.launch.py")))
+
+
+def test_a_key_added_to_a_launch_dict_moves_no_set_undeclared_id(tmp_path: Path):
+    def ids_of(name: str, keys: str) -> list[str]:
+        node = f'Node(package="p", executable="a", name="a", parameters=[{{{keys}}}])'
+        atlas = _one_node(tmp_path / name, node)
+        return [item.id for item in findings(atlas, "param.set_undeclared")]
+
+    one = ids_of("one", "'bogus': 1")
+    assert one and one == ids_of("two", "'bogus': 1, 'other': 2")
+
+
+def test_a_remap_added_beside_another_moves_no_remap_unresolved_id(tmp_path: Path):
+    def ids_of(name: str, remaps: str) -> list[str]:
+        node = f'Node(package="ext", executable="calib", name="calib", remappings=[{remaps}])'
+        root = tmp_path / name
+        package(root, "p", {"run.launch.py": launch(node)})
+        atlas = run_twice(config(root, Entrypoint("launch", "p", "run.launch.py")))
+        return [item.id for item in findings(atlas, "remap.unresolved")]
+
+    one = ids_of("one", '("~/input/a", "/a")')
+    assert one and one == ids_of("two", '("~/input/a", "/a"), ("~/input/b", "/b")')
+
+
+# ---------------------------------------------------------------------------
+# review 13: what a site edge key digests, and where a moved endpoint points
+
+
+def test_a_site_edge_key_does_not_depend_on_the_order_a_qos_block_was_built_in():
+    from rosio import join
+
+    built = {"history": "keep_last", "depth": 10}
+    again = {"depth": 10, "history": "keep_last"}
+    assert join._tf_key("p", "s", {"qos": built}) == join._tf_key("p", "s", {"qos": again})
+    assert join._stated(built) == join._stated(again)
+    assert join._stated("x") == "x"
+
+
+@pytest.mark.cpp
+def test_a_header_endpoint_moved_to_its_constructor_cites_no_header_line(tmp_path: Path):
+    package(
+        tmp_path,
+        "p",
+        {
+            "CMakeLists.txt": "project(p)\ninclude_directories(include)\n"
+            "add_library(calib SHARED src/calib.cpp)\n"
+            'rclcpp_components_register_node(calib PLUGIN "calib::Calib" EXECUTABLE calib_node)\n',
+            "include/p/calib.hpp": CALIB_HPP,
+            "src/calib.cpp": CALIB_CPP,
+            "run.launch.py": launch('Node(package="p", executable="calib_node", name="calib")'),
+        },
+    )
+    atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
+    rows = [
+        (row.file, row.line_hint)
+        for edge in atlas.out_edges("node:/calib")
+        if edge.kind == "subscribes"
+        for fact in edge.facts
+        for row in fact.evidence
+        if row.file == "file:p|src/calib.cpp"
+    ]
+    assert rows and all(line is None for _file, line in rows)
 
 
 # ---------------------------------------------------------------------------

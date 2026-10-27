@@ -425,5 +425,6 @@
     "timers": 1,
     "parameters": 13,
     "unresolved": 2
-  }
+  },
+  "name_literals": ["/health", "/px", "/px/cmd_vel_safe", "/px/footprint", "/px/points_raw", "/px/status", "PX_EXTRA_TOPIC", "cmd_topic", "footprint_topics", "gain", "global_costmap/footprint", "input_topic", "limits", "local_costmap/footprint", "max_accel", "max_speed", "publish_diagnostics", "publish_rate_hz", "px_front", "px_param", "queue_depth", "topic_prefix", "watchdog_timeout_s"]
 }

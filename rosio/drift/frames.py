@@ -48,6 +48,7 @@ from rosio import ids, model
 from rosio.drift import plugins, rules
 from rosio.errors import ContractError
 from rosio.model import Atlas, Finding, LayerFact, Source
+from rosio.resolve import wrappers
 
 WORLD_FRAMES = frozenset({"earth", "map", "odom", "utm", "world"})
 """REP 105 names earth, map and odom as the frames a running system owns, and utm and
@@ -1210,7 +1211,12 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
                 f"read the node source for the endpoint behind {source}, or add the package "
                 "that owns it to the workspace so the kind is stated"
             )
-        owners = tuple(sorted({entry.owner for entry, _ in group}))
+        # the nodes the file itself writes the remap on name the finding, so neither a remap
+        # added beside it nor a file it includes writing the same rule moves its id
+        owners = tuple(
+            sorted({entry.owner for entry, _ in group if not entry.written_in})
+            or sorted({entry.owner for entry, _ in group})
+        )
         finding = Finding(
             rule="remap.unresolved",
             severity=rules.severity_of("remap.unresolved"),
@@ -1227,7 +1233,7 @@ def remap_unresolved(atlas: Atlas) -> list[Finding]:
                 f"{writer} remaps {source} to {target}{via} and nothing in the workspace "
                 f"states what kind of endpoint {target} is, so the connection is unverified."
             ),
-            discriminator=_disc(expr),
+            discriminator=_disc(*owners),
             profiles=[profile for _, profiles in group for profile in profiles],
             layers=[model.Layer.DECLARED.value],
             where=[row for entry, _ in group for row in entry.evidence],
@@ -1268,7 +1274,7 @@ def _one_node_remaps(
             f"{where} remaps {len(rows)} names on {nodes} and nothing in the workspace states "
             "what kind of endpoint they are, so those connections are unverified."
         ),
-        discriminator=_disc(*sorted(expr for expr, _finding in rows)),
+        discriminator=first.discriminator,
         profiles=sorted({profile for _expr, item in rows for profile in item.profiles}),
         layers=list(first.layers),
         where=[row for _expr, item in rows for row in item.where],
@@ -1371,6 +1377,22 @@ class _Dead:
     nodes: dict[str, set[tuple[str, str]]] = field(default_factory=dict)
 
 
+_BUILT_IN = frozenset(
+    {raw for _kind, raw, _type in wrappers.implicit_endpoints()}
+    | {
+        f"~/{name}"
+        for name in (
+            "change_state",
+            "get_state",
+            "get_available_states",
+            "get_available_transitions",
+            "get_transition_graph",
+            "transition_event",
+        )
+    }
+)
+"""Names every node, and every lifecycle node, has with no call in its source."""
+
 _NAME_WANTS = (
     model.Want.TOPIC_NAME.value,
     model.Want.SERVICE_NAME.value,
@@ -1381,8 +1403,9 @@ _NAME_WANTS = (
 def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
     """Remap blind spots whose source name no endpoint of a wholly read node carries, by id.
 
-    A node not bound to code in a profile that starts it, or one whose code holds a name the
-    reader could not follow, could carry the name, and then the remap is not decided.
+    A node not bound to code in a profile that starts it, one whose code holds a name the
+    reader could not follow, hands itself to code nobody read, or shares a package with a
+    source the reader refused, could carry the name, and then the remap is not decided.
     """
     from rosio import join
 
@@ -1393,11 +1416,17 @@ def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
     defined = {
         _short_class(str(row.get("name") or "")) for rows in classes.values() for row in rows
     }
+    functions: set[tuple[str, str]] = set()
+    for entity in atlas.by_kind(model.NodeKind.SYM.value):
+        parsed = ids.parse_sym(entity.id)
+        functions.add((parsed.package, parsed.qualname.rpartition("::")[2]))
+    refused = _refused_packages(atlas)
     for entry in atlas.unresolved:
         if entry.role != "remap" or entry.owner not in atlas.entities:
             continue
         source, sep, _target = entry.expr.partition(":=")
-        if not sep or not source or source.startswith("__") or _bare(source) in spelled:
+        name = source.rpartition(":")[2]
+        if not sep or not name or name.startswith("__") or _bare(name) in spelled:
             continue
         owner = atlas.entities[entry.owner]
         live = [p for p in _owner_profiles(atlas, entry.owner) if rules.site_live(owner, p)]
@@ -1415,12 +1444,20 @@ def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
                     continue
                 read = rules.coded_sources(atlas, node_id, profile)
                 ends = _endpoint_names(atlas, node_id, profile)
-                renamed = _remap_source(source, node_id)
-                own = {_remap_source(raw, node_id) for _kind, raw in ends}
+                prefix, _colon, _rest = source.rpartition(":")
+                renamed = _remap_source(name, node_id)
+                own = {
+                    _remap_source(raw, node_id) for raw in {raw for _kind, raw in ends} | _BUILT_IN
+                }
                 if (
                     not read
                     or not ends
-                    or _hands_off_unread(read, classes, defined)
+                    # `ctrl:status` applies to the node named ctrl alone
+                    or (prefix and prefix != _node_scope(node_id)[1])
+                    or _hands_off_unread(read, classes, defined, functions)
+                    or _python_handoffs(atlas, read)
+                    or _literal(atlas, read, name)
+                    or any(ids.parse_file(file).package in refused for file in read)
                     or node_id in blind[profile]
                     or renamed in own
                     # image_transport and cuda_blackboard add sub topics under a base name
@@ -1454,20 +1491,81 @@ def _class_rows(atlas: Atlas) -> dict[str, list[dict]]:
 
 
 def _hands_off_unread(
-    files: set[str], classes: Mapping[str, list[dict]], defined: set[str]
+    files: set[str],
+    classes: Mapping[str, list[dict]],
+    defined: set[str],
+    functions: set[tuple[str, str]],
 ) -> bool:
     """Whether a class of a node's packages hands the node to a class no source of the read
-    set defines, `make_shared<Synchronizer>(this, topics)`: that class may create any
-    endpoint. The class rows sit in the header that declares the class, so every file of
-    the package is asked."""
+    set defines, `make_shared<Synchronizer>(this, topics)`, or to a free function no source
+    of its package states, `attach_diagnostics(this)`: that code may create any endpoint.
+    The class rows sit in the header that declares the class, so every file of the package
+    is asked."""
     packages = {ids.parse_file(file).package for file in files if ids.kind_of(file) == "file"}
+    for file, rows in classes.items():
+        package = ids.parse_file(file).package
+        if package not in packages:
+            continue
+        for row in rows:
+            for other in row.get("node_handoffs") or []:
+                spelled = str(other)
+                if spelled.endswith("()"):
+                    if (package, spelled[:-2]) not in functions:
+                        return True
+                elif _short_class(spelled) not in defined:
+                    return True
+    return False
+
+
+def _coded_values(atlas: Atlas, files: Iterable[str], key: str) -> list[str]:
+    out: list[str] = []
+    for file in files:
+        entity = atlas.entities.get(file)
+        for fact in entity.facts if entity else ():
+            if fact.layer == model.Layer.CODED.value:
+                out.extend(str(item) for item in fact.values.get(key) or [])
+    return out
+
+
+def _python_handoffs(atlas: Atlas, files: set[str]) -> bool:
+    """Whether a python source of the node hands the node, or builds it on a base, from a
+    module outside the read set: `InteractiveMarkerServer(self, 'markers')`."""
+    modules = {
+        ids.parse_file(file).relpath[:-3].replace("/", ".")
+        for file in files
+        if file.endswith(".py")
+    }
     return any(
-        not str(other).endswith("()") and _short_class(str(other)) not in defined
-        for file, rows in classes.items()
-        if ids.parse_file(file).package in packages
-        for row in rows
-        for other in row.get("node_handoffs") or []
+        not any(target.startswith(module + ".") for module in modules)
+        for target in _coded_values(atlas, files, "node_handoffs")
     )
+
+
+def _literal(atlas: Atlas, files: set[str], name: str) -> bool:
+    """Whether a source of the node spells the name, or a base it extends, as a string
+    literal anywhere, which a call the reader does not know may turn into an endpoint."""
+    bare = _bare(name)
+    return any(
+        bare == spelled or bare.startswith(spelled.rstrip("/") + "/")
+        for spelled in map(_bare, _coded_values(atlas, files, "name_literals"))
+        if spelled
+    )
+
+
+def _refused_packages(atlas: Atlas) -> set[str]:
+    """Packages holding a source the reader refused in whole or in part."""
+    out = {
+        ids.parse_file(entity.id).package
+        for entity in atlas.by_kind(model.NodeKind.FILE.value)
+        if entity.attrs.get("loadable") is False
+        and entity.attrs.get("language") in ("python", "cpp")
+    }
+    out.update(
+        ids.parse_file(entry.owner).package
+        for entry in atlas.unresolved
+        if entry.reason == "cpp_parse_error" and ids.kind_of(entry.owner) == "file"
+    )
+    return out
 
 
 def _bare(name: str) -> str:

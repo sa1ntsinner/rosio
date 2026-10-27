@@ -179,5 +179,6 @@
     "timers": 1,
     "parameters": 0,
     "unresolved": 0
-  }
+  },
+  "name_literals": ["/px/enable_motion", "/px/odom", "/px/points", "/px/ready", "/px/reset", "/px/scan", "cmd_vel", "px_literal"]
 }

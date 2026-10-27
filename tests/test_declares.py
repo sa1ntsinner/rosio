@@ -132,7 +132,7 @@ def atlas(tmp_path_factory) -> model.Atlas:
 
 def _undeclared(atlas: model.Atlas) -> set[str]:
     return {
-        ids.parse_param(finding.subject).name
+        finding.title.split(" ", 1)[0]
         for finding in atlas.findings
         if finding.rule == "param.set_undeclared"
     }
