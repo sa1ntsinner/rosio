@@ -2144,7 +2144,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     handler = HANDLERS[args.command]
     try:
-        return handler(args)
+        code = handler(args)
+        # Flushed here so a reader that already left breaks the pipe inside this try and
+        # not in the interpreter's own flush at exit, which prints a traceback.
+        sys.stdout.flush()
+        return code
     except RosioError as exc:
         print(f"{PROG}: {exc}", file=sys.stderr)
         return exit_code_for(exc)

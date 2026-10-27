@@ -1399,3 +1399,26 @@ def test_every_argument_of_every_verb_and_action_says_what_it_is():
                 yield f"{name} {'/'.join(action.option_strings) or action.metavar}"
 
     assert list(walk(cli.build_parser(), "rosio")) == []
+
+
+def test_output_still_buffered_when_the_reader_leaves_ends_quietly():
+    """Short output sits in the buffer until exit, so the pipe breaks at the final flush."""
+    import subprocess
+
+    script = (
+        "import sys, time\n"
+        "from rosio import cli\n"
+        "def answer(args):\n"
+        "    print('first'); print('x' * 2000)\n"
+        "    time.sleep(0.5)\n"
+        "    return 0\n"
+        "cli.HANDLERS['version'] = answer\n"
+        "sys.exit(cli.main(['version']))\n"
+    )
+    child = subprocess.Popen(
+        [sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    child.stdout.close()
+    err = child.stderr.read().decode()
+    assert child.wait(timeout=30) == 141
+    assert "Traceback" not in err and "BrokenPipeError" not in err
