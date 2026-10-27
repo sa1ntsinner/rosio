@@ -1297,3 +1297,24 @@ def test_extract_names_the_rendered_files_an_earlier_atlas_left_behind(tmp_path:
     (out / "DRIFT.md").write_text("Rendered from atlas sha256:0000000000000000", encoding="utf-8")
     assert main(["extract", str(tmp_path), "--out", str(out)]) == EXIT_OK
     assert "DRIFT.md describes an earlier atlas, rosio render" in capsys.readouterr().out
+
+
+def test_a_reader_that_closes_the_pipe_early_gets_no_traceback(tmp_path):
+    """`rosio drift | head` closes stdout before rosio is done writing."""
+    import subprocess
+
+    script = (
+        "import sys\n"
+        "from rosio import cli\n"
+        "cli.HANDLERS['version'] = lambda args: [print('x' * 80) for _ in range(100000)] and 0\n"
+        "sys.exit(cli.main(['version']))\n"
+    )
+    done = subprocess.run(
+        f'{sys.executable} -c "{script}" | head -n 1',
+        shell=True,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "Traceback" not in done.stderr
+    assert "BrokenPipeError" not in done.stderr

@@ -18,6 +18,7 @@ workspace setup file that exports its own would otherwise win.
 """
 
 import argparse
+import os
 import sys
 from collections.abc import Callable, Sequence
 
@@ -2069,6 +2070,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return exit_code_for(exc)
     except KeyboardInterrupt:
         return 130
+    except BrokenPipeError:
+        # A reader such as `head` stopped reading. Point stdout at devnull so the flush at
+        # exit does not raise again, and exit the way a shell reports SIGPIPE.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 141
 
 
 def commands() -> list[str]:
