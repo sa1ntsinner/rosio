@@ -41,8 +41,8 @@ tree of each robot model, with the joint behind every frame.
 ![The Launch and Frames views next to the launch file](https://raw.githubusercontent.com/sa1ntsinner/rosio/main/docs/media/vscode-launch.jpg)
 
 Show the robot model draws a URDF where its joints put each link, with the visual or collision
-shapes and the STL and OBJ meshes it names. Click a link for its joint as the file states it and
-the line to edit.
+shapes and the STL and OBJ meshes it names. Click a link for its joint as the file states it, the line to
+edit, and its pose relative to any other frame of the model.
 
 ![TurtleBot3 Burger in the robot model view](https://raw.githubusercontent.com/sa1ntsinner/rosio/main/docs/media/vscode-robot.jpg)
 
