@@ -251,6 +251,8 @@ def run(
     finally:
         ctx.close()
     _state_exceptions(builder, ws, cfg)
+    # The subject of a finding about the whole run, which no profile or package moves.
+    builder.node(ids.build_pkg(ids.REPO_PKG))
     _declare_layers(builder, passes)
     if any(name in STATIC for name in selected):
         _join(builder)

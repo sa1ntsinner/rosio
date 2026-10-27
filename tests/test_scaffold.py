@@ -70,14 +70,51 @@ def test_an_included_launch_file_that_needs_arguments_is_not_offered(workspace: 
     )
     alone = launch.with_name("alone.launch.py")
     alone.write_text(base.read_text(encoding="utf-8"), encoding="utf-8")
-    launch.write_text(
-        launch.read_text(encoding="utf-8") + "\n# includes needs_args.launch.py\n",
-        encoding="utf-8",
-    )
+    launch.with_name("top.launch.py").write_text(_including("needs_args.launch.py"))
     text = scaffold.render(default_config(str(workspace)), workspace)
     assert "needs_args.launch.py" not in text
     assert "alone.launch.py declares these with no default" in text
     assert "  #     description_file: ''" in text
+
+
+def _including(name: str, through_variable: bool = False) -> str:
+    source = f'os.path.join(get_package_share_directory("bot_bringup"), "launch", "{name}")'
+    return (
+        "import os\n"
+        "from ament_index_python.packages import get_package_share_directory\n"
+        "from launch import LaunchDescription\n"
+        "from launch.actions import IncludeLaunchDescription\n"
+        "from launch.launch_description_sources import PythonLaunchDescriptionSource\n"
+        "def generate_launch_description():\n"
+        + (f"    path = {source}\n" if through_variable else "")
+        + "    return LaunchDescription([IncludeLaunchDescription(\n"
+        + f"        PythonLaunchDescriptionSource({'path' if through_variable else source}))])\n"
+    )
+
+
+def test_only_a_real_include_hides_a_launch_file_that_needs_arguments(workspace: Path) -> None:
+    """`sim.launch.py` counted as included wherever `nav_sim.launch.py` was, and a comment
+    naming a file counted as including it."""
+    launch = next((workspace / "src").rglob("*.launch.py"))
+    needs = (
+        "from launch import LaunchDescription\n"
+        "from launch.actions import DeclareLaunchArgument\n"
+        "def generate_launch_description():\n"
+        "    return LaunchDescription([DeclareLaunchArgument('world')])\n"
+    )
+    for name in ("sim.launch.py", "nav_sim.launch.py", "noted.launch.py", "held.launch.py"):
+        launch.with_name(name).write_text(needs)
+    launch.with_name("top.launch.py").write_text(
+        _including("nav_sim.launch.py") + "# noted.launch.py starts the same nodes\n"
+    )
+    launch.with_name("other.launch.py").write_text(
+        _including("held.launch.py", through_variable=True)
+    )
+    text = scaffold.render(default_config(str(workspace)), workspace)
+    assert "sim.launch.py declares these with no default" in text
+    assert "noted.launch.py declares these with no default" in text
+    assert "nav_sim.launch.py" not in text
+    assert "held.launch.py" not in text
 
 
 def test_an_existing_file_is_kept_unless_asked(workspace: Path) -> None:

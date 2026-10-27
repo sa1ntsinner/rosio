@@ -741,6 +741,24 @@ def test_a_blind_spot_lands_on_the_symbol_that_owns_it(tmp_path: Path) -> None:
     assert atlas.entities[entry.owner].unresolved == [entry.id]
 
 
+def test_a_parameter_name_built_at_run_time_is_a_param_name_blind_spot(tmp_path: Path) -> None:
+    """The join reads `param_name` blind spots to decide which keys a node may declare, so a
+    python loop over names recorded under `other` made every key it is given undeclared."""
+    source = (
+        "from rclpy.node import Node\n"
+        "class N(Node):\n"
+        "    def __init__(self):\n"
+        "        super().__init__('n')\n"
+        "        self.declare_parameter('stop_distance', 0.5)\n"
+        "        for name in self._names():\n"
+        "            self.declare_parameter(name, 0.0)\n"
+    )
+    root = _package(tmp_path, {"user.py": source})
+    atlas, _collector = _atlas(root)
+    assert [(entry.want, entry.expr) for entry in atlas.unresolved] == [("param_name", "name")]
+    assert atlas.counters["resolution_rate"]["param_name"] == 0.5
+
+
 def test_one_unreadable_file_is_one_run_exception(tmp_path: Path) -> None:
     root = _package(tmp_path, {"user.py": USER, "broken.py": "def broken(:\n"})
     atlas, _collector = _atlas(root)

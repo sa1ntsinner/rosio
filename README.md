@@ -242,7 +242,8 @@ Arguments carry the command line's names (`only` as in `--only`, `source` and `t
 `rosio path`), except that `migrate` takes `start` for `--from` and accepts `from` too. An
 argument a tool does not take is refused with the names it does.
 The server starts without an atlas, and each tool then names the extract command that builds one.
-Over `--http`, `migrate` reads only the workspace the served atlas was written in.
+Over `--http`, `migrate` reads only the served workspace: the directory `--workspace` names, else
+the one above the `rosio-out` that holds the atlas, else the directory of the atlas itself.
 A worst case answer is under 4 KB. On very small models prefer the command
 line, where the skill file is 3.3 KB and carries six commands, the waiver file and a worked example.
 
@@ -304,7 +305,7 @@ rosio diff [--profile NAME] [--rev REV] [--repo DIR] [--cache-rules] [--workspac
 rosio render [--format {md,html}] [--atlas FILE] [--limit N]
 rosio install [--list] [--scope SCOPE] [--root DIR] [--home DIR] [--dry-run] [--force] [TARGET]
 rosio uninstall [--scope SCOPE] [--root DIR] [--home DIR] [--dry-run] [--force] [TARGET]
-rosio serve [--atlas FILE] [--stdio | --http] [--host ADDR] [--port N] [--api-key KEY] [--path PATH] [--stateless]
+rosio serve [--atlas FILE] [--stdio | --http] [--host ADDR] [--port N] [--api-key KEY] [--path PATH] [--stateless] [--workspace DIR]
 rosio hook install [--repo DIR] [--python PATH] [--workspace PATH] [--config FILE] [--force] [--dry-run] [--no-measure]
 rosio hook status [--repo DIR]
 rosio hook uninstall [--repo DIR] [--force] [--dry-run]

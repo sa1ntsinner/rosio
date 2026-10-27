@@ -182,7 +182,8 @@ PUBLIC_SOURCES = {
     "demos_src": {
         "unresolved": 13,
         "findings": {"extract.input_refused": 1},
-        "entities": 1882,
+        # One of them is pkg:@repo, the workspace every extraction writes.
+        "entities": 1883,
         "edges": 2404,
     },
     "rl_src": {
@@ -195,7 +196,7 @@ PUBLIC_SOURCES = {
         # The yaml or the code default reads publish_acceleration and publish_filtered_gps
         # false in four node profiles, so four publishes edges, the uses_type edge and the
         # /accel/filtered topic are not bound.
-        "entities": 1683,
+        "entities": 1684,
         "edges": 2328,
     },
 }

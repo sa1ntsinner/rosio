@@ -395,6 +395,9 @@ class LaunchDeclaredCollector:
                 }
                 if held is not None and held.share_path:
                     attrs["install_not_sourced"] = True
+                built = ctx.ws.unnamed_build(share)
+                if built:
+                    attrs["share_build"] = built
                 ctx.builder.node(ids.build_pkg(package), attrs=attrs)
 
         ctx.builder.add_profile(
@@ -2319,12 +2322,25 @@ INSTALL_UNNAMED = "workspace:install_unnamed"
 """An install tree a build made sits beside a src root and no root names it."""
 
 
+OUTSIDE_TREE = "a tree outside this workspace"
+
+
 def share_tree(ws: Workspace, share: str, ros_setup: Sequence[str] = ()) -> str:
     """The tree a share directory sits in, as a reader names it: `ROS jazzy` for a release
-    under `/opt/ros`, else the prefix as compared data may state it."""
+    under `/opt/ros`, else the prefix as compared data may state it inside the workspace.
+    Outside it the prefix is a property of one machine and its last segment names nothing a
+    reader can find, so the tree is said to be outside, and sourced when `ros_setup` holds it.
+    """
     prefix = str(Path(share).parent.parent)
     found = _DISTRO_PREFIX.fullmatch(prefix)
-    return f"ROS {found.group(1)}" if found else ws.stated_path(prefix, ros_setup)
+    if found:
+        return f"ROS {found.group(1)}"
+    stated = ws.stated_path(prefix, ros_setup)
+    if not stated.startswith(OUTSIDE):
+        return stated
+    if any(Path(prefix).is_relative_to(Path(setup).parent) for setup in ros_setup):
+        return f"{OUTSIDE_TREE} that ros_setup sources"
+    return OUTSIDE_TREE
 
 
 def _input_digest(

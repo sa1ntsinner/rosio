@@ -9,6 +9,8 @@ person merges the entry points that start together and states their arguments.
 
 from __future__ import annotations
 
+import ast
+import re
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -26,6 +28,7 @@ from rosio.config import (
     default_config,
 )
 from rosio.errors import UsageError
+from rosio.resolve import parse_python
 
 HEADER = """# rosio configuration, written by `rosio init`.
 #
@@ -62,24 +65,76 @@ def offered(cfg: Config) -> Config:
 
 
 def _included(profiles: Sequence[ProfileSpec]) -> set[str]:
-    """The file names one launch file of the tree names inside another, which is how an
-    include reads: `PythonLaunchDescriptionSource([..., "rrbot_base.launch.py"])`."""
-    texts: dict[str, str] = {}
+    """The file names one launch file of the tree includes from another, read from the
+    include itself: `PythonLaunchDescriptionSource([..., "rrbot_base.launch.py"])`, the
+    variable such a source is handed, or the `file` of an xml or yaml include. A name a
+    comment mentions, or one that ends another name, includes nothing."""
+    out: set[str] = set()
     for profile in profiles:
         for item in profile.entrypoints:
-            if item.verb == "launch" and item.origin is not None:
-                try:
-                    texts[item.origin.path] = Path(item.origin.path).read_text(
-                        encoding="utf-8", errors="replace"
-                    )
-                except OSError:
-                    continue
-    names = {Path(path).name for path in texts}
-    return {
-        name
-        for name in names
-        if any(name in text for path, text in texts.items() if Path(path).name != name)
+            if item.verb != "launch" or item.origin is None:
+                continue
+            path = Path(item.origin.path)
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            spelled = _python_includes(text) if path.suffix == ".py" else _frontend_includes(text)
+            out.update({re.split(r"[/\\]", value.strip())[-1] for value in spelled} - {path.name})
+    return out
+
+
+INCLUDE_CALLS = frozenset(
+    {
+        "IncludeLaunchDescription",
+        "PythonLaunchDescriptionSource",
+        "AnyLaunchDescriptionSource",
+        "FrontendLaunchDescriptionSource",
+        "XMLLaunchDescriptionSource",
+        "YAMLLaunchDescriptionSource",
     }
+)
+
+
+def _python_includes(text: str) -> list[str]:
+    try:
+        tree = parse_python(text)
+    except (SyntaxError, ValueError):
+        return []
+    assigned: dict[str, list[ast.AST]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assigned.setdefault(target.id, []).append(node.value)
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = node.func.attr if isinstance(node.func, ast.Attribute) else ""
+        called = node.func.id if isinstance(node.func, ast.Name) else called
+        if called not in INCLUDE_CALLS:
+            continue
+        pending: list[ast.AST] = [*node.args, *(item.value for item in node.keywords)]
+        seen: set[str] = set()
+        while pending:
+            part = pending.pop()
+            if isinstance(part, ast.Name) and part.id not in seen:
+                seen.add(part.id)
+                pending.extend(assigned.get(part.id, []))
+                continue
+            for inner in ast.walk(part):
+                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                    out.append(inner.value)
+                elif isinstance(inner, ast.Name) and inner.id not in seen:
+                    pending.append(inner)
+    return out
+
+
+def _frontend_includes(text: str) -> list[str]:
+    return re.findall(r"<include\b[^>]*?\bfile\s*=\s*[\"']([^\"']+)", text) + re.findall(
+        r"\binclude:\s*\n\s*file:\s*[\"']?([^\"'\n]+)", text
+    )
 
 
 def _include_only(entry: Entrypoint, included: set[str]) -> bool:

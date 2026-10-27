@@ -628,8 +628,12 @@ class Workspace:
     def install_unnamed(self) -> bool:
         """Whether a colcon install tree sits beside a src root and no root names it, so a
         build the person ran is not what this run reads."""
+        return bool(self._unnamed_installs())
+
+    def _unnamed_installs(self) -> list[Path]:
         named = {Path(spec.path).resolve() for spec in self.roots}
         index = Path("share", "ament_index", "resource_index", "packages")
+        out: list[Path] = []
         for spec in self.roots:
             if spec.kind != records.ROOTS[0]:
                 continue
@@ -639,8 +643,28 @@ class Workspace:
             if (install / index).is_dir() or any(
                 (child / index).is_dir() for child in install.iterdir() if child.is_dir()
             ):
-                return True
-        return False
+                out.append(install)
+        return out
+
+    def unnamed_build(self, share: str) -> str:
+        """How the install tree beside a src root that no root names holds a share directory:
+        `symlinked` when a `--symlink-install` build links files of it back to a src root,
+        `copied` when it holds them as copies, and empty when the share is not in such a tree.
+        """
+        directory = Path(share).resolve()
+        if not any(directory.is_relative_to(install) for install in self._unnamed_installs()):
+            return ""
+        sources = [
+            Path(spec.path).resolve() for spec in self.roots if spec.kind == records.ROOTS[0]
+        ]
+        for parent, _dirs, files in os.walk(directory):
+            for name in files:
+                path = Path(parent, name)
+                if path.is_symlink() and any(
+                    path.resolve().is_relative_to(source) for source in sources
+                ):
+                    return "symlinked"
+        return "copied"
 
     def underlay_twin(self, path: str) -> str | None:
         """The workspace file a share file outside every root stands for: the same package

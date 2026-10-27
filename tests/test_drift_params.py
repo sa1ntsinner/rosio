@@ -735,6 +735,60 @@ def test_a_name_built_at_run_time_matches_only_what_its_literal_text_allows():
     assert not join.could_name('"%s_rate" % name', "rate_limit")
 
 
+def test_a_name_chosen_by_a_condition_or_a_lookup_could_be_any_name():
+    """The literals of `use_fast_ ? "fast_gain" : "slow_gain"` are two whole names and the one
+    of `names_.at("gain_key")` is a map key, so neither spells a piece of the name. Only a
+    plain concatenation or a format string is read for its literal text."""
+    from rosio import join
+
+    for expr, name in [
+        ('use_fast_ ? "fast_gain" : "slow_gain"', "fast_gain"),
+        ('use_fast_ ? "fast_gain" : "slow_gain"', "slow_gain"),
+        ('names_.at("gain_key")', "kp"),
+        ('names_["gain_key"]', "kp"),
+        ('names_.find("gain_key")->second', "kp"),
+        ('self._names.get("gain_key")', "kp"),
+        ('"fast_gain" if fast else "slow_gain"', "slow_gain"),
+        ('lookup("gain_key") + "_x"', "kp_x"),
+    ]:
+        assert join.could_name(expr, name), expr
+    for expr in [
+        'std::string("sensor.") + sensor_id',
+        'fmt::format("sensor.{}", sensor_id)',
+        '"sensor.{}".format(sensor_id)',
+        'f"sensor.{sensor_id}"',
+        '"sensor.%s" % (sensor_id)',
+    ]:
+        assert not join.could_name(expr, "max_speed"), expr
+
+
+def test_a_name_another_profile_declares_is_still_undeclared_in_this_one():
+    """A sim and a real profile can start one node name from two executables. The code the
+    other profile runs declaring and reading max_speed says nothing about this profile."""
+    atlas = _undeclared_atlas()
+    param_id = ids.build_param(NODE, "max_speed")
+    atlas.entities[param_id].facts.append(
+        model.LayerFact(layer=CODED, profile=OTHER_PROFILE, values={"declared_in_code": True})
+    )
+    symbol = ids.build_sym("demo_sim", "src/sim_server.cpp", "SimServer::on_timer")
+    atlas.entities[symbol] = model.Node(id=symbol, kind="sym", label=symbol)
+    edge = model.Edge(
+        kind=model.EdgeKind.READS_PARAM.value,
+        src=symbol,
+        dst=param_id,
+        key=ids.edge_key(profile=OTHER_PROFILE, symbol=symbol, name="max_speed"),
+        facts=[model.LayerFact(layer=CODED, profile=OTHER_PROFILE, values={})],
+    )
+    atlas.edges[edge.id] = edge
+    found = _run(atlas, "param.set_undeclared")
+    assert [(item.subject, item.profiles) for item in found] == [(param_id, [PROFILE])]
+
+
+def test_param_set_undeclared_is_silent_for_a_name_a_condition_chooses():
+    atlas = _with_blind(_undeclared_atlas(), 'use_fast_ ? "fast_gain" : "slow_gain"')
+    assert _run(atlas, "param.set_undeclared") == []
+
+
 def test_param_set_undeclared_is_silent_when_the_bound_source_only_runs_a_class():
     """A `main` constructing a class defined in another file read none of its declarations."""
     atlas = _undeclared_atlas(states_node=False)

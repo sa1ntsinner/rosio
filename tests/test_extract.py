@@ -104,6 +104,12 @@ def test_extract_writes_a_valid_atlas(tmp_path: Path, ws: Workspace):
     assert atlas.entities, "an empty atlas is not an extraction"
 
 
+def test_every_atlas_holds_the_workspace_entity(tmp_path: Path, ws: Workspace):
+    """A finding about the whole run is about this entity, so adding a profile moves no id."""
+    atlas = extract.run(_config(tmp_path / "out", ws), ws)
+    assert ids.build_pkg(ids.REPO_PKG) in atlas.entities
+
+
 def test_the_file_is_written_through_the_pinned_encoder(tmp_path: Path, ws: Workspace):
     cfg = _config(tmp_path / "out", ws)
     atlas = extract.run(cfg, ws)

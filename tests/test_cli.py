@@ -1078,6 +1078,8 @@ def test_serve_hands_the_server_every_flag_it_takes(served, tmp_path: Path):
         "--path",
         "/tools",
         "--stateless",
+        "--workspace",
+        str(tmp_path),
     ]
     assert main(argv) == EXIT_OK
 
@@ -1085,6 +1087,7 @@ def test_serve_hands_the_server_every_flag_it_takes(served, tmp_path: Path):
     assert options.atlas == str(atlas)
     assert (options.http, options.host, options.port) == (True, "0.0.0.0", 9001)
     assert (options.api_key, options.path, options.stateless) == ("shh", "/tools", True)
+    assert options.workspace == str(tmp_path)
 
 
 def test_serve_defaults_to_stdio_and_to_the_atlas_under_out(served, tmp_path: Path):

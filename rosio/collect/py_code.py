@@ -39,7 +39,15 @@ LAYER = model.Layer.CODED.value
 NAME = "py_code"
 SUFFIXES = (".py",)
 
-WANTS = ("topic_name", "service_name", "node_name", "param_value", "frame_id", "other")
+WANTS = (
+    "topic_name",
+    "service_name",
+    "node_name",
+    "param_name",
+    "param_value",
+    "frame_id",
+    "other",
+)
 
 REFUSED_PY_SOURCE = "py_parse_error"
 
@@ -1766,8 +1774,9 @@ class PyFile:
         prefix: str = "",
     ) -> tuple[dict[str, Any] | None, Val]:
         if not (name.known and isinstance(name.value, str)):
-            self._blind("other", self._src(name_node), name.reason, ctx.symbol, name_node)
+            self._blind("param_name", self._src(name_node), name.reason, ctx.symbol, name_node)
             return None, Val(expr=name.expr, reason=name.reason or "call_result")
+        self.resolved_counts["param_name"] += 1
         full = f"{prefix}.{name.value}" if prefix else name.value
         record: dict[str, Any] = {
             "name": full,

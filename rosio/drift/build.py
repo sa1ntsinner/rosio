@@ -780,7 +780,9 @@ def build_underlay(atlas: Atlas) -> list[Finding]:
     a package an install root holds whose setup file nobody sourced, it is the release again.
     Either way every value of that package comes from a copy nobody in this workspace edits,
     and an edit that changes nothing reads as a tool that is wrong, so one finding per
-    package says so.
+    package says so. A share in the install tree beside src that no root names is the build of
+    the src package, sourced but not read by rosio, and the finding says so rather than
+    calling the package unbuilt.
     """
     findings: list[Finding] = []
     for node in atlas.by_kind(model.NodeKind.PKG.value):
@@ -799,6 +801,19 @@ def build_underlay(atlas: Atlas) -> list[Finding]:
                 f"{package} is built but its install tree is not sourced, so its launch files "
                 f"read the copy in {tree}: source that install tree's setup.bash."
             )
+        elif node.attrs.get("share_build"):
+            held = (
+                "the install tree beside the source root holds a build of it and no root names "
+                "that tree, so rosio reads src while the launch walk reads the build"
+            )
+            fix = _build_fix(atlas, package)
+            took = (
+                "a file the build links back to src takes effect as soon as it is saved, and "
+                "one it copied only after colcon build."
+                if node.attrs["share_build"] == "symlinked"
+                else "edits in src take effect only after colcon build."
+            )
+            say = f"{package} is read from {tree}, the build of its src package: {took}"
         else:
             held = "only a source root holds it, which is what ros2 launch reads before a build"
             fix = _build_fix(atlas, package)
@@ -908,11 +923,16 @@ def resolution_below_budget(
 
 
 def _whole_run_subject(atlas: Atlas) -> str:
-    """The first profile, else the first package, else the first run or owner of a blind spot.
+    """The workspace, which extraction always writes as `pkg:@repo`, so adding a profile or a
+    package moves no id. An atlas without it falls back to the first profile, else the first
+    package, else the first run or owner of a blind spot.
 
     A run id carries the digest of its inputs and changes with every edit, so it is the last
     choice: a subject that moves when a blind spot is repaired un waives the finding.
     """
+    workspace = ids.build_pkg(ids.REPO_PKG)
+    if workspace in atlas.entities:
+        return workspace
     for kind in (model.NodeKind.PROFILE.value, model.NodeKind.PKG.value):
         found = sorted(node.id for node in atlas.by_kind(kind))
         if found:

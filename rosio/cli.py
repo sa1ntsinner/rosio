@@ -604,6 +604,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="hold no session between requests, for a load balanced deployment",
     )
+    serve.add_argument(
+        "--workspace",
+        default="",
+        metavar="DIR",
+        help="the directory migrate may read over http, default the directory above the "
+        "rosio-out that holds the atlas, else the atlas's own directory",
+    )
 
     hook = _sub(
         subparsers,
@@ -1930,6 +1937,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         api_key=args.api_key,
         path=args.path,
         stateless=args.stateless,
+        workspace=args.workspace,
     ).check()
     if options.http and not args.quiet:
         guard = "key required" if options.api_key else "loopback only, no key"

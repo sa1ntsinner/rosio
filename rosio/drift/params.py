@@ -417,7 +417,7 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             if len(sources) > 3:
                 shown.append(f"{len(sources) - 3} more files")
             read = ", ".join(shown) or "its source"
-            near = _nearest_name(name, declared.get(owner_id, set()))
+            near = _nearest_name(name, join.declared_in(declared, owner_id, profile))
             meant = (
                 f" {owner_text} declares {near}, which is likely what was meant." if near else ""
             )

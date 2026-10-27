@@ -136,7 +136,11 @@ record and is not read.
   literal true (an rclpy keyword, or a `NodeOptions` call in the C++ file), and `unknown` when
   the value is not a literal. The join states it on the node's `coded` fact, and a node that
   carries it, or whose sources read the parameter back, is never said to ignore a value a file
-  sets.
+  sets. A C++ `NodeOptions` call is decided per construction: the `main` construction whose
+  arguments hold it, directly or through the options variable it sets, or the class whose
+  base initializer takes it. Only a call that cannot be traced to one construction marks every
+  row of the file, and the join reads the construction rows of the node's own classes, so a
+  helper node built to take any parameter speaks for itself alone.
 * `parameters` and `plugin_parameters` are two record kinds and not one list: a row carrying
   a base class or a suffix is a suffix only declaration bound to a plugin and never becomes a
   node parameter. The join reads both at one call site, `Carrier.declarations`, because the
@@ -514,7 +518,14 @@ with per candidate provenance.
 * A key the yaml sets that no declaration of the node names is decided per key, never per
   file. A declaration whose name is built at run time hides only the keys its literal text
   could spell (`"sensor." + id` never builds `min_range`): such a key is `other` in that
-  profile and wins nothing, with a note saying why, and any other key is `undeclared`.
+  profile and wins nothing, with a note saying why, and any other key is `undeclared`. The
+  literal text is read as pieces of the name only in a plain concatenation or a format string;
+  a condition choosing between names, a subscript, or a call taking a literal
+  (`names_.at("gain_key")`) could build any name and hides every key. The C++ and the python
+  collectors both record such a declaration as a `param_name` blind spot and count the
+  declarations they read under the same want. What a node declares or reads back is taken
+  from the profile the code ran in, because a sim and a real profile can start one node name
+  from two executables.
 * A python write whose value folded but whose guard did not is a candidate carrying the guard
   text, and remains a blind spot: the parameter stays `other` in that profile and nothing
   wins. Dropping the write hides the only line an engineer can edit, and letting it win names
@@ -694,7 +705,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.21`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.22`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -827,6 +838,12 @@ What was added, in the order it arrived:
   relative path in the workspace, at that file's own line. `missing` is the file id of a
   workspace file a walk step did not find.
 
+* in `1.22`, the package attribute `share_build`, `copied` or `symlinked`, on a package whose
+  share the walk read from the install tree beside a src root that no root names. That tree
+  is the build of the src package, and `build.underlay` says so instead of calling the
+  package unbuilt; `symlinked` means a `--symlink-install` build links files back to src, so
+  an edit to those files takes effect without a build.
+
 One observed key was renamed in `1.17` without a major bump. The process table wrote the
 whole command line of a node under `argv`, the key under which the declared layer states only
 the arguments a launch file passes, so every launched node with arguments disagreed with
@@ -946,7 +963,18 @@ no declaration names while a declaration built at run time could is no longer `e
 and `param.set_undeclared` decides per key, so a file holding one such declaration no longer
 silences every key of its node. No release had shipped, so no stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.21` file: `Atlas.from_json` compares the major
+Inside `1.22` several ids moved besides the new key. `resolution.below_budget` is about
+`pkg:@repo`, the workspace, which extraction now writes into every atlas, instead of the
+first profile by id, so its finding id moved once and no added profile or package moves it
+again; an atlas without that entity keeps the old choice. A python declaration whose name is
+built at run time is a `param_name` blind spot rather than an `other` one, which moved the id
+of each such entry, and python declarations the reader followed now count under
+`param_name`, which moved that rate. `build.underlay` names a tree outside the workspace as
+`a tree outside this workspace`, with `that ros_setup sources` when a setup file holds it,
+instead of its last directory, and states the build beside src as a build, which moved the
+fingerprints of those findings. No release had shipped, so no stored id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.22` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

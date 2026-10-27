@@ -1653,6 +1653,18 @@ def test_below_budget_fires_when_no_profile_owns_the_blind_spots():
     assert "0.000" in found[0].say
 
 
+def test_below_budget_keeps_its_id_when_a_profile_is_added():
+    """The subject was the first profile, so a profile whose slug sorts first moved the id
+    and un waived the finding. The workspace entity extraction always writes does not move."""
+    builder = _budget_atlas(unresolved=4)
+    builder.node(ids.build_pkg(ids.REPO_PKG))
+    before = _ids(build_rules.resolution_below_budget(builder.build()))
+    builder.node(ids.build_profile("aaa_first"))
+    after = _ids(build_rules.resolution_below_budget(builder.build()))
+    assert before == after and len(before) == 1
+    assert before[0].startswith("find:resolution.below_budget|pkg:@repo|")
+
+
 def test_below_budget_keeps_its_id_across_two_runs():
     first = _ids(build_rules.resolution_below_budget(_budget_atlas(unresolved=4).build()))
     second = _ids(build_rules.resolution_below_budget(_budget_atlas(unresolved=4).build()))

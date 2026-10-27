@@ -869,6 +869,43 @@ def test_an_install_tree_beside_src_that_no_root_names_is_noticed(bench: Path) -
     assert not _discover(bench).install_unnamed()
 
 
+def test_a_share_in_the_install_tree_beside_src_is_the_build_of_the_src_package(
+    bench: Path,
+) -> None:
+    """With `roots: [src]` the walk read install/ after colcon build, and the finding said the
+    package was not built. A `--symlink-install` build links its files back to src."""
+    index = bench / "install" / "demo_pkg" / "share" / "ament_index" / "resource_index"
+    _write(index / "packages" / "demo_pkg", "")
+    ws = Workspace.discover([RootSpec("src", str(bench / "src"))])
+    share = bench / "install" / "demo_pkg" / "share" / "demo_pkg"
+    assert ws.unnamed_build(str(share)) == "copied"
+    assert _discover(bench).unnamed_build(str(share)) == ""
+    assert ws.unnamed_build(str(bench / "elsewhere" / "share" / "demo_pkg")) == ""
+    linked = share / "launch" / "linked.launch.py"
+    try:
+        linked.symlink_to(bench / "src" / "demo_pkg" / "launch" / "demo.launch.py")
+    except OSError:
+        pytest.skip("this file system makes no symbolic links")
+    assert ws.unnamed_build(str(share)) == "symlinked"
+
+
+def test_a_tree_outside_the_workspace_is_never_named_by_its_last_segment(
+    bench: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """A second workspace read `the copy in rover_description`, which names nothing."""
+    from rosio.collect import launch_declared
+
+    ws = Workspace.discover([RootSpec("src", str(bench / "src"))])
+    other = tmp_path_factory.mktemp("other_ws") / "install"
+    share = str(other / "demo_pkg" / "share" / "demo_pkg")
+    assert launch_declared.share_tree(ws, share) == "a tree outside this workspace"
+    sourced = launch_declared.share_tree(ws, share, [str(other / "setup.bash")])
+    assert sourced == "a tree outside this workspace that ros_setup sources"
+    assert launch_declared.share_tree(ws, "/opt/ros/jazzy/share/demo_pkg") == "ROS jazzy"
+    beside = str(bench / "install" / "demo_pkg" / "share" / "demo_pkg")
+    assert launch_declared.share_tree(ws, beside) == "install/demo_pkg"
+
+
 def test_a_released_share_file_stands_for_the_same_file_in_the_package_source(
     bench: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:

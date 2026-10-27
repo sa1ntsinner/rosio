@@ -492,6 +492,7 @@ class Unit:
     string_maps: dict[str, tuple[str, int]] = field(default_factory=dict)
     map_mutations: set[str] = field(default_factory=set)
     auto_declare: bool | str = False
+    auto_declare_classes: dict[str, bool | str] = field(default_factory=dict)
 
     @property
     def syntax(self) -> Any:
@@ -2347,10 +2348,29 @@ AUTO_DECLARE_OPTIONS = frozenset(
 )
 
 
-def _auto_declare(root: Any, src: bytes) -> bool | str:
-    """Whether a `NodeOptions` chain in this file lets its node take parameters it never
-    declares: True for a literal `true`, `unknown` when the value is not a literal."""
-    found: bool | str = False
+def _stronger(left: bool | str, right: bool | str) -> bool | str:
+    return True if True in (left, right) else ("unknown" if "unknown" in (left, right) else False)
+
+
+def _auto_declare(
+    root: Any, src: bytes
+) -> tuple[bool | str, dict[int, bool | str], dict[str, bool | str]]:
+    """Which node a `NodeOptions` chain lets take parameters it never declares: True for a
+    literal `true`, `unknown` when the value is not a literal.
+
+    A chain is decided per node construction where the code allows: the construction in
+    `main` whose arguments hold it, directly or through the options variable it sets, or the
+    class whose base initializer takes it. A chain this cannot trace to one construction (a
+    helper function building the options, say) falls back to the whole file, which is the
+    only case where one helper node built to take any parameter still speaks for every node
+    of the file. Returns the file fallback, the value per construction site by its first
+    byte, and the value per class by its unqualified name.
+    """
+    fallback: bool | str = False
+    sites: dict[int, bool | str] = {}
+    classes: dict[str, bool | str] = {}
+    variables: dict[str, bool | str] = {}
+    constructions = _main_constructions(root, src)
     stack = [root]
     while stack:
         node = stack.pop()
@@ -2361,18 +2381,93 @@ def _auto_declare(root: Any, src: bytes) -> bool | str:
         if name not in AUTO_DECLARE_OPTIONS or receiver is None:
             continue
         arguments = _args(node)
-        value = _flat(arguments[0], src) if len(arguments) == 1 else ""
-        if value == "true":
-            return True
-        if value != "false":
-            found = "unknown"
-    return found
+        flat = _flat(arguments[0], src) if len(arguments) == 1 else ""
+        if flat == "false":
+            continue
+        value: bool | str = True if flat == "true" else "unknown"
+        holders = [
+            site
+            for _name, _arguments, site in constructions
+            if site.start_byte <= node.start_byte and node.end_byte <= site.end_byte
+        ]
+        if holders:
+            site = min(holders, key=lambda item: item.end_byte - item.start_byte)
+            sites[site.start_byte] = _stronger(sites.get(site.start_byte, False), value)
+            continue
+        owner = _initialized_class(node, src)
+        variable = "" if owner else _options_variable(node, src)
+        if owner:
+            classes[owner] = _stronger(classes.get(owner, False), value)
+        elif variable:
+            variables[variable] = _stronger(variables.get(variable, False), value)
+        else:
+            fallback = _stronger(fallback, value)
+    used: set[str] = set()
+    for _name, arguments, site in constructions:
+        for argument in arguments:
+            variable = _flat(argument, src).strip("&* ")
+            if variable in variables:
+                used.add(variable)
+                sites[site.start_byte] = _stronger(
+                    sites.get(site.start_byte, False), variables[variable]
+                )
+    for variable, value in variables.items():
+        if variable not in used:
+            fallback = _stronger(fallback, value)
+    return fallback, sites, classes
+
+
+def _chain_top(node: Any) -> Any:
+    while node.parent is not None and node.parent.type in ("call_expression", "field_expression"):
+        node = node.parent
+    return node
+
+
+def _initialized_class(node: Any, src: bytes) -> str:
+    """The class whose base initializer takes this options chain as an argument."""
+    holder = _chain_top(node).parent
+    if holder is None or holder.type != "argument_list":
+        return ""
+    if holder.parent is None or holder.parent.type != "field_initializer":
+        return ""
+    parent = holder.parent
+    while parent is not None:
+        if parent.type in ("class_specifier", "struct_specifier"):
+            name = _child(parent, "name")
+            return _text(name, src).rpartition("::")[2] if name is not None else ""
+        if parent.type == "function_definition":
+            declarator = _child(parent, "declarator")
+            while declarator is not None and declarator.type != "function_declarator":
+                declarator = _child(declarator, "declarator")
+            name = _child(declarator, "declarator") if declarator is not None else None
+            qualified = _text(name, src) if name is not None else ""
+            if "::" in qualified:
+                return qualified.rpartition("::")[0].rpartition("::")[2]
+        parent = parent.parent
+    return ""
+
+
+def _options_variable(node: Any, src: bytes) -> str:
+    """The variable an options chain initialises or sets, `options` in both
+    `auto options = rclcpp::NodeOptions().allow_undeclared_parameters(true);` and
+    `options.allow_undeclared_parameters(true);`."""
+    holder = _chain_top(node).parent
+    if holder is not None and holder.type == "init_declarator":
+        declarator = _child(holder, "declarator")
+        return _text(declarator, src).strip("&* ") if declarator is not None else ""
+    base = node
+    while base is not None and base.type in ("call_expression", "field_expression"):
+        base = _child(base, "function" if base.type == "call_expression" else "argument")
+    return _text(base, src) if base is not None and base.type == "identifier" else ""
 
 
 def _constructions(unit: Unit, rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     if not unit.auto_declare:
         return list(rows)
-    return [{**row, "auto_declare": unit.auto_declare} for row in rows]
+    return [
+        {**row, "auto_declare": _stronger(row.get("auto_declare", False), unit.auto_declare)}
+        for row in rows
+    ]
 
 
 def _declares_with(body: Any, src: bytes, parameter: str) -> bool:
@@ -2432,12 +2527,14 @@ def parse_text(
         reader.constructor_arguments.setdefault(name, []).append(values)
     reader.walk(root)
     unit.type_aliases = _type_aliases(root, src)
-    unit.auto_declare = _auto_declare(root, src)
+    unit.auto_declare, auto_sites, unit.auto_declare_classes = _auto_declare(root, src)
     # the mutations are a second, whole tree walk that only a map default ever asks for
     unit.string_maps = _string_map_records(root, src, mutations_wanted=False)[0]
     for name, values, site in sites:
         unit.construction_sites.append((name, values, _line(site)))
         row = {"class": name, "owner_symbol": "main", "line_hint": _line(site)}
+        if auto_sites.get(site.start_byte):
+            row["auto_declare"] = auto_sites[site.start_byte]
         if site.type == "call_expression" and _call_parts(site, src)[0] not in {
             "make_shared",
             "make_unique",
@@ -3971,8 +4068,12 @@ def file_report(
             row["construction_ambiguous"] = True
         if item.takes_node_options:
             row["takes_node_options"] = True
-        if unit.auto_declare:
-            row["auto_declare"] = unit.auto_declare
+        auto = _stronger(
+            unit.auto_declare,
+            unit.auto_declare_classes.get(item.qualname.rpartition("::")[2], False),
+        )
+        if auto:
+            row["auto_declare"] = auto
         if not item.stated_name:
             row["unresolved_ref"] = f"node_name:{item.name_expr}"
             unresolved.append(

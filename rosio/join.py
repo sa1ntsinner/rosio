@@ -877,13 +877,22 @@ _STRING = re.compile(r"\"((?:[^\"\\]|\\.)*)\"|'((?:[^'\\]|\\.)*)'")
 _PLACEHOLDER = re.compile(r"\{[^{}]*\}|%[-+ #0-9.]*[a-z]")
 
 
+_CHOICE = re.compile(r"[?\[]|\|\||&&|\b(?:if|else|or|and)\b")
+_FORMATTERS = frozenset({"", "std::string", "string", "std::format", "fmt::format", "str"})
+_CALLEE = re.compile(r"([\w:]*)\s*$")
+
+
 def could_name(expr: str, name: str) -> bool:
     """Whether a name built at run time from `expr` can be `name`.
 
     The text the expression spells as string literals has to appear in the name in that
     order: `"sensor." + id` builds `sensor.front` and never `min_range`. An expression with
-    no literal, a constant or a variable, could build any name.
+    no literal, a constant or a variable, could build any name. Literals are pieces of the
+    name only in a plain concatenation or a format string: a condition choosing between two
+    names, a subscript, or a call taking a literal (`names_.at("gain_key")`) could build any.
     """
+    if not _spells_pieces(expr):
+        return True
     pieces = [
         piece
         for found in _STRING.finditer(expr)
@@ -899,22 +908,50 @@ def could_name(expr: str, name: str) -> bool:
     return True
 
 
-def declared_names(atlas: model.Atlas) -> dict[str, set[str]]:
-    """Owner node id to the parameter names its source declares or reads back.
+def _spells_pieces(expr: str) -> bool:
+    blank = _STRING.sub(lambda found: '"' + " " * (len(found.group(0)) - 2) + '"', expr)
+    if _CHOICE.search(blank):
+        return False
+    for found in _STRING.finditer(blank):
+        before = re.sub(r"[fFrRbBuU]{1,2}$", "", blank[: found.start()]).rstrip()
+        if before.endswith(","):
+            depth = 0
+            for at in range(len(before) - 1, -1, -1):
+                depth += {")": 1, "(": -1}.get(before[at], 0)
+                if depth < 0:
+                    before = before[: at + 1]
+                    break
+            else:
+                return False
+        if before.endswith("(") and _CALLEE.search(before[:-1]).group(1) not in _FORMATTERS:
+            return False
+    return True
+
+
+def declared_names(atlas: model.Atlas) -> dict[tuple[str, str], set[str]]:
+    """Owner node id and profile to the parameter names its source declares or reads back.
 
     A read of a name no declaration carries is the code using the value all the same, through
     a declaration this reader could not follow or a node that takes undeclared parameters.
+    The profile is the one the code ran in, because a sim and a real profile can start one
+    node name from two executables; `declared_in` adds what holds in every profile.
     """
-    out: dict[str, set[str]] = {}
+    out: dict[tuple[str, str], set[str]] = {}
     for node in atlas.by_kind(model.NodeKind.PARAM.value):
-        if any(fact.layer == CODED and fact.values.get("declared_in_code") for fact in node.facts):
-            parsed = ids.parse_param(node.id)
-            out.setdefault(parsed.owner, set()).add(parsed.name)
+        parsed = ids.parse_param(node.id)
+        for fact in node.facts:
+            if fact.layer == CODED and fact.values.get("declared_in_code"):
+                out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
     for edge in atlas.edges.values():
         if edge.kind == model.EdgeKind.READS_PARAM.value:
             parsed = ids.parse_param(edge.dst)
-            out.setdefault(parsed.owner, set()).add(parsed.name)
+            for fact in edge.facts:
+                out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
     return out
+
+
+def declared_in(declared: Mapping[tuple[str, str], set[str]], owner: str, profile: str) -> set[str]:
+    return declared.get((owner, profile), set()) | declared.get((owner, model.ANY_PROFILE), set())
 
 
 DECLARED_STATE = "declared"
@@ -927,7 +964,7 @@ def reading(
     node: model.Node,
     profile: str,
     blind: Mapping[str, Sequence[str]],
-    declared: dict[str, set[str]],
+    declared: Mapping[tuple[str, str], set[str]],
 ) -> str:
     """Whether the node a parameter belongs to declares it in this profile, decided per key.
 
@@ -955,12 +992,11 @@ def reading(
     ):
         return ""
     sources = set(coded.values.get("coded_sources") or [])
-    if parsed.owner not in declared and not any(_states_node(atlas, s) for s in sources):
+    names = declared_in(declared, parsed.owner, profile)
+    if not names and not any(_states_node(atlas, s) for s in sources):
         return ""
     own = node.fact(CODED, profile)
-    if parsed.name in declared.get(parsed.owner, ()) or (
-        own is not None and own.values.get("declared_in_code")
-    ):
+    if parsed.name in names or (own is not None and own.values.get("declared_in_code")):
         return DECLARED_STATE
     if any(could_name(expr, parsed.name) for item in sources for expr in blind.get(item, ())):
         return UNKNOWN_STATE
@@ -972,7 +1008,7 @@ def ignored(
     node: model.Node,
     profile: str,
     blind: Mapping[str, Sequence[str]],
-    declared: dict[str, set[str]],
+    declared: Mapping[tuple[str, str], set[str]],
 ) -> bool:
     """Whether the node never declares the parameter in this profile, so it ignores it."""
     return reading(atlas, node, profile, blind, declared) == UNDECLARED_STATE
@@ -1279,6 +1315,32 @@ def _component_files(atlas: model.Atlas) -> dict[str, set[str]]:
 
 # ---------------------------------------------------------------------------
 # identity
+
+
+def auto_declare_of(name: str, found: tuple[Carrier, ...]) -> bool | str | None:
+    """Whether the node an instance runs is built to take parameters it never declares.
+
+    The collector marks the construction or the class whose options say so, so a helper node
+    `main` builds with options of its own speaks only for its class. The node rows named like
+    the instance pick its classes when the code names several, and every row counts when it
+    names none of them.
+    """
+    nodes = [row for carrier in found for row in carrier.nodes]
+    mine = [row for row in nodes if name and row.get("name") == name] or nodes
+    classes = {str(row.get("class") or "").rpartition("::")[2] for row in mine}
+    rows = [
+        *mine,
+        *(
+            row
+            for carrier in found
+            for row in carrier.constructions
+            if not mine or str(row.get("class") or "").rpartition("::")[2] in classes
+        ),
+    ]
+    auto = {row.get("auto_declare") for row in rows if row.get("auto_declare")}
+    if not auto:
+        return None
+    return True if True in auto else "unknown"
 
 
 def _code_names(found: tuple[Carrier, ...]) -> list[str]:
@@ -1760,14 +1822,9 @@ def _bind_instance(
     stated = _code_namespace(found)
     if stated:
         values["code_namespace"] = stated
-    auto = {
-        row.get("auto_declare")
-        for carrier in found
-        for row in (*carrier.nodes, *carrier.constructions)
-        if row.get("auto_declare")
-    }
+    auto = auto_declare_of(item.name.rpartition("/")[2], found)
     if auto:
-        values["auto_declare"] = True if True in auto else "unknown"
+        values["auto_declare"] = auto
     item = _placed(item, stated)
     reads = _read_names(found)
     assigned = _argv_assigned(item)

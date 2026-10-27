@@ -133,6 +133,43 @@ def test_a_main_that_builds_the_options_marks_its_construction():
     assert row["auto_declare"] is True
 
 
+HELPER_MAIN = (
+    "int main(int argc, char ** argv) {\n"
+    "  auto client = std::make_shared<rclcpp::Node>(\n"
+    '    "param_client", rclcpp::NodeOptions().allow_undeclared_parameters(true));\n'
+    "  rclcpp::spin(std::make_shared<ScanFilter>());\n"
+    "}\n"
+)
+
+
+def test_a_helper_node_built_with_its_own_options_speaks_only_for_itself():
+    """A parameter client `main` builds to take any parameter made every node of the file
+    take any, so none of the launched node's keys was ever undeclared."""
+    unit = cpp.parse_text(
+        'ScanFilter::ScanFilter() : rclcpp::Node("scan_filter") {}\n' + HELPER_MAIN,
+        path="main.cpp",
+    )
+    cpp.analyse([unit])
+    report = cpp.file_report(unit)
+    constructed = {row["class"]: row.get("auto_declare") for row in report["constructions"]}
+    assert constructed == {"rclcpp::Node": True, "ScanFilter": None}
+    classes = {row["class"]: row.get("auto_declare") for row in report["nodes"]}
+    assert classes["ScanFilter"] is None
+
+
+def test_options_built_where_no_construction_can_be_told_apart_mark_the_file():
+    unit = cpp.parse_text(
+        "rclcpp::NodeOptions make_options() {\n"
+        "  return rclcpp::NodeOptions().allow_undeclared_parameters(true);\n"
+        "}\n"
+        'ScanFilter::ScanFilter() : rclcpp::Node("scan_filter", make_options()) {}\n',
+        path="filter.cpp",
+    )
+    cpp.analyse([unit])
+    (row,) = cpp.file_report(unit)["nodes"]
+    assert row["auto_declare"] is True
+
+
 def test_a_refused_region_can_hide_a_nav2_declaration():
     unit = cpp.parse_text(
         'void f() { FOO(auto p = declare_or_get_parameter<double>("gain", 1.0)); }',

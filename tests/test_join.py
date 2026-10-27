@@ -1952,3 +1952,26 @@ def test_a_class_a_source_brings_in_with_using_finds_its_methods():
     assert join._methods_of(table, "robotis::turtlebot3::TurtleBot3", classes) == ["ctor"]
     assert join._methods_of(table, "other::Twin", classes) == ["a"]
     assert join._methods_of(table, "more::Twin", classes) == []
+
+
+def test_a_helper_construction_speaks_only_for_the_node_it_builds():
+    """`main` building a parameter client to take any parameter says nothing of the node the
+    launch file starts from the same executable."""
+    found = (
+        join.Carrier(
+            owner=ids.build_file("demo", "src/main.cpp"),
+            file=ids.build_file("demo", "src/main.cpp"),
+            symbol="main",
+            nodes=(
+                {"name": "scan_filter", "class": "ScanFilter"},
+                {"name": "param_client", "class": "rclcpp::Node"},
+            ),
+            constructions=(
+                {"class": "rclcpp::Node", "auto_declare": True},
+                {"class": "ScanFilter"},
+            ),
+        ),
+    )
+    assert join.auto_declare_of("scan_filter", found) is None
+    assert join.auto_declare_of("param_client", found) is True
+    assert join.auto_declare_of("", found) is True

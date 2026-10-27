@@ -26,7 +26,10 @@ def _underlay_atlas(**attrs: object) -> model.Atlas:
         DECLARED,
         profile=PROFILE,
         input_digest="deadbeef",
-        predicates={f"{launch.UNDERLAY_PREDICATE}slam_toolbox": True} if attrs else {},
+        predicates={
+            **({f"{launch.UNDERLAY_PREDICATE}slam_toolbox": True} if attrs else {}),
+            **({launch.INSTALL_UNNAMED: True} if attrs.get("share_build") else {}),
+        },
     )
     return builder.build()
 
@@ -56,6 +59,27 @@ def test_build_underlay_names_the_setup_file_when_the_install_tree_is_not_source
     assert "ros_setup" in found.fix
     assert "colcon build" not in found.fix
     assert "is built but its install tree is not sourced" in found.say
+
+
+def test_build_underlay_says_the_build_beside_src_was_read_and_not_that_nothing_is_built():
+    """roots [src] and install/setup.bash sourced after colcon build: the walk read install,
+    and the finding said the package in src was not built."""
+    tree = "@checkout/install/slam_toolbox"
+    (found,) = build_rules.build_underlay(
+        _underlay_atlas(share_read_from=tree, share_build="copied")
+    )
+    found = rules.plain_finding(found)
+    assert "not built" not in found.say + found.detail
+    assert found.say.startswith(
+        "slam_toolbox is read from install/slam_toolbox, the build of its src package"
+    )
+    assert "edits in src take effect only after colcon build" in found.say
+    assert "kind: install" in found.fix
+    (linked,) = build_rules.build_underlay(
+        _underlay_atlas(share_read_from=tree, share_build="symlinked")
+    )
+    assert "a file the build links back to src takes effect as soon as it is saved" in linked.say
+    assert "after colcon build" in linked.say
 
 
 def test_a_build_fix_names_the_install_tree_beside_src_that_no_root_names():

@@ -20,6 +20,7 @@ from pathlib import Path
 
 from rosio import ids, schema
 from rosio import query as slices
+from rosio.config import DEFAULT_OUT_DIR
 from rosio.errors import ContractError, UsageError
 from rosio.model import ANY_PROFILE, SCHEMA_MINOR, SEVERITY_ORDER, Atlas, Edge, Finding, Node
 from rosio.render import plural
@@ -44,12 +45,15 @@ MAX_LIMIT = 50
 class AtlasSource:
     """One atlas, read from disk on the first question and answered from memory after."""
 
-    def __init__(self, path: str | Path, *, confined: bool = False) -> None:
+    def __init__(
+        self, path: str | Path, *, confined: bool = False, workspace: str | Path = ""
+    ) -> None:
         self.path = Path(path).expanduser()
         self._atlas: Atlas | None = None
         self.confined = confined
         """Whether a tool that reads the file system keeps to the served workspace, which
         is how the http transport serves a caller who is not the person who started it."""
+        self.stated = Path(workspace).expanduser() if str(workspace) else None
 
     def atlas(self) -> Atlas:
         if self._atlas is None:
@@ -61,9 +65,15 @@ class AtlasSource:
         return self._atlas is not None
 
     def workspace(self) -> Path:
-        """The directory above the one that holds the atlas, where extract wrote it."""
+        """The served workspace: the one `serve --workspace` names, else the directory above
+        the `rosio-out` that holds the atlas, where extract wrote it, else the atlas's own
+        directory. A copied atlas at `~/atlas.json` otherwise served every directory under
+        `/home`."""
+        if self.stated is not None:
+            return self.stated.resolve()
         target = self.path / ATLAS_NAME if self.path.is_dir() else self.path
-        return target.absolute().parent.parent.resolve()
+        holder = target.absolute().parent
+        return (holder.parent if holder.name == DEFAULT_OUT_DIR else holder).resolve()
 
     @property
     def present(self) -> bool:
@@ -1704,8 +1714,9 @@ def current_release(start: str | None) -> tuple[str, str]:
 
 
 CONFINED = (
-    "over http migrate reads only the workspace the served atlas was written in, so name a "
-    "directory inside it or run rosio migrate on that machine"
+    "over http migrate reads only the workspace this server serves, {within}: name a "
+    "directory inside it, start the server with --workspace naming another, or run rosio "
+    "migrate on that machine"
 )
 
 
@@ -1734,7 +1745,7 @@ def migrate(
     if within is not None:
         directory = str((within / directory).resolve())
         if not Path(directory).is_relative_to(within):
-            raise UsageError(CONFINED)
+            raise UsageError(CONFINED.format(within=within))
     try:
         changes, root = release.plan_workspace(directory, source, target)
     except OSError as exc:

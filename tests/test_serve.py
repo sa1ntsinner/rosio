@@ -1396,6 +1396,28 @@ def test_migrate_over_http_reads_only_the_served_workspace(tmp_path: Path, monke
     assert [Path(item) for item in read] == [workspace.resolve(), (workspace / "src").resolve()]
 
 
+def test_the_served_workspace_is_never_wider_than_the_atlas_says(tmp_path: Path, monkeypatch):
+    """An atlas copied to ~/atlas.json confined migrate to /home, every user's workspaces."""
+    from rosio import migrate as release
+
+    home = tmp_path / "home" / "u"
+    (home / "secret_ws" / "src").mkdir(parents=True)
+    (home / "ws" / "rosio-out").mkdir(parents=True)
+    assert tools.AtlasSource(home / "atlas.json").workspace() == home.resolve()
+    assert (
+        tools.AtlasSource(home / "ws" / "rosio-out" / "atlas.json").workspace()
+        == (home / "ws").resolve()
+    )
+    stated = tools.AtlasSource(home / "atlas.json", workspace=home / "ws")
+    assert stated.workspace() == (home / "ws").resolve()
+
+    monkeypatch.setattr(release, "plan_workspace", lambda directory, *args: ([], ""))
+    source = tools.AtlasSource(home / "ws" / "atlas.json", confined=True)
+    (migrate,) = [item for item in server.bindings(source) if item.__name__ == "migrate"]
+    with pytest.raises(UsageError, match=r"--workspace"):
+        migrate("jazzy", start="humble", workspace="../secret_ws")
+
+
 def test_migrate_over_stdio_reads_the_directory_it_is_given(tmp_path: Path, monkeypatch):
     from rosio import migrate as release
 
@@ -1430,6 +1452,8 @@ def test_the_http_transport_confines_migrate(monkeypatch):
     monkeypatch.setattr(server, "http_app", lambda built_server, options: None)
     server.run(server.Options(atlas="a.json", http=True))
     assert built[-1].confined is True
+    server.run(server.Options(atlas="a.json", http=True, workspace="served"))
+    assert built[-1].workspace() == Path("served").resolve()
 
 
 def test_the_current_release_comes_from_the_one_under_opt_ros_when_the_environment_has_none(

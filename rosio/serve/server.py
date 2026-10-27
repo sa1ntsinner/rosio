@@ -104,6 +104,7 @@ class Options:
     api_key: str = ""
     path: str = DEFAULT_PATH
     stateless: bool = False
+    workspace: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     def check(self) -> Options:
@@ -457,7 +458,9 @@ def run(options: Options) -> None:
     """Serve until the caller stops it. Nothing is printed on stdout, which the stdio
     transport owns."""
     options.check()
-    server = build(tools.AtlasSource(options.atlas, confined=options.http))
+    server = build(
+        tools.AtlasSource(options.atlas, confined=options.http, workspace=options.workspace)
+    )
     if not options.http:
         _run_async(server.run_stdio_async)
         return
