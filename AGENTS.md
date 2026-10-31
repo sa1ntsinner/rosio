@@ -1614,6 +1614,16 @@ the generated parameter libraries its sources link. Entities, edges and finding 
 depended on those executables moved; a stored id of a finding about an unbound node stops
 matching because the finding is gone.
 
+Inside `1.32`, with no new key, a launch name built by `AnonName` is `runtime_randomised`:
+the walk performed it, which appended the host name, the process id and a random number, so
+the atlas held a node id that changed on every run and named the machine. The node is
+synthetic now and its launch step is named by the stem `AnonName` was given. A free function
+a node class hands its node to (`build_processors(node_ptr, names)`) hands it on to the
+classes it builds, and is a `classes` row named `<function>()` holding only `node_handoffs`,
+so the declarations of those classes reach the node. A node handed on through
+`std::dynamic_pointer_cast<Self>(shared_from_this())` is still the node, and `node_ptr` is a
+name a node handle goes by. No release had shipped, so no stored id or waiver existed.
+
 A reader pinned to `1.0` still loads a `1.32` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

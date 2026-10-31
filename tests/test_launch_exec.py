@@ -1027,6 +1027,38 @@ def test_a_process_namespace_is_claimed_only_from_argv(tmp_path: Path) -> None:
 
 
 @pytest.mark.ros
+def test_anon_name_is_randomised_not_a_name(tmp_path: Path) -> None:
+    entry = tmp_path / "anon.launch.py"
+    entry.write_text(
+        "from launch import LaunchDescription\n"
+        "from launch.actions import DeclareLaunchArgument\n"
+        "from launch.substitutions import AnonName, LaunchConfiguration\n"
+        "from launch_ros.actions import LoadComposableNodes, Node\n"
+        "from launch_ros.descriptions import ComposableNode\n"
+        "def generate_launch_description():\n"
+        "    return LaunchDescription([\n"
+        "        DeclareLaunchArgument('node_name', default_value=AnonName('talker')),\n"
+        "        Node(package='demo', executable='talker',\n"
+        "             name=LaunchConfiguration('node_name')),\n"
+        "        LoadComposableNodes(target_container='container', composable_node_descriptions=[\n"
+        "            ComposableNode(package='demo', plugin='demo::C', name=AnonName('c'))]),\n"
+        "    ])\n",
+        encoding="utf-8",
+    )
+    walk = launch_exec.walk(
+        str(entry), ros_setup=[path for path in ROS_SETUP if Path(path).is_file()], timeout=90.0
+    )
+    assert [(node.name, node.name_source) for node in walk.nodes] == [
+        (None, "runtime_randomised"),
+        (None, "runtime_randomised"),
+    ], walk.exceptions
+    assert sorted(node.entity_path[-1] for node in walk.nodes) == [
+        "ComposableNode(c)",
+        "Node(talker)",
+    ]
+
+
+@pytest.mark.ros
 @pytest.mark.parametrize("description_condition", [None, "true", "false"])
 @pytest.mark.parametrize("map_value", [None, "map.yaml"])
 def test_load_composable_conditions_are_kept(

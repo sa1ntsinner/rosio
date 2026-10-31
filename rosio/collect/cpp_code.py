@@ -154,6 +154,7 @@ PLAIN_NODE_TYPES = {name: form for name, form in NODE_BASES.items() if "::" in n
 qualified spellings, because a bare `Node` there is as likely a class of the package."""
 
 NODE_INTERFACE = re.compile(r"(?:(?:this|node_?|parent)->)?get_node_\w+_interface\(\)")
+_POINTER_CAST = re.compile(r"std::(?:dynamic|static)_pointer_cast\s*<[^()]*>\s*\((.*)\)", re.S)
 
 NODE_USERS = frozenset(
     {"bind", "ref", "cref", "move", "forward", "make_pair", "make_tuple", "spin", "spin_some"}
@@ -1943,6 +1944,15 @@ class _Reader:
         """A class this node class hands itself to, directly or through a variable that holds
         it, which `_finish_node_helpers` decides once every assignment is read."""
         if not self.klass:
+            # a free function a node calls (`build_processors(node_ptr, names)`) hands the
+            # node on to the classes it builds
+            if (
+                self.functions
+                and name in ("make_unique", "make_shared", "new")
+                and types
+                and any(_is_node_handle(arg, self.src) for arg in arguments)
+            ):
+                self.unit.node_handoffs.setdefault(self.sym + "()", set()).add(types[0])
             return
         if any(_is_node_handle(argument, self.src) for argument in arguments):
             member = _flat(receiver, self.src).removeprefix("this->") if receiver else ""
@@ -2688,6 +2698,8 @@ def _is_node_argument(node: Any, src: bytes) -> bool:
         "this",
         "node",
         "node_",
+        "node_ptr",
+        "node_ptr_",
         "parent",
         "parent_node",
         "shared_from_this()",
@@ -2698,6 +2710,10 @@ def _is_node_argument(node: Any, src: bytes) -> bool:
 def _is_node_handle(node: Any, src: bytes) -> bool:
     """A node handed to a call: the node itself, or one of its interfaces."""
     text = _text(node, src).strip().lstrip("*&")
+    cast = _POINTER_CAST.fullmatch(text)
+    if cast is not None:
+        text = cast.group(1).strip()
+        return text in ("shared_from_this()", "this->shared_from_this()", "this")
     return (
         _is_node_argument(node, src)
         or text in ("weak_from_this()", "this->weak_from_this()")

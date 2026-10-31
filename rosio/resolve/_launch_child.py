@@ -881,7 +881,9 @@ class Walker:
     def run(self) -> records.LaunchWalk:
         substitutions.require_launch()
         from launch import LaunchContext
+        from launch.substitutions import AnonName
 
+        AnonName.compute_name = lambda _self, name: name + ANONYMOUS
         for key, value in self.env:
             os.environ[key] = value
         if self.guard.sandbox:
@@ -1380,6 +1382,8 @@ class Walker:
         name = substitutions.perform_optional(
             self.context, getattr(description, "_ComposableNode__node_name", None)
         )
+        anonymous = _anonymous(name)
+        name = None if anonymous else name
         stated = getattr(description, "_ComposableNode__node_namespace", None)
         namespace = None
         if stated is not None:
@@ -1402,7 +1406,7 @@ class Walker:
         global_params = list(self.context.launch_configurations.get("global_params", []) or [])
         global_remaps = list(self.context.launch_configurations.get("ros_remaps", []) or [])
         raw = getattr(description, "_ComposableNode__parameters", ()) or ()
-        disc = name or plugin
+        disc = name or anonymous or plugin
         params = self._params(raw, global_params, frame, kept=f"ComposableNode({disc})")
         own_remaps = substitutions.perform_pairs(
             self.context, getattr(description, "_ComposableNode__remappings", ()) or ()
@@ -1414,7 +1418,9 @@ class Walker:
             namespace=substitutions.namespace_of(composed),
             form="composable_node",
             name=name,
-            name_source="literal" if name else "executable_default",
+            name_source=(
+                "runtime_randomised" if anonymous else "literal" if name else "executable_default"
+            ),
             container=container,
             plugin_class=plugin,
             remaps=remaps,
@@ -1457,7 +1463,9 @@ class Walker:
         raw_name = getattr(action, "_Node__expanded_node_name", None)
         raw_namespace = getattr(action, "_Node__expanded_node_namespace", None)
         name = substitutions.name_of(raw_name)
-        disc = name or executable or "unknown"
+        anonymous = _anonymous(name)
+        name = None if anonymous else name
+        disc = name or anonymous or executable or "unknown"
         kept = f"{type(action).__name__}({disc})"
         namespace = _namespace_of(raw_namespace, performed)
         seen = len(self.result.exceptions)
@@ -1505,7 +1513,7 @@ class Walker:
             namespace=namespace,
             form=form,
             name=name,
-            name_source=_name_source(stated_name, name),
+            name_source="runtime_randomised" if anonymous else _name_source(stated_name, name),
             remaps=remaps,
             params=params,
             argv=argv,
@@ -1974,6 +1982,18 @@ def _container_namespace(target) -> str:
     if getattr(target, "_Node__final_node_name", None) is None:
         return ""
     return _namespace_of(getattr(target, "expanded_node_namespace", None))
+
+
+# `AnonName` appends the host name, the process id and a random number when it runs, so the
+# name it performs is never the one the node runs under. The walk has it append this instead.
+ANONYMOUS = "_rosio_anonymous"
+
+
+def _anonymous(name: str | None) -> str | None:
+    """The stem of a name `AnonName` built, directly or through a launch argument."""
+    if name and name.endswith(ANONYMOUS):
+        return name.removesuffix(ANONYMOUS).rpartition("/")[2] or "anon"
+    return None
 
 
 def _name_source(stated, name: str | None) -> str:

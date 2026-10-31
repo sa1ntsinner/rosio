@@ -328,6 +328,32 @@ def test_a_member_method_a_node_class_hands_itself_to_reaches_the_field_class():
     assert "Smoother" in header.node_handoffs["p::Host"]
 
 
+def test_a_free_function_hands_the_node_on_to_the_classes_it_builds():
+    source = cpp.parse_text(
+        "namespace p { class Speed {};\n"
+        "inline std::vector<std::unique_ptr<Base>> build(rclcpp::Node * node_ptr) {\n"
+        "  std::vector<std::unique_ptr<Base>> out;\n"
+        '  out.push_back(std::make_unique<Speed>(node_ptr, "speed")); return out; }\n'
+        "Chain::Chain(rclcpp::Node * node_ptr) { items_ = build(node_ptr); } }",
+        pkg="p",
+        relpath="chain.cpp",
+    )
+    cpp.analyse([source])
+    assert source.node_handoffs["p::build()"] == {"Speed"}
+    assert "build()" in source.node_handoffs["p::Chain"]
+
+
+def test_a_node_cast_to_its_own_type_is_still_the_node():
+    source = cpp.parse_text(
+        "namespace p { void Host::start() { strategy_ = std::make_unique<Naive<A>>(\n"
+        "  std::dynamic_pointer_cast<Host>(this->shared_from_this()), offsets_); } }",
+        pkg="p",
+        relpath="host.cpp",
+    )
+    cpp.analyse([source])
+    assert source.node_handoffs["p::Host"] == {"Naive<A>"}
+
+
 def test_a_member_a_node_class_initializes_with_itself_is_its_helper():
     header = cpp.parse_text(
         "namespace p { class Host : public rclcpp::Node { fit::Fitter fitter_;"
