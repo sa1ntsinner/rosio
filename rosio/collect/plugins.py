@@ -98,6 +98,10 @@ AMENT_AUTO = {
 """ament_cmake_auto spellings of the two target commands, which take the same leading name
 and list their sources the same way."""
 
+COMPONENT_NODE_SPELLINGS = {"autoware_agnocast_wrapper_register_node": MECHANISM_COMPONENT_NODE}
+"""Macros that call `rclcpp_components_register_node` with the same target, `PLUGIN` and
+`EXECUTABLE` arguments, so they register one executable per class the same way."""
+
 _COMMAND = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _VARIABLE = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
 _EXPORT_MACRO = re.compile(
@@ -364,7 +368,8 @@ def usable_target(name: str) -> bool:
     return bool(name) and "${" not in name
 
 
-def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
+def scan_cmake(text: str, *, pkg: str = "", base: str = "") -> CmakeScan:
+    """`base` is the package directory, which a `DIRECTORY` source argument is read under."""
     variables: dict[str, list[str]] = {}
     project = pkg
     raw_targets: dict[str, dict[str, Any]] = {}
@@ -392,6 +397,8 @@ def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
         auto = command.name in AMENT_AUTO
         if auto:
             command = replace(command, name=AMENT_AUTO[command.name])
+        if command.name in COMPONENT_NODE_SPELLINGS:
+            command = replace(command, name=COMPONENT_NODE_SPELLINGS[command.name])
         args = expand(command.args)
         if auto and args and usable_target(args[0]):
             # ament_auto_package installs every target the auto commands add
@@ -472,6 +479,8 @@ def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
             sources = [item for item in args[1:] if _is_source(item)]
             if args[1:] and all(item in TARGET_KEYWORDS for item in args[1:]):
                 sources = []
+            if base and "DIRECTORY" in args[:-1]:
+                sources = _directory_sources(base, args[args.index("DIRECTORY") + 1])
             raw_targets.setdefault(args[0], {}).update(
                 {
                     "kind": kind,
@@ -624,6 +633,16 @@ def _keyword_value(args: Sequence[str], keyword: str) -> str | None:
 
 def _is_source(name: str) -> bool:
     return any(name.endswith(suffix) for suffix in SOURCE_SUFFIXES)
+
+
+def _directory_sources(base: str, directory: str) -> list[str]:
+    """The sources `ament_auto_add_library(<name> DIRECTORY src)` globs, package relative."""
+    root = Path(base)
+    return sorted(
+        path.relative_to(root).as_posix()
+        for path in (root / directory).rglob("*")
+        if path.is_file() and _is_source(path.name)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -893,7 +912,7 @@ def read_package(ws: Any, pkg: str, *, libraries: Iterable[str] = ()) -> Package
     cmake = Path(base) / "CMakeLists.txt"
     if cmake.is_file():
         build.cmake_path = str(cmake)
-        build.scan = scan_cmake(_read(ws, cmake), pkg=pkg)
+        build.scan = scan_cmake(_read(ws, cmake), pkg=pkg, base=str(base))
     build.installed_names = frozenset(build.scan.installed) | _installed_in_tree(package)
     setup = Path(base) / "setup.py"
     if setup.is_file():
@@ -955,8 +974,8 @@ def _executables(build: PackageBuild) -> list[Executable]:
         )
         symbol_file = next((path for path in sources if _defines_component(path, component)), "")
         if not symbol_file:
-            # The target's sources sit behind a variable or a DIRECTORY glob this reader does
-            # not expand, so the package's own sources are asked for the registration.
+            # The target's sources sit behind a variable this reader does not expand, so
+            # the package's own sources are asked for the registration.
             symbol_file = next(
                 (
                     str(path)
@@ -1204,7 +1223,7 @@ def library_targets(ws: Any) -> set[str]:
         cmake = Path(base) / "CMakeLists.txt"
         if not cmake.is_file():
             continue
-        scan = scan_cmake(_read(ws, cmake), pkg=name)
+        scan = scan_cmake(_read(ws, cmake), pkg=name, base=str(base))
         out.update(target.name for target in scan.targets.values() if target.kind == "library")
     return out
 

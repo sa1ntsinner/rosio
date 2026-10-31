@@ -1833,6 +1833,10 @@ class _Reader:
             scope = _scope_text(node, self.src)
             self._node_helper("new", None, [f"{scope}::{name}" if scope else name], arguments)
         else:
+            scope = _scope_text(node, self.src) if receiver is None else ""
+            if scope.rpartition("::")[2][:1].isupper():
+                # `NodeParam::init(*this)` hands the node to a static method of that class
+                self._node_helper("new", None, [scope], arguments)
             self._node_helper(name, receiver, types, arguments)
         if name in ("make_shared", "make_unique"):
             self._plain_node(types[0] if types else _scope_text(node, self.src), arguments)
@@ -1941,6 +1945,10 @@ class _Reader:
         if not self.klass:
             return
         if any(_is_node_handle(argument, self.src) for argument in arguments):
+            member = _flat(receiver, self.src).removeprefix("this->") if receiver else ""
+            if member.isidentifier():
+                # `smoother_.initialize(this)` hands the node to the class the field holds
+                self.unit.member_uses.append((self.klass, member, True, None))
             if name in ("make_unique", "make_shared", "new") and types:
                 self.unit.node_handoffs.setdefault(self.klass, set()).add(types[0])
             elif (
@@ -5932,7 +5940,7 @@ class CppCodeCollector:
             if base and (Path(base) / "CMakeLists.txt").is_file():
                 path = str(Path(base) / "CMakeLists.txt")
                 try:
-                    scan = plugins.scan_cmake(plugins._read(ws, path), pkg=name)
+                    scan = plugins.scan_cmake(plugins._read(ws, path), pkg=name, base=str(base))
                     include_dirs[name] = list(scan.include_dirs)
                     source_dirs: dict[str, set[tuple[str, ...]]] = {}
                     for target in scan.targets.values():

@@ -100,6 +100,31 @@ def test_a_component_executable_is_not_an_add_executable_target() -> None:
     assert scan.components[0].target == "comp"
 
 
+def test_an_agnocast_wrapped_component_registers_its_executable() -> None:
+    text = (
+        "ament_auto_add_library(comp_ros SHARED src/comp_node.cpp)\n"
+        "autoware_agnocast_wrapper_register_node(comp_ros\n"
+        '  PLUGIN "demo::Comp"\n  EXECUTABLE comp_node\n'
+        "  ROS2_EXECUTOR SingleThreadedExecutor)\n"
+    )
+    (component,) = plugins_collect.scan_cmake(text, pkg="demo").components
+    assert (component.class_name, component.executable, component.target) == (
+        "demo::Comp",
+        "comp_node",
+        "comp_ros",
+    )
+
+
+def test_a_directory_target_lists_the_sources_under_it(tmp_path: Path) -> None:
+    (tmp_path / "src" / "sub").mkdir(parents=True)
+    for name in ("src/a.cpp", "src/sub/b.hpp", "src/notes.md"):
+        (tmp_path / name).write_text("", encoding="utf-8")
+    scan = plugins_collect.scan_cmake(
+        "ament_auto_add_library(lib SHARED DIRECTORY src)\n", pkg="demo", base=str(tmp_path)
+    )
+    assert scan.targets["lib"].sources == ("src/a.cpp", "src/sub/b.hpp")
+
+
 def test_console_script_names_and_modules_are_read_separately() -> None:
     text = (
         "setup(\n  entry_points={\n    'console_scripts': [\n"

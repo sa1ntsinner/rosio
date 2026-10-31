@@ -1,16 +1,29 @@
 "use strict";
-// atlas.html. The index block is parsed now, the detail block on the first click that
-// needs it. Both live in this file, nothing is fetched.
-(function () {
-  var IX = JSON.parse(document.getElementById("rosio-index").textContent);
+// atlas.html. Both data blocks live in this file as gzip in base64 and nothing is fetched.
+// They are unpacked before the page starts, the index is parsed then, the detail on the
+// first click that needs it.
+function unpack(id) {
+  var block = document.getElementById(id);
+  if (!block) return Promise.resolve("");
+  var bytes = Uint8Array.from(atob(block.textContent), function (c) { return c.charCodeAt(0); });
+  var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Response(stream).text();
+}
+
+Promise.all([unpack("rosio-index"), unpack("rosio-detail")]).then(function (texts) {
+  start(texts[0], texts[1]);
+});
+
+function start(indexText, detailText) {
+  var IX = JSON.parse(indexText);
   var E = IX.entities;
   var N = E.id.length;
   var DETAIL = null;
 
   function detail() {
     if (DETAIL === null) {
-      var block = document.getElementById("rosio-detail");
-      DETAIL = block ? JSON.parse(block.textContent) : { entities: {}, unresolved: {} };
+      DETAIL = detailText ? JSON.parse(detailText) : { entities: {}, unresolved: {} };
+      detailText = "";
     }
     return DETAIL;
   }
@@ -835,4 +848,4 @@
   recompute();
   resize();
   fit();
-})();
+}

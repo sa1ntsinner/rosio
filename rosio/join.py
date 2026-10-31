@@ -1334,6 +1334,11 @@ def parameter_declarations(
                 if key in reached or (key[0] in others and key not in standalone):
                     held.update(names.get(key, ()))
                     pending.extend(exprs.get(key, ()))
+            # and so are the generated parameter libraries its sources link
+            for source, (generated_names, patterns) in sorted(generated.items()):
+                if ids.parse_file(source).package in others:
+                    held.update(generated_names)
+                    pending.extend(patterns)
             for source in sources:
                 generated_names, patterns = generated.get(source, (set(), []))
                 declared.setdefault((node.id, fact.profile), set()).update(generated_names)

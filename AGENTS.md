@@ -1603,6 +1603,17 @@ line, its locator the site's with `.plugin` appended, and the component case of
 `plugin.unresolved` cites it, which is the line an engineer edits. It adds a row and moves
 no id.
 
+Inside `1.32`, with no new key, Autoware's build and handoff idioms are read.
+`autoware_agnocast_wrapper_register_node` registers an executable per class the way
+`rclcpp_components_register_node` does, so those executables bind their sources and their
+remaps stop being blind spots. A target that lists `DIRECTORY src` holds the sources under that
+directory, so a generated parameter library it links reaches them. A node class that hands
+itself to a static method (`NodeParam::init(*this)`) or to a method of a field
+(`smoother_.initialize(this)`) reaches that class, and another package a node reaches counts
+the generated parameter libraries its sources link. Entities, edges and finding ids that
+depended on those executables moved; a stored id of a finding about an unbound node stops
+matching because the finding is gone.
+
 A reader pinned to `1.0` still loads a `1.32` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

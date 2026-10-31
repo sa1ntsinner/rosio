@@ -1,7 +1,8 @@
 """atlas.html: the whole atlas as one self contained page.
 
 Nothing is fetched at run time. The css and the js are vendored under `assets/` and
-inlined, and the data is embedded as two JSON blocks.
+inlined, and the data is embedded as two JSON blocks, each gzip in base64, which the page
+unpacks with the browser's own `DecompressionStream`.
 
 The split is what keeps a real stack usable. The index block holds every entity and
 every edge with the small fields only (label, kind, layer mask, profile mask, the
@@ -16,6 +17,8 @@ one atlas produce identical bytes.
 
 from __future__ import annotations
 
+import base64
+import gzip
 import math
 from pathlib import Path
 from typing import Any
@@ -459,8 +462,11 @@ def _compact(text: str) -> str:
 
 
 def _embed(payload: Any) -> str:
-    text = _compact(model.dumps(payload))
-    return text.replace("<", "\\u003c")
+    """The JSON as gzip in base64. The JSON of a real stack is tens of megabytes and
+    compresses about thirty times, and base64 can never close the script tag. `mtime=0`
+    keeps two renders of one atlas byte identical."""
+    data = _compact(model.dumps(payload)).encode("ascii")
+    return base64.b64encode(gzip.compress(data, 9, mtime=0)).decode("ascii")
 
 
 def _asset(name: str) -> str:
@@ -495,9 +501,9 @@ def render(atlas: Atlas) -> str:
         "</head><body>\n"
         f"<noscript>This atlas needs javascript. {head}.</noscript>\n"
         f"{_asset('atlas.html')}"
-        f'<script type="application/json" id="rosio-index">{_embed(index)}</script>\n'
+        f'<script type="application/gzip" id="rosio-index">{_embed(index)}</script>\n'
         f"<script>\n{_asset('atlas.js')}</script>\n"
-        f'<script type="application/json" id="rosio-detail">{_embed(detail)}</script>\n'
+        f'<script type="application/gzip" id="rosio-detail">{_embed(detail)}</script>\n'
         "</body></html>\n"
     )
 

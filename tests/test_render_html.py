@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import gzip
 import json
 import re
 
@@ -99,24 +101,24 @@ def atlas() -> Atlas:
     return builder.build()
 
 
-def _index_payload(page: str) -> dict:
-    pattern = r'<script type="application/json" id="rosio-index">(.*?)</script>'
-    match = re.search(pattern, page, re.S)
+def _payload(page: str, block: str) -> dict:
+    match = re.search(rf'<script type="application/gzip" id="{block}">(.*?)</script>', page, re.S)
     assert match is not None
-    return json.loads(match.group(1).replace("\\u003c", "<"))
+    return json.loads(gzip.decompress(base64.b64decode(match.group(1))))
+
+
+def _index_payload(page: str) -> dict:
+    return _payload(page, "rosio-index")
 
 
 def _detail_payload(page: str) -> dict:
-    pattern = r'<script type="application/json" id="rosio-detail">(.*?)</script>'
-    match = re.search(pattern, page, re.S)
-    assert match is not None
-    return json.loads(match.group(1).replace("\\u003c", "<"))
+    return _payload(page, "rosio-detail")
 
 
 def _markup(page: str) -> str:
     """The page with the two data blocks removed. A url inside a parameter value is data,
     not a reference, and the reference test has to be able to tell the two apart."""
-    return re.sub(r'<script type="application/json".*?</script>', "", page, flags=re.S)
+    return re.sub(r'<script type="application/gzip".*?</script>', "", page, flags=re.S)
 
 
 def test_the_page_is_one_file_with_nothing_fetched(atlas: Atlas) -> None:
@@ -147,8 +149,7 @@ def test_a_url_in_the_data_stays_data(atlas: Atlas) -> None:
         },
     )
     page = html.render(builder.build())
-    assert "http://" in page
-    assert "http://" not in _markup(page)
+    assert "http://" not in page
     assert _detail_payload(page)["entities"][node]["facts"][0]["values"]["doc"] == (
         "http://example.invalid/x"
     )

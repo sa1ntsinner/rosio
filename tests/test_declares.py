@@ -297,6 +297,37 @@ def test_a_class_records_what_it_builds_from_the_node_it_was_handed():
     assert header.node_handoffs == {"p::Optimizer": {"Param", "declare_all()"}}
 
 
+def test_a_static_method_a_node_class_hands_itself_to_reaches_its_class():
+    header = cpp.parse_text(
+        "namespace p { class Host : public rclcpp::Node {}; struct NodeParam {}; }",
+        pkg="p",
+        relpath="host.hpp",
+    )
+    source = cpp.parse_text(
+        'namespace p { Host::Host() : Node("host") { param_ = NodeParam::init(*this); } }',
+        pkg="p",
+        relpath="host.cpp",
+    )
+    cpp.analyse([header, source])
+    assert "NodeParam" in header.node_handoffs["p::Host"]
+
+
+def test_a_member_method_a_node_class_hands_itself_to_reaches_the_field_class():
+    header = cpp.parse_text(
+        "namespace p { class Smoother {}; class Host : public rclcpp::Node {"
+        " Smoother smoother_; }; }",
+        pkg="p",
+        relpath="host.hpp",
+    )
+    source = cpp.parse_text(
+        'namespace p { Host::Host() : Node("host") { smoother_.initialize(this, params_); } }',
+        pkg="p",
+        relpath="host.cpp",
+    )
+    cpp.analyse([header, source])
+    assert "Smoother" in header.node_handoffs["p::Host"]
+
+
 def test_a_member_a_node_class_initializes_with_itself_is_its_helper():
     header = cpp.parse_text(
         "namespace p { class Host : public rclcpp::Node { fit::Fitter fitter_;"
