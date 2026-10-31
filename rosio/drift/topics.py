@@ -1057,7 +1057,7 @@ def rate_below_declared(atlas: model.Atlas) -> list[model.Finding]:
                 ),
                 say=(
                     f"{label} states {expected:g} Hz and runs below it, so anything "
-                    "downstream that assumes the stated rate is working on stale data"
+                    "downstream that assumes the stated rate is working on stale data."
                 ),
                 discriminator=disc_for(profile),
                 profiles=[profile] if profile != model.ANY_PROFILE else [],
