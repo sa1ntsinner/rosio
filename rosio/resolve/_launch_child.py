@@ -440,10 +440,9 @@ class _MarkupLines:
                 continue
             original = parser.__dict__["load"]
             self.originals.append((parser, original))
-            if isinstance(original, staticmethod):  # humble
-                parser.load = staticmethod(lambda file, read=reader, cls=parser: read(cls, file))
-            else:
-                parser.load = classmethod(reader)
+            # a plain function: on python 3.10 a classmethod over a bound method chains the two
+            # descriptors and drops the file argument
+            parser.load = classmethod(lambda cls, file, read=reader: read(cls, file))
 
     def restore(self) -> None:
         for parser, original in self.originals:
