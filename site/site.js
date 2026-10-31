@@ -47,7 +47,7 @@ for (const [i, tab] of tabs.entries()) {
 }
 show("drift");
 
-const parts = document.querySelectorAll("section h2, .rules li, .shots figure, .how-cols > div, .promises li, .engraving, .releases-shot, .agents-ui, .proof table, .honest");
+const parts = document.querySelectorAll("section h2, .rules li, .shots figure, .how-cols > div, .promises li, .engraving, .releases-shot, .agents-ui, .honest");
 if ("IntersectionObserver" in window && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
   parts.forEach((part) => part.classList.add("reveal"));
   const seen = new IntersectionObserver((entries) => {

@@ -5,16 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rosio: find the layer that disagrees</title>
 <meta name="description" content="rosio reads a ROS 2 system four ways: launch files, source code, the running graph and recorded bags. It shows where they disagree and which line to edit.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="preload" href="assets/fonts/geologica-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
 <header class="bar" data-ink="night">
   <a class="home" href="#top" aria-label="rosio, top of the page">
-    <svg viewBox="3 4 26 24" aria-hidden="true"><rect x="3.5" y="4.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="10.5" width="19" height="5" rx="1.3"/><rect class="slid" x="9.5" y="16.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="22.5" width="19" height="5" rx="1.3"/></svg>
+    <svg viewBox="2 2 20 20.5" aria-hidden="true"><rect x="2" y="2" width="14" height="4"/><rect x="2" y="7.5" width="14" height="4"/><rect class="slid" x="8" y="13" width="14" height="4"/><rect x="2" y="18.5" width="14" height="4"/></svg>
     <span>rosio</span>
   </a>
   <nav aria-label="Sections">
@@ -22,6 +20,7 @@
     <a href="#checks">Checks</a>
     <a href="#editor">Editor</a>
     <a href="#agents">Agents</a>
+    <a href="https://github.com/sa1ntsinner/rosio/tree/main/docs">Docs</a>
     <a class="action" href="#install">Install</a>
   </nav>
 </header>
@@ -31,7 +30,7 @@
   <h1 id="hero-title" class="sentence">
     <span>Find the layer</span>
     <button class="inline-mark" type="button" aria-pressed="false" aria-label="Four layers, the third out of line. Press to line it up.">
-      <svg viewBox="3 4 26 24" aria-hidden="true"><rect x="3.5" y="4.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="10.5" width="19" height="5" rx="1.3"/><rect class="slid" x="9.5" y="16.5" width="19" height="5" rx="1.3"/><rect x="3.5" y="22.5" width="19" height="5" rx="1.3"/></svg>
+      <svg viewBox="2 2 20 20.5" aria-hidden="true"><rect x="2" y="2" width="14" height="4"/><rect x="2" y="7.5" width="14" height="4"/><rect class="slid" x="8" y="13" width="14" height="4"/><rect x="2" y="18.5" width="14" height="4"/></svg>
     </button>
     <span>that disagrees.</span>
   </h1>
@@ -48,6 +47,11 @@
   </ol>
   <p class="state" aria-live="polite">Observed is out of line: what runs is not what the launch file says.</p>
 </section>
+
+<figure class="seen" data-ink="night">
+  <img src="assets/lidar-point-cloud.jpg" width="1920" height="1080" loading="lazy" alt="A lidar point cloud of a street crossing: buildings, parked cars and the road drawn in points">
+  <figcaption>What one sensor reports, before anyone asks whether it agrees with the launch file. An Ouster OS1-64 scan of a street crossing in San Francisco.</figcaption>
+</figure>
 
 <section id="output" class="output chalk" data-ink="chalk" aria-labelledby="output-title">
   <div class="output-head">
@@ -199,15 +203,15 @@
 <footer id="install" class="end night" data-ink="night">
   <div class="install">
     <h2>Install</h2>
-<pre><code><span class="prompt">$ pip install "rosio[cpp,stamps]"</span>
+<pre><code><span class="prompt">$ pip install "rosio[cpp,stamps,mcp]"</span>
 <span class="prompt">$ rosio init ~/ros2_ws</span>        <span class="note"># one profile per launch file, to edit</span>
 <span class="prompt">$ rosio extract ~/ros2_ws</span>
 <span class="prompt">$ rosio drift</span>                  <span class="note"># what is wrong, worst first</span></code></pre>
-    <p>Then the VS Code extension, which finds the atlas on its own. Tested on ROS 2 humble and jazzy, DDS and Zenoh, Python 3.10 and later.</p>
+    <p>Then the VS Code extension, which finds the atlas on its own. Tested on ROS 2 humble and jazzy, DDS and Zenoh, Python 3.10 and later. Every command, every configuration key and the assistant setup are in the <a href="https://github.com/sa1ntsinner/rosio/tree/main/docs">documentation</a>.</p>
   </div>
   <p class="name">rosio</p>
   <div class="meta">
-    <span><a href="https://github.com/sa1ntsinner/rosio">GitHub</a> · <a href="https://pypi.org/project/rosio/">PyPI</a> · <a href="https://marketplace.visualstudio.com/items?itemName=sa1ntsinner.rosio">VS Code</a> · Apache 2.0</span>
+    <span><a href="https://github.com/sa1ntsinner/rosio">GitHub</a> · <a href="https://github.com/sa1ntsinner/rosio/tree/main/docs">Docs</a> · <a href="https://pypi.org/project/rosio/">PyPI</a> · <a href="https://marketplace.visualstudio.com/items?itemName=sa1ntsinner.rosio">VS Code</a> · Apache 2.0</span>
     <span class="credits">{{credits}}</span>
     <a href="#top">Back to top</a>
   </div>

@@ -44,5 +44,29 @@
   "credit": "\"Geology: a long section through mountains, and a volcano, sh\", CC BY 4.0, via Wikimedia Commons",
   "notes": [],
   "saved": "2026-10-26T09:51:36.440Z"
+ },
+ {
+  "file": "assets/lidar-point-cloud.jpg",
+  "media": "image",
+  "ref": "commons:84598949",
+  "title": "Ouster OS1-64 lidar point cloud of intersection of Folsom and Dore St, San Francisco",
+  "creator": "Daniel L. Lu",
+  "creatorUrl": null,
+  "date": "2019-12-03",
+  "license": "CC BY 4.0",
+  "licenseCode": "by",
+  "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+  "creditRequired": true,
+  "page": "https://commons.wikimedia.org/wiki/File:Ouster_OS1-64_lidar_point_cloud_of_intersection_of_Folsom_and_Dore_St,_San_Francisco.png",
+  "via": "Wikimedia Commons",
+  "image": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bd/Ouster_OS1-64_lidar_point_cloud_of_intersection_of_Folsom_and_Dore_St%2C_San_Francisco.png/1920px-Ouster_OS1-64_lidar_point_cloud_of_intersection_of_Folsom_and_Dore_St%2C_San_Francisco.png",
+  "width": 1920,
+  "height": 1080,
+  "bytes": 3648622,
+  "credit": "\"Ouster OS1-64 lidar point cloud of intersection of Folsom and Dore St, San Francisco\" by Daniel L. Lu, CC BY 4.0, via Wikimedia Commons",
+  "notes": [
+   "Converted to greyscale."
+  ],
+  "saved": "2026-10-31T12:01:11.662Z"
  }
 ]
