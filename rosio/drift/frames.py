@@ -1036,6 +1036,8 @@ def frame_no_publisher(atlas: Atlas) -> list[Finding]:
         for profile, nodes in broadcasters.items()
         if any(rules.coded_sources(atlas, node, profile) & blind for node in nodes)
     }
+    # A tree only static publishers spell is decided only when no launched node could add to it.
+    unseen |= _unread_launched(atlas) - read
     findings: list[Finding] = []
     for key in sorted(wanted):
         profile, frame = key
@@ -1076,6 +1078,35 @@ def frame_no_publisher(atlas: Atlas) -> list[Finding]:
             )
         )
     return findings
+
+
+# Executables whose transforms are known without reading them: the model, their arguments,
+# or nothing at all.
+KNOWN_TF_EXECUTABLES = frozenset(
+    {
+        ROBOT_STATE_PUBLISHER,
+        "static_transform_publisher",
+        "joint_state_publisher",
+        "joint_state_publisher_gui",
+        "rviz2",
+    }
+)
+
+
+def _unread_launched(atlas: Atlas) -> set[str]:
+    """Profiles that launch a node whose code was not read whole and whose transforms are not
+    known otherwise, which may broadcast any frame (an ekf from another workspace)."""
+    whole = read_whole(atlas)
+    out: set[str] = set()
+    for node in atlas.by_kind(model.NodeKind.NODE.value):
+        for fact in node.facts:
+            if fact.layer != model.Layer.DECLARED.value or not rules.usable(fact):
+                continue
+            if fact.profile in out or fact.values.get("executable") in KNOWN_TF_EXECUTABLES:
+                continue
+            if not whole(node.id, fact.profile):
+                out.add(fact.profile)
+    return out
 
 
 def _published_frames(atlas: Atlas, broadcast: dict[str, set[str]]) -> dict[str, set[str]]:
