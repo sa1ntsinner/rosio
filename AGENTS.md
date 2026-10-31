@@ -1033,7 +1033,12 @@ What was added, in the order it arrived:
   `get_parameter_or(...).value`, or through a one hop accessor, states that call as its
   `api` where it stated `get_parameter_value`, so a reader can tell a read that raises from
   one that answers a default, which moved the keys of those `reads_param` edges once. No
-  release had shipped, so no stored id existed.
+  release had shipped, so no stored id existed. The coded file value `stamped_frames`, a
+  `{frame, line_hint}` row for every literal a python or C++ source writes into a message
+  header (`msg.header.frame_id = "camera_frame"`), which `frame.not_in_urdf` reports when no
+  model and no transform names the frame. In a profile that launches a node whose code was
+  not read, which could broadcast any frame, it fires only when a model link names the same
+  part with another suffix (`camera_link`).
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace

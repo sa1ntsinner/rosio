@@ -91,3 +91,27 @@ def test_a_read_of_an_undeclared_parameter_is_reported_and_a_read_with_default_i
     atlas = python_workspace(tmp_path, {"sup": node("sup", body)})
     found = findings(atlas, "param.read_undeclared")
     assert [item.subject for item in found] == [ids.build_param("node:/sup", "watchdog")]
+
+
+# ---------------------------------------------------------------------------
+# a message stamped with a frame the model names another way
+
+
+def test_a_frame_written_into_a_header_that_no_model_has_is_reported(tmp_path: Path):
+    model_text = (
+        '<robot name="r"><link name="base_link"/><link name="camera_link"/>'
+        '<joint name="j" type="fixed"><parent link="base_link"/><child link="camera_link"/>'
+        "</joint></robot>"
+    )
+    (tmp_path / "src" / "d" / "urdf").mkdir(parents=True)
+    (tmp_path / "src" / "d" / "package.xml").write_text(
+        "<package><name>d</name></package>", encoding="utf-8"
+    )
+    (tmp_path / "src" / "d" / "urdf" / "r.urdf").write_text(model_text, encoding="utf-8")
+    body = "        m = Image()\n        m.header.frame_id = 'camera_frame'\n"
+    atlas = python_workspace(tmp_path, {"cam": node("cam", body)})
+    found = [
+        item for item in findings(atlas, "frame.not_in_urdf") if "stamps messages" in item.title
+    ]
+    assert [item.subject for item in found] == ["file:p|p/cam.py"]
+    assert "camera_link" in found[0].say

@@ -824,6 +824,89 @@ def _looked_up_not_in_urdf(
     return findings
 
 
+STAMPED = "stamped"
+"""The variant of `frame.not_in_urdf` for a frame the code writes into a message header by its
+literal name. Every consumer that transforms such a message fails, so it is graded like a
+lookup."""
+
+
+def _stamped_not_in_urdf(
+    atlas: Atlas, declared: Mapping[str, Any], tied: set[str]
+) -> list[Finding]:
+    """Frames a node stamps its messages with that no model and no transform states. A node
+    whose code was not read could broadcast any frame, so in a profile that launches one only a
+    frame naming a model link's part with another suffix (`camera_frame` beside `camera_link`)
+    is reported."""
+    unseen = _unread_launched(atlas)
+    sites: dict[str, dict[tuple[str, str], list[model.Source]]] = {}
+    for node in atlas.by_kind(model.NodeKind.NODE.value):
+        for fact in node.facts:
+            if fact.layer != model.Layer.CODED.value or not rules.usable(fact):
+                continue
+            for file in sorted(fact.values.get("coded_sources") or []):
+                entity = atlas.entities.get(file)
+                for coded in entity.facts if entity else ():
+                    if coded.layer != model.Layer.CODED.value:
+                        continue
+                    for row in coded.values.get("stamped_frames") or []:
+                        try:
+                            frame = ids.normalise_frame(str(row.get("frame") or ""))
+                        except ContractError:
+                            continue
+                        if frame in declared or frame in tied or frame in WORLD_FRAMES:
+                            continue
+                        source = model.Source(
+                            file=file,
+                            locator="header.frame_id",
+                            line_hint=row.get("line_hint"),
+                            root=coded.evidence[0].root if coded.evidence else "src",
+                        )
+                        sites.setdefault(frame, {}).setdefault((node.id, fact.profile), []).append(
+                            source
+                        )
+    findings: list[Finding] = []
+    for frame, by_node in sorted(sites.items()):
+        part = _same_part(frame, declared)
+        if not part:
+            by_node = {key: rows for key, rows in by_node.items() if key[1] not in unseen}
+        if not by_node:
+            continue
+        nodes = sorted({rules.node_text(node) for node, _profile in by_node})
+        where = rules.sources([row for rows in by_node.values() for row in rows])
+        site = rules.where(where[0])
+        near = part or _nearest(frame, declared)
+        hint = f", the model has {near}" if near else ""
+        findings.append(
+            Finding(
+                rule="frame.not_in_urdf",
+                severity=rules.severity_of("frame.not_in_urdf", STAMPED),
+                subject=where[0].file,
+                title=f"{', '.join(nodes)} stamps messages with {frame}, which no robot model has",
+                detail=(
+                    f"{site} writes {frame} into a message header. None of the "
+                    f"{len(declared)} links the robot models declare carries that name and no "
+                    "transform in this atlas names it, so every consumer that transforms the "
+                    f"message fails to place it{hint}."
+                ),
+                fix=(
+                    f"stamp the message with {near} at {site}, or name the link {frame} in "
+                    "the model"
+                    if near
+                    else f"stamp the message with a link of the model at {site}"
+                ),
+                say=(
+                    f"{site} stamps messages with the frame {frame}, which no robot model "
+                    f"declares and nothing publishes, so they cannot be transformed{hint}."
+                ),
+                discriminator=_disc(frame, STAMPED),
+                profiles=sorted({profile for _node, profile in by_node} - {model.ANY_PROFILE}),
+                layers=[model.Layer.CODED.value],
+                where=where,
+            )
+        )
+    return findings
+
+
 RENAMED = "renamed"
 """The variant of `frame.not_in_urdf` for a frame the code broadcasts by a literal name under a
 link of the loaded model, while the model names a child of that link by the same stem with
@@ -973,6 +1056,7 @@ def frame_not_in_urdf(atlas: Atlas) -> list[Finding]:
         grouped.setdefault((ref.owner, ref.frame), []).append(ref)
     findings: list[Finding] = _looked_up_not_in_urdf(atlas, declared, tied)
     findings += _renamed_in_model(atlas, declared)
+    findings += _stamped_not_in_urdf(atlas, declared, tied)
     for key in sorted(grouped):
         owner, frame = key
         refs = sorted(grouped[key], key=lambda item: (item.param, item.profile))

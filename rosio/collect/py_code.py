@@ -382,6 +382,16 @@ def _line(node: ast.AST) -> int | None:
     return getattr(node, "lineno", None)
 
 
+def _is_header_frame(node: ast.AST) -> bool:
+    """`<message>.header.frame_id` as an assignment target."""
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "frame_id"
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "header"
+    )
+
+
 def _is_self(node: ast.AST) -> bool:
     return isinstance(node, ast.Name) and node.id == "self"
 
@@ -2647,6 +2657,18 @@ class PyFile:
         }
         if literals:
             record["name_literals"] = sorted(literals)
+        stamped = {
+            (node.value.value, _line(node))
+            for node in ast.walk(self.tree)
+            if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            and any(_is_header_frame(target) for target in node.targets)
+        }
+        if stamped:
+            record["stamped_frames"] = [
+                {"frame": frame, "line_hint": line} for frame, line in sorted(stamped)
+            ]
         if self.param_reads:
             record["parameter_reads"] = sorted(
                 self.param_reads, key=lambda item: (item["name"], item["owner_symbol"])
@@ -3181,7 +3203,11 @@ class PyCodeCollector:
             "counts": record["counts"],
             "executables": record["executables"],
             "wrappers": record.get("wrappers", []),
-            **{key: record[key] for key in ("node_handoffs", "name_literals") if key in record},
+            **{
+                key: record[key]
+                for key in ("node_handoffs", "name_literals", "stamped_frames")
+                if key in record
+            },
         }
         builder.fact(
             file_id,

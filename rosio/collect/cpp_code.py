@@ -2565,6 +2565,25 @@ def name_literals(source: bytes) -> list[str]:
     )
 
 
+def stamped_frames(source: bytes) -> list[dict[str, Any]]:
+    """The literal frames a source writes into a message header, `msg.header.frame_id =
+    "camera_link"`, with their lines. A comment is no assignment."""
+    text = _COMMENT.sub(
+        lambda match: re.sub(r"[^\n]", " ", match.group()), source.decode("utf-8", "replace")
+    )
+    return sorted(
+        (
+            {"frame": match.group(1), "line_hint": text.count("\n", 0, match.start()) + 1}
+            for match in _HEADER_FRAME.finditer(text)
+        ),
+        key=lambda row: (row["frame"], row["line_hint"]),
+    )
+
+
+_COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
+_HEADER_FRAME = re.compile(r'(?:\.|->)header\.frame_id\s*=\s*"([^"\\\n]*)"')
+
+
 _STRING_LITERAL = re.compile(
     r'"((?:[^"\\\n]|\\.)*)"|\'(?:[^\'\\\n]|\\.)*\'|//[^\n]*|/\*.*?\*/', re.S
 )
@@ -5849,6 +5868,7 @@ class CppCodeCollector:
         report = file_report(unit, lookups=lookups, components=components)
         file_id = ws.file_id(unit.path)
         literals = name_literals(unit.source)
+        stamped = stamped_frames(unit.source)
         builder.node(file_id, attrs={"language": "cpp", "loadable": unit.parsed})
         if unit.pkg and unit.pkg != ids.REPO_PKG:
             pkg_id = ids.build_pkg(unit.pkg)
@@ -5870,6 +5890,7 @@ class CppCodeCollector:
                 "wrappers": report.get("wrappers", []),
                 "type_aliases": unit.type_aliases,
                 **({"name_literals": literals} if literals else {}),
+                **({"stamped_frames": stamped} if stamped else {}),
                 **(
                     {"plugin_loaders": [{"base_class": base} for base in unit.plugin_loaders]}
                     if unit.plugin_loaders
