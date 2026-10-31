@@ -70,6 +70,18 @@ struct State {
     next_refresh: u64,
 }
 
+/// The nearest directory at or above `start` that holds the atlas, for an editor that opens a
+/// subdirectory of the workspace (Zed roots a single file at its own folder).
+fn atlas_ancestor(start: &std::path::Path, atlas: &str) -> Option<PathBuf> {
+    if std::path::Path::new(atlas).is_absolute() {
+        return None;
+    }
+    start
+        .ancestors()
+        .find(|dir| dir.join(atlas).is_file())
+        .map(PathBuf::from)
+}
+
 impl State {
     fn atlas_path(&self) -> PathBuf {
         let configured = self.workspace.join(&self.options.atlas_path);
@@ -230,6 +242,7 @@ pub fn run(connection: Connection) -> Result<(), String> {
         .and_then(|u| u.to_file_path().ok())
         .or_else(|| std::env::current_dir().ok())
         .ok_or("No workspace folder")?;
+    let workspace = atlas_ancestor(&workspace, &options.atlas_path).unwrap_or(workspace);
     let watcher = params
         .pointer("/capabilities/workspace/didChangeWatchedFiles/dynamicRegistration")
         == Some(&Value::Bool(true));
@@ -635,6 +648,20 @@ mod tests {
             next_refresh: 0,
         };
         assert_eq!(state.atlas_path(), workspace.join("atlas.json"));
+        std::fs::remove_dir_all(&workspace).unwrap();
+    }
+
+    #[test]
+    fn a_subdirectory_finds_the_atlas_of_its_workspace() {
+        let workspace = std::env::temp_dir().join(format!("rosio-ancestor-{}", std::process::id()));
+        let inner = workspace.join("src/pkg/config");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::create_dir_all(workspace.join("rosio-out")).unwrap();
+        std::fs::write(workspace.join("rosio-out/atlas.json"), "{}").unwrap();
+        assert_eq!(
+            atlas_ancestor(&inner, "rosio-out/atlas.json"),
+            Some(workspace.clone())
+        );
         std::fs::remove_dir_all(&workspace).unwrap();
     }
 }
