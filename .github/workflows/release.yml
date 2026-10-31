@@ -3,6 +3,12 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # publishes the extension packages of a release that exists, when only that step failed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: release whose .vsix files go to the marketplaces
+        required: true
 
 permissions:
   contents: read
@@ -14,6 +20,7 @@ concurrency:
 jobs:
   versions:
     name: tag matches the versions
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,6 +116,7 @@ jobs:
   marketplace:
     name: publish the extension
     needs: vsix
+    if: always() && (needs.vsix.result == 'success' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     # the marketplace trusts this repository, workflow and environment, so no token is stored
     environment: marketplace
@@ -125,14 +133,20 @@ jobs:
           node-version: "22"
       - run: npm ci
       - uses: actions/download-artifact@v4
+        if: github.event_name == 'push'
         with:
           name: vsix
           path: editors/vscode/packages
+      - name: the packages of the release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.tag }}" --pattern '*.vsix' --dir packages
       - name: visual studio marketplace
         run: |
           set -e
           for package in packages/*.vsix; do
-            npx --yes @vscode/vsce@4.0.0 publish --packagePath "$package" --oidc
+            npx --yes @vscode/vsce@4.1.0 publish --packagePath "$package" --oidc
           done
       - name: open vsx
         env:
