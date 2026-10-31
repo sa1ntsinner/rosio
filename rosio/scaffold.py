@@ -207,6 +207,11 @@ def _python_includes(text: str, started_only: bool = False) -> list[str]:
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             left, right = resolve(node.left, seen), resolve(node.right, seen)
             return left + right if left is not None and right is not None else None
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            left, right = resolve(node.left, seen), resolve(node.right, seen)
+            if left is None or right is None:
+                return None
+            return f"{left.rstrip('/')}/{right.lstrip('/')}"
         if isinstance(node, ast.JoinedStr):
             parts = [
                 resolve(part.value if isinstance(part, ast.FormattedValue) else part, seen)
@@ -229,6 +234,8 @@ def _python_includes(text: str, started_only: bool = False) -> list[str]:
             package = node.args[0]
             if isinstance(package, ast.Constant) and isinstance(package.value, str):
                 return f"$(find-pkg-share {package.value})"
+        if name in {"Path", "pathlib.Path", "str"} and len(node.args) == 1:
+            return resolve(node.args[0], seen)
         if name in INCLUDE_CALLS - {"IncludeLaunchDescription"} and len(node.args) == 1:
             return resolve(node.args[0], seen)
         if name == "os.path.join" or name == "PathJoinSubstitution":
@@ -447,8 +454,11 @@ def started_inside(profiles: Sequence[ProfileSpec]) -> dict[str, str]:
     """Slug to the offered file of the same package that includes this profile's launch file
     with no condition and no argument, and starts with no argument itself. Read as a profile of
     its own, such a file restates every finding of the file that starts it, so it is written
-    commented out. An include under a condition or with arguments starts something else."""
+    commented out. An include under a condition or with arguments starts something else,
+    unless the included file needs an argument it has no default for: it cannot run alone, so
+    any include that starts it is the way it runs."""
     included = _included(profiles, started_only=True)
+    every = _included(profiles)
     runs = {
         id(item): f"{item.pkg}/{Path(item.target).name}"
         for profile in profiles
@@ -462,9 +472,10 @@ def started_inside(profiles: Sequence[ProfileSpec]) -> dict[str, str]:
         (entry,) = profile.entrypoints
         if entry.verb != "launch" or entry.origin is None:
             continue
+        source = every if _required_arguments(entry) else included
         starters = sorted(
             runs[id(includer)]
-            for includer in included.get(_launch_key(entry), ())
+            for includer in source.get(_launch_key(entry), ())
             if id(includer) in runs and includer.pkg == entry.pkg
         )
         if starters:

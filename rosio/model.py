@@ -35,10 +35,10 @@ from typing import Any
 from rosio import ATLAS_SCHEMA_VERSION, __version__, ids
 from rosio.errors import ContractError
 
-SCHEMA_MINOR = "31"
+SCHEMA_MINOR = "32"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the rules `param.read_undeclared`, `controller.undefined` and
-`controller.joint_missing`, the coded file value `stamped_frames`, the
+stored id: the rules `topic.namespace_escape`, `param.read_undeclared`,
+`controller.undefined` and `controller.joint_missing`, the coded file value `stamped_frames`, the
 model file attribute `mesh_lines` and the `publishes` edge value `period_s`, inferred from
 python and C++ timer callbacks with the same endpoint row keys `callback`, `period_form`,
 `period_numerator`, `attribute` and `published_from`; recorded rate comparisons through

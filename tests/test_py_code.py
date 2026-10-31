@@ -1243,3 +1243,32 @@ def test_a_file_the_launch_walk_refused_is_still_read_and_stays_refused(tmp_path
     atlas = builder.build()
     assert atlas.entities[file_id].attrs["loadable"] is False
     assert atlas.entities[file_id].fact("coded") is not None
+
+
+def test_a_declare_wrapper_of_another_module_declares_the_name_it_is_handed() -> None:
+    helper = py_code.PyFile(
+        "def parameter(node, name, default):\n"
+        "    return node.declare_parameter(name, default).value\n",
+        path="bot/bot/runtime.py",
+        package="bot",
+        package_relative_path="bot/runtime.py",
+    )
+    declarers = helper.own_declarers()
+    assert declarers == {"bot.runtime.parameter": (1, 2)}
+    record = py_code.PyFile(
+        "from rclpy.node import Node\n"
+        "from std_srvs.srv import Trigger\n"
+        "from .runtime import parameter\n"
+        "class Bot(Node):\n"
+        "    def __init__(self):\n"
+        "        super().__init__('bot')\n"
+        "        self.limit = parameter(self, 'limit', 0.5)\n"
+        "        self.clients = {r: self.create_client(Trigger, f'/{r}/reset')\n"
+        "                        for r in ('a', 'b')}\n",
+        path="bot/bot/node.py",
+        package="bot",
+        package_relative_path="bot/node.py",
+        declarers=declarers,
+    ).read()
+    assert [row["name"] for row in record["parameters"]] == ["limit"]
+    assert sorted(row["name"] for row in record["endpoints"]) == ["/a/reset", "/b/reset"]

@@ -126,7 +126,7 @@ def _ids(atlas: model.Atlas, rule: str) -> list[str]:
 
 
 def test_the_committed_vocabulary_is_the_one_in_the_contract():
-    assert len(rules.COMMITTED) == len(set(rules.COMMITTED)) == 56
+    assert len(rules.COMMITTED) == len(set(rules.COMMITTED)) == 57
     assert rules.COMMITTED[0] == "param.shadowed"
     assert set(rules.SEVERITY) == set(rules.COMMITTED)
 

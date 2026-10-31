@@ -110,6 +110,11 @@ jobs:
     name: publish the extension
     needs: vsix
     runs-on: ubuntu-latest
+    # the marketplace trusts this repository, workflow and environment, so no token is stored
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: editors/vscode
@@ -124,16 +129,10 @@ jobs:
           name: vsix
           path: editors/vscode/packages
       - name: visual studio marketplace
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           set -e
-          if [ -z "$VSCE_PAT" ]; then
-            echo "VSCE_PAT is not set, skipping the Visual Studio Marketplace"
-            exit 0
-          fi
           for package in packages/*.vsix; do
-            npx vsce publish --packagePath "$package" --pat "$VSCE_PAT"
+            npx --yes @vscode/vsce@4.0.0 publish --packagePath "$package" --oidc
           done
       - name: open vsx
         env:

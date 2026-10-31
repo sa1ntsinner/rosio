@@ -705,3 +705,12 @@ def test_a_top_level_file_its_simulators_include_stays_offered(
     slugs = [p.slug for p in scaffold.offered(default_config(str(workspace))).profiles]
     assert "robot" in slugs and "simulator" in slugs
     assert "sensing" not in slugs and "map" not in slugs
+
+
+def test_an_include_spelled_with_pathlib_is_followed() -> None:
+    text = (
+        "from pathlib import Path\n"
+        "share = Path(get_package_share_directory('bot'))\n"
+        "IncludeLaunchDescription(AnyLaunchDescriptionSource(str(share / 'launch/a.launch.xml')))\n"
+    )
+    assert scaffold._python_includes(text) == ["$(find-pkg-share bot)/launch/a.launch.xml"]

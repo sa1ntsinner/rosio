@@ -297,6 +297,7 @@ class Val:
     value: Any = None
     state: str = "unresolved"
     from_parameter: str | None = None
+    parameter_suffix: str = ""
     from_constant: str | None = None
     binding: str | None = None
     reason: str = ""
@@ -440,9 +441,11 @@ class PyFile:
         extra_wrappers: dict[str, wrappers.Wrapper] | None = None,
         extra_bases: dict[str, str] | None = None,
         constructions: dict[str, list[dict[str, Any]]] | None = None,
+        declarers: dict[str, tuple[int, int | None]] | None = None,
     ) -> None:
         self.source = source
         self.extra = dict(extra_wrappers or {})
+        self.declarers = dict(declarers or {})
         self.bases = dict(extra_bases or {})
         self.constructions = dict(constructions or {})
         self.sites: list[dict[str, Any]] = []
@@ -580,6 +583,7 @@ class PyFile:
         self._collect_classes()
         self._collect_accessors()
         self._collect_sites()
+        self.declarers.update(self.own_declarers())
         self._module_body()
         for node in self._nested(self.tree.body):
             if isinstance(node, ast.ClassDef):
@@ -689,6 +693,37 @@ class PyFile:
                 value = tuple(value)
             return Val(expr=text, known=known, value=value, state="literal", node=node)
         return self._literal(node)
+
+    def own_declarers(self) -> dict[str, tuple[int, int | None]]:
+        """Module level functions that declare a parameter under a name they are handed,
+        `def parameter(node, name, default)`, as the position of the name and of the default.
+        Each call of one declares the name its caller passes."""
+        out: dict[str, tuple[int, int | None]] = {}
+        for stmt in self.tree.body:
+            if not isinstance(stmt, ast.FunctionDef):
+                continue
+            params = [arg.arg for arg in stmt.args.args]
+            for call in ast.walk(stmt):
+                if not (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Attribute)
+                    and call.func.attr == "declare_parameter"
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id in params
+                    and call.args
+                    and isinstance(call.args[0], ast.Name)
+                    and call.args[0].id in params
+                ):
+                    continue
+                default = call.args[1] if len(call.args) > 1 else None
+                out[self._qual(stmt.name)] = (
+                    params.index(call.args[0].id),
+                    params.index(default.id)
+                    if isinstance(default, ast.Name) and default.id in params
+                    else None,
+                )
+                break
+        return out
 
     def _collect_classes(self) -> None:
         pending = [node for node in ast.walk(self.tree) if isinstance(node, ast.ClassDef)]
@@ -1299,6 +1334,8 @@ class PyFile:
             self._target = None
             for item in stmt.targets:
                 self._bind(item, val, ctx)
+            if isinstance(target, ast.Name) and isinstance(stmt.value, ast.Call):
+                self._message_fields(target.id, stmt.value, ctx)
         elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
             self._target = stmt.target
             val = self._eval(stmt.value, ctx, target=stmt.target)
@@ -1446,6 +1483,26 @@ class PyFile:
         )
         self._bind(target, val, ctx)
 
+    def _message_fields(self, name: str, call: ast.Call, ctx: Ctx) -> None:
+        """The frame fields a message built by keyword states,
+        `TransformStamped(header=odom.header, child_frame_id='base_link')`."""
+        fields: dict[str, Val] = {}
+        for keyword in call.keywords:
+            if keyword.arg == "child_frame_id":
+                value = keyword.value
+                held = None
+                if isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
+                    held = ctx.fields.get(value.value.id, {}).get(value.attr)
+                fields["child_frame_id"] = held or self._eval(value, ctx)
+            elif keyword.arg == "header" and isinstance(keyword.value, ast.Attribute):
+                source = keyword.value.value
+                if isinstance(source, ast.Name) and keyword.value.attr == "header":
+                    held = ctx.fields.get(source.id, {}).get("header.frame_id")
+                    if held is not None:
+                        fields["header.frame_id"] = held
+        if fields:
+            ctx.fields[name] = fields
+
     def _bind(self, target: ast.expr, val: Val, ctx: Ctx) -> None:
         if isinstance(target, ast.Name):
             ctx.scope[target.id] = replace(val, expr=target.id, binding=val.binding or "local")
@@ -1517,7 +1574,7 @@ class PyFile:
             skipped = ctx.under(f"not {condition}", self._guard(node.test, ctx, False))
             self._eval(node.orelse, skipped)
             return replace(body, condition=condition)
-        if isinstance(node, ast.ListComp | ast.SetComp | ast.GeneratorExp):
+        if isinstance(node, ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp):
             return self._eval_comprehension(node, ctx)
         if isinstance(node, ast.List | ast.Tuple | ast.Set | ast.Dict):
             return self._eval_container(node, ctx)
@@ -1632,12 +1689,23 @@ class PyFile:
             return Val(expr=text, reason="call_result")
         carried = left if left.state != "literal" else right
         state = carried.state if carried.state != "literal" else "literal"
+        suffix = ""
+        if (
+            isinstance(node.op, ast.Add)
+            and carried is left
+            and left.from_parameter
+            and right.state == "literal"
+            and isinstance(right.value, str)
+        ):
+            # `prefix + "odom"`: the join reads the parameter per profile and adds the rest
+            suffix = left.parameter_suffix + right.value
         return Val(
             expr=text,
             known=True,
             value=value,
             state=state,
             from_parameter=carried.from_parameter,
+            parameter_suffix=suffix,
             from_constant=carried.from_constant,
             binding=carried.binding,
         )
@@ -1692,13 +1760,15 @@ class PyFile:
 
     def _eval_comprehension(self, node: ast.expr, ctx: Ctx) -> Val:
         generators = node.generators
-        element = node.elt
+        elements = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
         if len(generators) != 1 or not isinstance(generators[0].target, ast.Name):
-            self._eval(element, ctx)
+            for element in elements:
+                self._eval(element, ctx)
             return Val(expr=self._src(node), reason="call_result")
         source = self._eval(generators[0].iter, ctx)
         if not (source.known and isinstance(source.value, list | tuple)):
-            self._eval(element, ctx)
+            for element in elements:
+                self._eval(element, ctx)
             return Val(expr=self._src(node), reason="call_result")
         for item in source.value:
             inner = replace(ctx, scope=dict(ctx.scope))
@@ -1711,8 +1781,11 @@ class PyFile:
                 binding="comprehension",
             )
             self._seen.clear()
-            self._eval(element, inner)
+            for element in elements:
+                self._eval(element, inner)
         self._seen.clear()
+        if isinstance(node, ast.DictComp):
+            return Val(expr=self._src(node), reason="call_result")
         return Val(expr=self._src(node), known=True, value=list(source.value), state=source.state)
 
     # -- calls -------------------------------------------------------------
@@ -1796,6 +1869,23 @@ class PyFile:
         if tail == "QoSProfile":
             return self._qos_profile(node, ctx, text)
 
+        declarer = self.declarers.get(self._defined_name(dotted))
+        if declarer is not None and len(node.args) > declarer[0]:
+            name_index, default_index = declarer
+            default = (
+                node.args[default_index]
+                if default_index is not None and default_index < len(node.args)
+                else None
+            )
+            name = self._eval(node.args[name_index], ctx)
+            record, val = self._param_record(
+                name, node.args[name_index], default, ctx, "declare_parameter"
+            )
+            if record is not None:
+                self._keep(record, ctx)
+                return replace(val, expr=text)
+            return Val(expr=text, reason="call_result")
+
         for arg in node.args:
             self._eval(arg, ctx)
         for keyword in node.keywords:
@@ -1841,6 +1931,13 @@ class PyFile:
             return Val(expr=text, reason="call_result")
         args = self._positional(node)
         if not args:
+            return Val(expr=text, reason="call_result")
+        if (
+            ctx.symbol in self.declarers
+            and isinstance(args[0], ast.Name)
+            and args[0].id in ctx.args
+        ):
+            # the wrapper itself: each call site declares the name it passes
             return Val(expr=text, reason="call_result")
         name = self._eval(args[0], ctx)
         default = args[1] if len(args) > 1 else self._keyword(node, "value")
@@ -2117,6 +2214,8 @@ class PyFile:
                 )
             if val.from_parameter:
                 record["from_parameter"] = val.from_parameter
+                if val.parameter_suffix:
+                    record["parameter_suffix"] = val.parameter_suffix
                 record["binding"] = val.binding
                 if val.binding in ("comprehension", "loop"):
                     record["count_state"] = "parameter_dependent"
@@ -2394,6 +2493,8 @@ class PyFile:
                     self.resolved_counts["frame_id"] += 1
                     if val.from_parameter:
                         record[f"{role}_from_parameter"] = val.from_parameter
+                        if val.parameter_suffix:
+                            record[f"{role}_parameter_suffix"] = val.parameter_suffix
                 elif val.expr:
                     record["unresolved_ref"] = f"frame_id:{val.expr}"
                     self._blind("frame_id", val.expr, val.reason, ctx.symbol, node)
@@ -2534,6 +2635,8 @@ class PyFile:
                 self.resolved_counts["frame_id"] += 1
                 if val.from_parameter:
                     record[f"{role}_from_parameter"] = val.from_parameter
+                    if val.parameter_suffix:
+                        record[f"{role}_parameter_suffix"] = val.parameter_suffix
             else:
                 record["unresolved_ref"] = f"frame_id:{self._src(expr_node)}"
                 self._blind("frame_id", self._src(expr_node), val.reason, ctx.symbol, expr_node)
@@ -2701,6 +2804,9 @@ class PyFile:
             record["wrapper_candidates"] = candidates
         if self.handoffs:
             record["node_handoffs"] = sorted(self.handoffs)
+        own = self.own_declarers()
+        if own:
+            record["declarers"] = own
         literals = {
             node.value
             for node in ast.walk(self.tree)
@@ -3019,6 +3125,7 @@ def read_file(
     found: dict[str, wrappers.Wrapper] | None = None,
     bases: dict[str, str] | None = None,
     constructions: dict[str, list[dict[str, Any]]] | None = None,
+    declarers: dict[str, tuple[int, int | None]] | None = None,
 ) -> _FileRead:
     """One file of a discovered workspace, cited by file id rather than by machine path."""
     package, relpath = ws.rel(path)
@@ -3032,6 +3139,7 @@ def read_file(
         extra_wrappers=found,
         extra_bases=bases,
         constructions=constructions,
+        declarers=declarers,
     )
     return reader.read(), reader.resolved_counts, reader.defined_bases, reader.sites
 
@@ -3088,9 +3196,19 @@ class PyCodeCollector:
         self.discovered = wrappers.discover(candidates([item.record for item in read]))
         self.node_bases = {name: form for item in read for name, form in sorted(item.bases.items())}
         constructions = construction_table([(item.record, item.sites) for item in read])
-        if self.discovered or self.node_bases or constructions:
+        declarers = {
+            name: position
+            for item in read
+            for name, position in sorted((item.record.get("declarers") or {}).items())
+        }
+        if self.discovered or self.node_bases or constructions or declarers:
             read, problems = self._read(
-                ws, paths, wrappers.index(self.discovered), self.node_bases, constructions
+                ws,
+                paths,
+                wrappers.index(self.discovered),
+                self.node_bases,
+                constructions,
+                declarers,
             )
         run = builder.add_run(
             LAYER,
@@ -3202,13 +3320,16 @@ class PyCodeCollector:
         found: dict[str, wrappers.Wrapper],
         bases: dict[str, str],
         constructions: dict[str, list[dict[str, Any]]] | None = None,
+        declarers: dict[str, tuple[int, int | None]] | None = None,
     ) -> tuple[list[_Read], list[tuple[str, str, str]]]:
         read: list[_Read] = []
         problems: list[tuple[str, str, str]] = []
         for path in paths:
             package, relpath = ws.rel(path)
             try:
-                record, counts, defined, sites = read_file(ws, path, found, bases, constructions)
+                record, counts, defined, sites = read_file(
+                    ws, path, found, bases, constructions, declarers
+                )
             except CollectorError as exc:
                 problems.append((path, CollectorError.__name__, str(exc)))
             except Exception as exc:

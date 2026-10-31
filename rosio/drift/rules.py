@@ -81,6 +81,7 @@ COMMITTED = (
     "param.read_undeclared",
     "controller.undefined",
     "controller.joint_missing",
+    "topic.namespace_escape",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -149,6 +150,7 @@ SEVERITY: dict[str, str] = {
     "param.read_undeclared": WARN,
     "controller.undefined": ERROR,
     "controller.joint_missing": ERROR,
+    "topic.namespace_escape": WARN,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {

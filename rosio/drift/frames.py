@@ -1281,10 +1281,10 @@ def frame_broadcast_twice(atlas: Atlas) -> list[Finding]:
     """One child frame two nodes broadcast in one profile.
 
     tf2 keeps one parent per child and the latest transform wins, so two broadcasters make
-    the frame jump between them, or between two parents. Only broadcasts that state both
-    frames, outside any condition in the source and from a live launch site, are counted, and
-    two sites of one node are one broadcaster (section 5 cites one node broadcasting a pair
-    from two methods).
+    the frame jump between them, or between two parents. Only broadcasts that state the child
+    as a literal and a parent, outside any condition in the source and from a live launch
+    site, are counted, and two sites of one node are one broadcaster (section 5 cites one node
+    broadcasting a pair from two methods).
     """
     sites: dict[tuple[str, str, tuple[str, ...]], dict[str, list[tuple[str, LayerFact]]]] = {}
     trees = _tf_trees(atlas)
@@ -1298,7 +1298,9 @@ def frame_broadcast_twice(atlas: Atlas) -> list[Finding]:
             if not rules.usable(fact) or fact.values.get("condition") or fact.profile == "*":
                 continue
             parent = _frame_name(fact.values.get("parent"))
-            if not parent or any(key.endswith("_from_parameter") for key in fact.values):
+            # a child named by a parameter could differ per node; a parent the profile's
+            # parameter chain resolved is a stated parent like any literal
+            if not parent or "child_from_parameter" in fact.values:
                 continue
             tree = trees.get((edge.src, fact.profile), _TF_TOPICS)
             by_node = sites.setdefault((fact.profile, edge.dst, tree), {})

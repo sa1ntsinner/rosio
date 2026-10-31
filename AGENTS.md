@@ -847,7 +847,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.31`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.32`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -1582,7 +1582,22 @@ default profile at that depth, a `message_filters::Subscriber` handed a QoS stat
 commented profile for the other value of a simulation switch an entry point declares. No
 release had shipped, so no stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.31` file: `Atlas.from_json` compares the major
+The eleventh first run trial moved several findings inside `1.31` with no new key. The python
+reader follows a declare wrapper the way the C++ reader does: a module level function that
+calls `declare_parameter` on a node and a name it is handed declares, at each call, the name
+its caller passes, also from another module of the workspace, so `param.set_undeclared` no
+longer fires on every key such a helper declares. Endpoints built inside a dict comprehension
+over a literal sequence are read, where they were dropped without a blind spot. A frame spelled
+as a parameter plus a literal (`self.prefix + 'odom'`) states `<role>_parameter_suffix`, so the
+join adds the literal to the profile's value instead of replacing the whole frame with it, and a
+`TransformStamped` built with `header=` and `child_frame_id=` keywords states its frames.
+`frame.broadcast_twice` counts a broadcast whose parent a profile's parameter chain resolves.
+No release had shipped, so no stored id or waiver existed.
+
+* in `1.32`, the rule id `topic.namespace_escape`, an executable started in two namespaces
+  whose code publishes one absolute name from every copy. No key and no id form changed.
+
+A reader pinned to `1.0` still loads a `1.32` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -1631,7 +1646,7 @@ param.sim_time_mixed        launch.file_not_installed     model.mesh_missing
 build.unbuilt               build.underlay                remap.matches_nothing
 type.incompatible           service.no_server             launch.argument_undeclared
 frame.broadcast_twice       param.read_undeclared         controller.undefined
-controller.joint_missing
+controller.joint_missing     topic.namespace_escape
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -1734,14 +1749,23 @@ includes declares or reads the name, and nothing is decided when an include does
 resolve.
 
 `frame.broadcast_twice` is `warn`. It fires once per child frame and profile that two nodes
-broadcast, from declared or coded facts that state both frames as literals and sit under no
-condition. tf2 holds one transform per child, so the frame takes whichever arrived last, which
+broadcast, from declared or coded facts that state the child as a literal and a parent, a
+literal or a parameter the profile resolves, and sit under no condition. tf2 holds one transform per child, so the frame takes whichever arrived last, which
 is what two robots without a frame prefix, or one frame published with two parents, look like.
 Two sites of one node are one broadcaster (section 5 cites one node broadcasting a pair from
 two methods). Two nodes whose remaps send `/tf` and `/tf_static` to different topics write
 two trees, the way two robots in their own namespaces do, so one child frame in each is no
 clash. It is not `frame.parent_differs`, which compares the robot models of the
 profiles with each other.
+
+`topic.namespace_escape` is `warn`. It fires once per profile, topic and executable when one
+executable the launch starts in two or more namespaces publishes a name its code spells with a
+leading slash, so every copy writes one topic: two robots on one `/battery_state`, which no
+subscriber can tell apart. Only a coded publisher with no remap and no condition counts, and the
+names a library shares on purpose (`/tf`, `/tf_static`, `/rosout`, `/diagnostics`,
+`/parameter_events`, `/clock`) are left out. It names the line and asks to drop the slash or
+remap the name per namespace. It is not `type.incompatible` or `qos.incompatible`, which are two
+ends that cannot connect, while here the ends connect and should not.
 
 `param.read_undeclared` is `warn`. It fires once per parameter of a node whose code reads it
 with `get_parameter(name)`, in rclcpp or rclpy, when no code the node runs declares the name.

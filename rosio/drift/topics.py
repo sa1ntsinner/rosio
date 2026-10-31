@@ -777,6 +777,85 @@ def type_incompatible(atlas: model.Atlas) -> list[model.Finding]:
     return [_type_mismatch(key[0], rows) for key, rows in sorted(sites.items())]
 
 
+@rules.register("topic.namespace_escape")
+def topic_namespace_escape(atlas: model.Atlas) -> list[model.Finding]:
+    """One executable started in two namespaces publishes one absolute topic from both.
+
+    The code spells the name with a leading slash, so the namespace each copy runs in does not
+    reach it and every robot writes the same topic, which a reader cannot tell apart. Only a
+    coded publisher with no remap counts, and names a library shares on purpose (`/tf`,
+    `/rosout`, `/diagnostics`) are left out.
+    """
+    sites: dict[tuple[str, str, tuple[str, str]], list[tuple[str, model.LayerFact]]] = {}
+    for edge in endpoint_edges(atlas, ("publishes",)):
+        name = ids.parse(edge.dst).segments[0]
+        if is_quiet(name) or name == "/clock":
+            continue
+        node = atlas.entities.get(edge.src)
+        for fact in edge.facts:
+            raw = str(fact.values.get("raw_name") or "")
+            if (
+                fact.layer != model.Layer.CODED.value
+                or not rules.usable(fact)
+                or not raw.startswith("/")
+                or fact.values.get("remapped")
+                or fact.values.get("condition")
+            ):
+                continue
+            started = _started_as(node, fact.profile)
+            if started is not None:
+                sites.setdefault((fact.profile, edge.dst, started), []).append((edge.src, fact))
+    out = []
+    for (profile, topic, (pkg, exe)), rows in sorted(sites.items()):
+        nodes = sorted({node for node, _fact in rows})
+        spaces = {
+            ids.parse_node(node).fqn.rpartition("/")[0]
+            for node in nodes
+            if not ids.is_synthetic(node)
+        }
+        if len(spaces) < 2:
+            continue
+        name = ids.parse(topic).segments[0]
+        where = rules.sources([row for _node, fact in rows for row in fact.evidence])
+        at = rules.where(where[0]) if where else f"{pkg}/{exe}"
+        told = ", ".join(rules.node_text(node) for node in nodes)
+        out.append(
+            model.Finding(
+                rule="topic.namespace_escape",
+                severity=rules.severity_of("topic.namespace_escape"),
+                subject=topic,
+                discriminator=ids.digest(profile, pkg, exe),
+                title=f"{told} all publish {name} in {rules.slug_of(profile)}",
+                detail=(
+                    f"In {rules.slug_of(profile)} {pkg}/{exe} runs as {told}, and {at} publishes "
+                    f"the absolute name {name}, which no namespace changes, so every copy writes "
+                    "the same topic and a subscriber cannot tell them apart."
+                ),
+                fix=f"drop the leading slash of {name} at {at}, or remap it per namespace",
+                say=(
+                    f"{told} all publish {name} because {at} spells it with a leading slash; "
+                    f"drop the slash so each namespace gets its own topic."
+                ),
+                profiles=[profile],
+                layers=[model.Layer.CODED.value],
+                where=where,
+            )
+        )
+    return out
+
+
+def _started_as(node: model.Node | None, profile: str) -> tuple[str, str] | None:
+    """(package, executable) the profile's launch starts this node from."""
+    if node is None:
+        return None
+    for fact in node.facts:
+        if fact.layer == model.Layer.DECLARED.value and fact.profile == profile:
+            pkg, exe = fact.values.get("pkg"), fact.values.get("executable")
+            if pkg and exe:
+                return str(pkg), str(exe)
+    return None
+
+
 def _comparable(rows: list[Typed]) -> list[Typed]:
     """The ends that state one type unconditionally. A node stating two types on one name
     (`TwistStamped` or `Twist` by a parameter) holds alternatives, and either may run."""
