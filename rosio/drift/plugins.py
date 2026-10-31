@@ -548,7 +548,8 @@ def _unregistered_components(atlas: model.Atlas) -> list[model.Finding]:
             )
             row["nodes"].add(rules.node_text(node.id))
             row["profiles"].add(fact.profile)
-            row["where"].update(fact.evidence)
+            written = [item for item in fact.evidence if item.locator.endswith(".plugin")]
+            row["where"].update(written or fact.evidence)
     out = []
     for (file_id, package, name), row in sorted(groups.items()):
         launchfile = ids.build_launchfile(*ids.parse_file(file_id))

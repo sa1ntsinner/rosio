@@ -1597,6 +1597,12 @@ No release had shipped, so no stored id or waiver existed.
 * in `1.32`, the rule id `topic.namespace_escape`, an executable started in two namespaces
   whose code publishes one absolute name from every copy. No key and no id form changed.
 
+Inside `1.32`, with no new key, the declared fact of a composable node whose `plugin=` is
+written on a line below the start of its launch site carries a second evidence row on that
+line, its locator the site's with `.plugin` appended, and the component case of
+`plugin.unresolved` cites it, which is the line an engineer edits. It adds a row and moves
+no id.
+
 A reader pinned to `1.0` still loads a `1.32` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

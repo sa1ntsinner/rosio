@@ -153,7 +153,7 @@ def _components(tmp_path: Path, plugin: str, client: str = "") -> model.Atlas:
         "run.launch.py": component_launch(
             'ComposableNodeContainer(name="box", namespace="", package="rclcpp_components",'
             ' executable="component_container", composable_node_descriptions=['
-            f'ComposableNode(package="p", plugin="{plugin}", name="dock_server")])',
+            f'ComposableNode(package="p",\n    plugin="{plugin}", name="dock_server")])',
             *(['Node(package="p", executable="client", name="client")'] if client else []),
         ),
     }
@@ -176,6 +176,7 @@ def test_a_component_class_no_library_registers_names_the_closest_one(tmp_path: 
     (found,) = findings(atlas, "plugin.unresolved")
     assert "fleet_nodes::DockSever" in found.say
     assert "fleet_nodes::DockServer" in found.fix
+    assert found.where[0].locator.endswith(".plugin")
     assert any(entry.reason == "component_class_unregistered" for entry in atlas.unresolved)
 
 

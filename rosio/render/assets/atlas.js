@@ -19,13 +19,13 @@
   }
 
   var COLOUR = {
-    agree: "#6aa3f8",
-    differ: "#d03b3b",
-    declared: "#ad6800",
-    coded: "#00a1c6",
-    observed: "#00915d",
-    recorded: "#ce5b8c",
-    none: "#3a4250"
+    agree: "#b39780",
+    differ: "#ec5a55",
+    declared: "#4a92ea",
+    coded: "#7a4eb8",
+    observed: "#2b8044",
+    recorded: "#d8609f",
+    none: "#3a3a3a"
   };
   var WHY = {
     value_changed: "a later write set a different value",
@@ -230,7 +230,7 @@
     var w = canvas.clientWidth, h = canvas.clientHeight;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#0d1017";
+    ctx.fillStyle = "#111111";
     ctx.fillRect(0, 0, w, h);
     var s = view.scale, ox = view.x, oy = view.y;
 
@@ -291,7 +291,7 @@
 
     for (var f = 0; f < N; f++) {
       if (!vis[f] || findingOf[f] === 0) continue;
-      ctx.strokeStyle = findingOf[f] === 3 ? "#d03b3b" : (findingOf[f] === 2 ? "#e0a019" : "#5d6676");
+      ctx.strokeStyle = findingOf[f] === 3 ? "#ec5a55" : (findingOf[f] === 2 ? "#e8a33d" : "#6e6e6e");
       ctx.lineWidth = findingOf[f] === 3 ? 1.8 : 1.1;
       ctx.beginPath();
       ctx.arc(E.x[f] * s + ox, E.y[f] * s + oy, 6, 0, 6.2832);
@@ -299,7 +299,7 @@
     }
 
     if (highlight.length) {
-      ctx.strokeStyle = "#d03b3b";
+      ctx.strokeStyle = "#ec5a55";
       ctx.lineWidth = 2;
       for (var g = 0; g < highlight.length; g++) {
         var hgt = highlight[g];
@@ -319,7 +319,7 @@
     // A cluster is named once it is wide enough on screen to read, so zooming out
     // leaves the shape and zooming in fills in the names.
     ctx.font = "11px system-ui, sans-serif";
-    ctx.fillStyle = "#c6cdd8";
+    ctx.fillStyle = "#d9d9d9";
     for (var t = 0; t < N; t++) {
       if (!vis[t]) continue;
       var named = E.radius[t] * s > 22;

@@ -986,6 +986,9 @@ class LaunchDeclaredCollector:
         if node.argv and not any(field == "arguments" for field, _expr in node.command_blinds):
             values["argv"] = _argv_values(ctx.ws, node.argv)
         evidence = [row.source]
+        plugin_line = _plugin_line(node, row.source)
+        if plugin_line is not None:
+            evidence.append(plugin_line)
         if identity.known_name:
             evidence.append(_table_source(node.pkg, node.executable))
             _file_entity_id(ctx, _TABLE_FILE)
@@ -2692,6 +2695,25 @@ def _remap_line(remap: records.Remap, cited: model.Source) -> model.Source:
         if any(text in lines[number - 1] for text in quoted):
             return dataclasses.replace(cited, line_hint=number)
     return cited
+
+
+def _plugin_line(node: records.ResolvedNode, cited: model.Source) -> model.Source | None:
+    """The first line below a composable node's site that quotes its class, as a row of its
+    own, since that is the line an engineer edits when the class is wrong."""
+    site = node.site
+    if not node.plugin_class or site is None or cited.line_hint is None:
+        return None
+    if not site.path.endswith("/" + ids.parse_file(cited.file).relpath):
+        return None
+    try:
+        lines = Path(site.path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    quoted = (f"'{node.plugin_class}'", f'"{node.plugin_class}"')
+    for number in range(cited.line_hint + 1, len(lines) + 1):
+        if any(text in lines[number - 1] for text in quoted):
+            return dataclasses.replace(cited, locator=f"{cited.locator}.plugin", line_hint=number)
+    return None
 
 
 def _written_outside(ctx: CollectContext, site: records.Site | None) -> str:

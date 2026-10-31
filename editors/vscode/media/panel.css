@@ -23,10 +23,10 @@
   --code: var(--vscode-editor-font-family);
   --size: var(--vscode-font-size, 13px);
   /* the four layer colours of the rosio brand kit, one set per kind of theme */
-  --declared: #ad6800;
-  --coded: #00a1c6;
-  --observed: #00915d;
-  --recorded: #ce5b8c;
+  --declared: #4a92ea;
+  --coded: #7a4eb8;
+  --observed: #2b8044;
+  --recorded: #d8609f;
   --gutter: 24px;
 }
 
@@ -155,10 +155,10 @@ a:hover {
 /* the four layers, the one element only rosio has */
 
 body.vscode-light {
-  --declared: #a66000;
-  --coded: #0090af;
-  --observed: #008648;
-  --recorded: #c65690;
+  --declared: #207de4;
+  --coded: #652ea5;
+  --observed: #07652d;
+  --recorded: #be528b;
 }
 
 body.vscode-high-contrast,
