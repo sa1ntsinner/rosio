@@ -817,7 +817,8 @@ def _type_mismatch(
         rule="type.incompatible",
         severity=rules.severity_of("type.incompatible"),
         subject=channel,
-        title=f"{name} has two message types in {slug(profile)}",
+        title=f"{', '.join([name, *also])} {'have' if also else 'has'} two message types in "
+        f"{slug(profile)}",
         detail=(
             f"in {slug(profile)} the {layers[0]} layer has {', '.join(who)} on {name} as "
             f"{spelling}, while {'; '.join(others)}{more}. Two ends of one name that state two "
@@ -829,8 +830,8 @@ def _type_mismatch(
         ),
         say=(
             f"{human(odd[0].src)} {odd[0].kind} {name} as {odd[3]} at {line}, while "
-            f"{', '.join(who)} uses {spelling}, so the two ends never connect; change it to "
-            f"{spelling}"
+            f"{', '.join(who)} uses {spelling}, so the two ends never connect{more}; change "
+            f"it to {spelling}"
         ),
         discriminator=disc_for(profile),
         profiles=[profile] if profile != model.ANY_PROFILE else [],

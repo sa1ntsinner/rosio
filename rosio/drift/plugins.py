@@ -574,7 +574,8 @@ def _unregistered_components(atlas: model.Atlas) -> list[model.Finding]:
                 detail=(
                     f"{at} loads {name} from {package} as {nodes} in {slugs}, and {package} "
                     f"registers {', '.join(known)}, so the container refuses the load and "
-                    f"{never}."
+                    f"{never}. No code is bound to it, so what it publishes, serves or calls is "
+                    "not known, and no rule judges those ends until the class is fixed."
                 ),
                 fix=f"Load {instead} at {at}, or register {name} in {package}.",
                 say=(
