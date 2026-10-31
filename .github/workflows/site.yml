@@ -1,0 +1,36 @@
+name: site
+
+# The site lives in sa1ntsinner/rosio-site and is served from here, at
+# https://sa1ntsinner.github.io/rosio/. Run it by hand after a site change; the daily run
+# picks up one nobody deployed.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sa1ntsinner/rosio-site
+      - run: rm -rf .git .github
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
