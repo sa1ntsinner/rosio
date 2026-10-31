@@ -1536,6 +1536,16 @@ header and its source keep one publisher history. Parameter expressions outside 
 seconds value or a literal numerator over a member keep no period form, and chrono durations
 with an explicit ratio remain unresolved.
 
+Inside `1.31` a recorded bagtopic's `stamps` gained `offset_s`, the median of receive time
+minus stamp over its stamped messages. `time.topic_skew` takes its reference from those
+offsets with one vote per publishing node where the coded or declared layer names the one
+node that publishes the topic, so a node with two late topics no longer outvotes a punctual
+one and has the punctual topic blamed. A topic no node is known to publish keeps its own vote,
+and a recording where no topic has a known publisher keeps the per topic result the stamps
+check stored. The grouping is done by the rule, because the stamps collector reads no other
+layer. The standalone `rosio stamps` command has no atlas and votes per topic. The stored
+check results and the bag verdict are unchanged.
+
 A reader pinned to `1.0` still loads a `1.31` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

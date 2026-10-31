@@ -77,7 +77,7 @@ def test_recorded_stamp_findings_validate_and_repeat(recordings: Path, tmp_path:
     epoch = next(row for row in findings if row.rule == "time.epoch_offset")
     assert "PTP" in epoch.fix
     clean = first.entities[ids.build_bagtopic("clean", "/scan")].fact("recorded")
-    assert clean.values["stamps"] == {"messages": 40, "checks": []}
+    assert clean.values["stamps"] == {"messages": 40, "checks": [], "offset_s": 0.049999952}
     assert clean.values["volatile"]["stamps"]["rate_hz"] > 0
     assert clean.values["volatile"]["message_count"] == 40
     assert "stamp_rate" not in str(clean.values["stamps"])
@@ -277,3 +277,28 @@ def test_a_recorded_offset_title_prints_seconds_to_the_millisecond() -> None:
     (found,) = rules.findings_for(builder.build(), only=["time.epoch_offset"])
     assert found.title == "/scan: stamp epoch offset of -36.980 s"
     assert "-36.980 s" in found.say
+
+
+def test_skew_takes_one_vote_per_publishing_node() -> None:
+    builder = model.AtlasBuilder()
+    for topic, offset in (("/image", 0.4), ("/info", 0.4), ("/joint_states", 0.0)):
+        builder.fact(
+            ids.build_bagtopic("run", topic),
+            "recorded",
+            values={"stamps": {"offset_s": offset, "checks": []}},
+        )
+    for topic, node in (("/image", "/camera"), ("/info", "/camera"), ("/joint_states", "/arm")):
+        builder.node(ids.build_node(node))
+        builder.node(ids.build_topic(topic))
+        builder.edge(
+            "publishes", ids.build_node(node), ids.build_topic(topic), key="k", layer="coded"
+        )
+    builder.node(ids.build_node("/imu"))
+    builder.fact(
+        ids.build_bagtopic("run", "/imu"), "recorded", values={"stamps": {"offset_s": 0.0}}
+    )
+    found = rules.findings_for(builder.build(), only=["time.topic_skew"])
+    assert sorted(item.subject for item in found) == [
+        ids.build_bagtopic("run", "/image"),
+        ids.build_bagtopic("run", "/info"),
+    ]

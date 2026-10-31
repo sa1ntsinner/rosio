@@ -23,7 +23,7 @@ DRIFT_MIN_SPAN_S = 5.0
 DRIFT_SEGMENT_SLOPE_FRACTION = 0.5
 
 
-def _median_offset(entry):
+def median_offset(entry):
     """Receive time minus stamp, the sign every offset is stated with: negative is a stamp
     ahead of the receiver."""
     pairs = list(zip(entry.receive_times, entry.stamps, strict=True))
@@ -101,7 +101,7 @@ def classify_offset(topic, offset, stamps):
 def check_epoch_offset(series):
     findings = []
     for topic, entry in sorted(series.items()):
-        offset = _median_offset(entry)
+        offset = median_offset(entry)
         if offset is None:
             continue
         first = _first_nonzero(entry.stamps)
@@ -130,7 +130,7 @@ def check_epoch_offset(series):
 def check_inter_topic_skew(series):
     offsets = {}
     for topic, entry in series.items():
-        offset = _median_offset(entry)
+        offset = median_offset(entry)
         if offset is not None:
             offsets[topic] = offset
     if len(offsets) < MIN_TOPICS_FOR_SKEW:

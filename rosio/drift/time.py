@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from statistics import median
 from typing import Any
 
 from rosio import ids, model
 from rosio.drift import rules
+from rosio.stamps.clock import MIN_TOPICS_FOR_SKEW, SKEW_ERROR_S, SKEW_WARNING_S
 
 RECORDED = model.Layer.RECORDED.value
 OBSERVED = model.Layer.OBSERVED.value
@@ -33,6 +35,62 @@ def _publish_sources(atlas: model.Atlas, topic: str, profile: str) -> list[model
     )
 
 
+def _skew_by_node(atlas: model.Atlas) -> dict[str, list[dict[str, Any]]]:
+    """Recorded skew results with one vote per publishing node.
+
+    The stamps check takes the median over topics, so a node publishing two late topics
+    outvotes a third node and the punctual topic is blamed. Where the atlas names the one
+    node publishing a recorded topic, that node's topics share a vote; a topic no node is known
+    to publish keeps its own. A recording where no topic has a known publisher keeps the
+    stored results.
+    """
+    owners: dict[str, set[str]] = {}
+    for edge in atlas.edges.values():
+        if edge.kind == "publishes" and any(
+            fact.layer in ("coded", "declared") and rules.usable(fact) for fact in edge.facts
+        ):
+            owners.setdefault(ids.label_for(edge.dst), set()).add(edge.src)
+    bags: dict[str, dict[str, tuple[str, float]]] = {}
+    for entity in atlas.by_kind(model.NodeKind.BAGTOPIC.value):
+        for fact in entity.facts:
+            offset = fact.values.get("stamps", {}).get("offset_s")
+            if fact.layer == RECORDED and isinstance(offset, (int, float)):
+                identity = ids.parse_bagtopic(entity.id)
+                bags.setdefault(identity.bag, {})[entity.id] = (identity.topic, float(offset))
+    out: dict[str, list[dict[str, Any]]] = {}
+    for topics in bags.values():
+        if len(topics) < MIN_TOPICS_FOR_SKEW:
+            continue
+        if not any(len(owners.get(topic, ())) == 1 for topic, _ in topics.values()):
+            continue
+        votes: dict[str, list[float]] = {}
+        for topic, offset in topics.values():
+            found = owners.get(topic, set())
+            votes.setdefault(next(iter(found)) if len(found) == 1 else topic, []).append(offset)
+        reference = median(median(values) for values in votes.values())
+        for entity_id, (topic, offset) in topics.items():
+            delta = offset - reference
+            if abs(delta) <= SKEW_WARNING_S:
+                out[entity_id] = []
+                continue
+            out[entity_id] = [
+                {
+                    "check": "inter_topic_skew",
+                    "severity": "error" if abs(delta) > SKEW_ERROR_S else "warning",
+                    "message": (
+                        f"{topic} offset {offset:.3f} s deviates {delta:.3f} s from the bag "
+                        f"reference {reference:.3f} s, taken with one vote per publishing node"
+                    ),
+                    "evidence": {
+                        "topic_offset_s": offset,
+                        "reference_offset_s": reference,
+                        "delta_s": delta,
+                    },
+                }
+            ]
+    return out
+
+
 def _findings(
     atlas: model.Atlas,
     rule: str,
@@ -41,6 +99,7 @@ def _findings(
     measurement: str,
     unit: str,
     fallback: str,
+    recorded: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[model.Finding]:
     out = []
     for entity in sorted(atlas.entities.values(), key=lambda row: row.id):
@@ -52,7 +111,10 @@ def _findings(
             if fact.layer != layer or not rules.usable(fact):
                 continue
             values = fact.values.get("volatile", {}) if live else fact.values
-            for result in values.get("stamps", {}).get("checks", []):
+            results = values.get("stamps", {}).get("checks", [])
+            if not live and recorded is not None and entity.id in recorded:
+                results = recorded[entity.id]
+            for result in results:
                 if result.get("check") != check:
                     continue
                 evidence: dict[str, Any] = result.get("evidence", {})
@@ -151,6 +213,7 @@ def topic_skew(atlas: model.Atlas) -> list[model.Finding]:
         "delta_s",
         "s",
         "Synchronize this source clock with the clocks of the other topics.",
+        _skew_by_node(atlas),
     )
 
 

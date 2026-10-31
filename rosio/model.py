@@ -42,7 +42,8 @@ stored id: the rules `param.read_undeclared`, `controller.undefined` and
 model file attribute `mesh_lines` and the `publishes` edge value `period_s`, inferred from
 python and C++ timer callbacks with the same endpoint row keys `callback`, `period_form`,
 `period_numerator`, `attribute` and `published_from`; recorded rate comparisons through
-`samples`, with no new key; the rules
+`samples`, with no new key, and the recorded stamps value `offset_s` that
+`time.topic_skew` groups by publishing node; the rules
 `type.incompatible`, `service.no_server`,
 `launch.argument_undeclared` and `frame.broadcast_twice`, the include fact values
 `args_unread` and `arg_lines`, the `component_class_unregistered` blind spot reason, and

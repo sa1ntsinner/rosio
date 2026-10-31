@@ -11,7 +11,8 @@ from rosio import extra_line, ids, model
 from rosio.collect import CollectContext, register
 from rosio.collect.bag import BAG_PKG, METADATA_NAME, STORAGE_SUFFIXES, BagCollector
 from rosio.errors import CollectorError
-from rosio.stamps.checks import run_checks
+from rosio.stamps.checks import run_checks, stamped_series
+from rosio.stamps.clock import median_offset
 from rosio.stamps.model import TopicSeries
 from rosio.stamps.read import read_topic_series_report
 from rosio.stamps.verdict import diagnose
@@ -168,6 +169,7 @@ class StampsCollector:
             values={"stamp_verdict": verdict},
             evidence=evidence,
         )
+        stamped = stamped_series(report.series)
         for topic, series in sorted(report.series.items()):
             checks = check_rows(results, topic)
             volatile = {}
@@ -180,6 +182,9 @@ class StampsCollector:
                         for key in ("rate_hz", "p95_jitter_s", "median_dt_s")
                     }
             values: dict[str, Any] = {"stamps": {"messages": len(series.stamps), "checks": checks}}
+            offset = median_offset(series) if topic in stamped else None
+            if offset is not None:
+                values["stamps"]["offset_s"] = offset
             if volatile:
                 values["volatile"] = {"stamps": volatile}
             ctx.builder.fact(
