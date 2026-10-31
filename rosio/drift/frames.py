@@ -997,12 +997,21 @@ def _stem(frame: str) -> str:
 
 def _same_part(child: str, siblings: Mapping[str, Any]) -> str:
     """The sibling that names the same part as `child` with another frame suffix
-    (`laser_frame` beside `laser_link`), or nothing.
+    (`laser_frame` beside `laser_link`) or with the same words in another order
+    (`camera_depth_optical_frame` beside `depth_camera_optical_frame`), or nothing.
 
     Close spelling is not enough here: `imu_link` and `gps_link`, `left_wheel` and
     `right_wheel`, and `camera_link` and `camera_link_optical` are close and are two frames."""
     stem = _stem(child)
-    return next((item for item in sorted(siblings) if _stem(item) == stem), "")
+    words = sorted(child.lower().split("_"))
+    return next(
+        (
+            item
+            for item in sorted(siblings)
+            if item != child and (_stem(item) == stem or sorted(item.lower().split("_")) == words)
+        ),
+        "",
+    )
 
 
 def _nearest(frame: str, declared: Mapping[str, Any]) -> str:
@@ -1794,7 +1803,10 @@ def _hands_off_unread(
     set defines, `make_shared<Synchronizer>(this, topics)`, or to a free function no source
     of its package states, `attach_diagnostics(this)`: that code may create any endpoint.
     The class rows sit in the header that declares the class, so every file of the package
-    is asked."""
+    is asked. A known wrapper (`tf2_ros::TransformBroadcaster`) creates only the endpoints
+    its table row states, which the reader already recorded."""
+    from rosio.resolve import wrappers
+
     packages = {ids.parse_file(file).package for file in files if ids.kind_of(file) == "file"}
     for file, rows in classes.items():
         package = ids.parse_file(file).package
@@ -1806,7 +1818,10 @@ def _hands_off_unread(
                 if spelled.endswith("()"):
                     if (package, spelled[:-2]) not in functions:
                         return True
-                elif _short_class(spelled) not in defined:
+                elif (
+                    _short_class(spelled) not in defined
+                    and wrappers.lookup(spelled.split("<", 1)[0], "cpp") is None
+                ):
                     return True
     return False
 

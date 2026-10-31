@@ -436,6 +436,22 @@ def test_a_target_named_by_a_variable_is_recorded_and_not_named() -> None:
     assert scan.installed == ()
 
 
+def test_a_foreach_over_literal_names_builds_one_target_each() -> None:
+    text = (
+        "project(zz)\n"
+        "foreach(node base_driver depth_monitor)\n"
+        "  add_executable(${node} src/${node}.cpp)\n"
+        "  install(TARGETS ${node} DESTINATION lib/${PROJECT_NAME})\n"
+        "endforeach()\n"
+    )
+    scan = plugins_collect.scan_cmake(text, pkg="zz")
+    assert {name: row.sources for name, row in scan.targets.items()} == {
+        "base_driver": ("src/base_driver.cpp",),
+        "depth_monitor": ("src/depth_monitor.cpp",),
+    }
+    assert sorted(scan.installed) == ["base_driver", "depth_monitor"]
+
+
 def test_usable_target_refuses_an_empty_and_an_unexpanded_name() -> None:
     assert plugins_collect.usable_target("real_node") is True
     assert plugins_collect.usable_target("") is False

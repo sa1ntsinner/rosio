@@ -1498,7 +1498,8 @@ class _Reader:
         self._named_wrapper_endpoints(member, wrapper, arguments)
         listed = [item for item in arguments.named_children if item.type != "comment"]
         if wrapper == "message_filters::Subscriber" and len(listed) > 1:
-            self._filter_endpoint(member, listed[1], arguments, "Subscriber")
+            qos = listed[2] if len(listed) > 2 else None
+            self._filter_endpoint(member, listed[1], arguments, "Subscriber", qos)
 
     def _declaration(self, node: Any) -> None:
         type_node = _child(node, "type")
@@ -1709,7 +1710,8 @@ class _Reader:
                 if item.type != "comment"
             ]
             if arguments is not None and arguments.type == "argument_list" and len(listed) > 1:
-                self._filter_endpoint(name, listed[1], value, "Subscriber")
+                qos = listed[2] if len(listed) > 2 else None
+                self._filter_endpoint(name, listed[1], value, "Subscriber", qos)
 
     def _named_wrapper_endpoints(
         self, member: str, wrapper: str, value: Any, sym: str = ""
@@ -2140,11 +2142,15 @@ class _Reader:
             return
         if wrapper != "message_filters::Subscriber" or len(arguments) < 2:
             return
-        self._filter_endpoint(member, arguments[1], node, "subscribe")
+        qos = arguments[2] if len(arguments) > 2 else None
+        self._filter_endpoint(member, arguments[1], node, "subscribe", qos)
 
-    def _filter_endpoint(self, member: str, topic: Any, node: Any, api: str) -> None:
+    def _filter_endpoint(
+        self, member: str, topic: Any, node: Any, api: str, qos: Any = None
+    ) -> None:
         """The subscription a message_filters::Subscriber makes, by `subscribe(node, topic,
-        qos)` or by the constructor taking the same arguments."""
+        qos)` or by the constructor taking the same arguments. Without a qos argument the
+        profile is the one message_filters picks, which this source does not state."""
         wrapper = "message_filters::Subscriber"
         self.unit.endpoints.append(
             Endpoint(
@@ -2155,8 +2161,8 @@ class _Reader:
                 line=_line(node),
                 api=api,
                 type_text=self.member_types.get(f"{member}::type", ""),
-                qos=None,
-                qos_reason=str(KNOWN_WRAPPERS[wrapper]["reason"]),
+                qos=self._qos(qos) if qos is not None else None,
+                qos_reason="" if qos is not None else str(KNOWN_WRAPPERS[wrapper]["reason"]),
                 via_known_wrapper=wrapper,
                 condition=self.guarded(member),
                 guard=self.guard_of(member),
@@ -2253,7 +2259,7 @@ class _Reader:
             if number is not None:
                 self.numbers[target.strip("&* ")] = number
                 self.direct_numbers.add(target.strip("&* ").removeprefix("this->"))
-        api = "get_parameter_out" if target else "get_parameter"
+        api = "get_parameter_out" if target else name
         if api == "get_parameter" and ref.resolved and _checked(self.condition, str(ref.value)):
             # a read under `if (has_parameter(name))` never meets an undeclared name
             api = "get_parameter_checked"
@@ -5603,6 +5609,22 @@ def file_report(
         ]
     report["endpoints"] = endpoints
     report["parameters"] = parameters
+    declared = {(item.construction, item.name.value) for item in unit.params if item.name.resolved}
+    report["parameter_reads"] = sorted(
+        (
+            {
+                "name": read.name.value,
+                **_read_view(read),
+                **({"construction": read.construction} if read.construction else {}),
+                "owner_symbol": read.sym,
+            }
+            for read in unit.reads
+            if read.name.resolved
+            and read.name.status != SUFFIX
+            and (read.construction, read.name.value) not in declared
+        ),
+        key=lambda row: (row["name"], row["owner_symbol"], row["line_hint"]),
+    )
     report["parameter_callbacks"] = [
         {
             "api": item.api,
@@ -6224,6 +6246,7 @@ class CppCodeCollector:
                 "endpoints": slice_of(report["endpoints"]),
                 "parameters": slice_of(report["parameters"]),
                 "plugin_parameters": slice_of(report["plugin_parameters"]),
+                "parameter_reads": slice_of(report["parameter_reads"]),
                 "tf_broadcasts": slice_of(report["tf"]["broadcasts"]),
                 "tf_lookups": slice_of(report["tf"]["lookups"]),
             },

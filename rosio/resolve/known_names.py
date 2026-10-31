@@ -126,6 +126,24 @@ ENDPOINT_TABLE: tuple[KnownEndpoints, ...] = (
     ),
 )
 
+SERVICE_SCOPE: dict[tuple[str, str], str] = {
+    ("robot_state_publisher", "robot_state_publisher"): "none",
+    ("joint_state_publisher", "joint_state_publisher"): "none",
+    ("controller_manager", "spawner"): "none",
+    ("controller_manager", "ros2_control_node"): "controllers",
+    ("rclcpp_components", "component_container"): "private",
+    ("rclcpp_components", "component_container_mt"): "private",
+    ("rclcpp_components", "component_container_isolated"): "private",
+}
+"""Which service and action names an executable whose source was not read can serve,
+besides the parameter services every node has. `none`: it creates no service
+(robot_state_publisher.cpp, joint_state_publisher.py and spawner.py hold no create_service
+on humble and jazzy). `private`: only under its own name (component_manager.cpp creates
+`~/_container/load_node`, `unload_node` and `list_nodes`). `controllers`: under its own name
+(controller_manager.cpp creates `~/list_controllers` and the other `~/` services) and under
+the name of each controller it loads, a node in its namespace that may serve its own `~/`
+names."""
+
 
 @dataclass(frozen=True)
 class KnownName:
@@ -637,6 +655,7 @@ __all__ = [
     "ENDPOINT_TABLE",
     "INDEX",
     "INTERFACE_CONSTANTS",
+    "SERVICE_SCOPE",
     "TABLE",
     "ChildNode",
     "KnownEndpoints",

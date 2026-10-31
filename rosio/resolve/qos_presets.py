@@ -10,6 +10,7 @@ means whatever the middleware chooses.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -28,6 +29,14 @@ PRESETS: dict[str, dict[str, str]] = {
 DEPTH_DEFAULT = {"reliability": "reliable", "durability": "volatile"}
 """A bare history depth, `QoS(10)` or `10`, is the default profile at that depth."""
 
+DEPTH_OBJECT = re.compile(
+    r"(?:rclcpp::)?QoS\((?:(?:rclcpp::)?KeepLast\(\d+\)|\d+)\)"
+    r"(?:\.(?:reliable|best_effort|transient_local|durability_volatile|get_rmw_qos_profile)\(\)"
+    r"|\.keep_last\(\d+\))*"
+)
+"""`rclcpp::QoS(10)` with only the modifiers the reader spells out, which is the default
+profile at that depth with those modifiers applied."""
+
 CONNECTING_POLICIES = ("reliability", "durability")
 
 
@@ -43,7 +52,10 @@ def policies(qos: Mapping[str, Any] | None) -> dict[str, str]:
     preset = qos.get("preset")
     if isinstance(preset, str) and preset in PRESETS:
         implied = dict(PRESETS[preset])
-    elif qos.get("form") == "depth":
+    elif qos.get("form") == "depth" or (
+        qos.get("form") == "qos_object"
+        and DEPTH_OBJECT.fullmatch("".join(str(qos.get("raw") or "").split()))
+    ):
         implied = dict(DEPTH_DEFAULT)
     for key in CONNECTING_POLICIES:
         value = qos.get(key)

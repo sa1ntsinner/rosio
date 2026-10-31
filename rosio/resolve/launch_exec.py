@@ -22,6 +22,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -1082,6 +1083,33 @@ def required_arguments(source: str) -> tuple[str, ...]:
         ):
             found.append((node.lineno, node.col_offset, name.value))
     return tuple(dict.fromkeys(text for _line, _col, text in sorted(found)))
+
+
+SIM_SWITCH = re.compile(r"(?:use_)?sim(?:ulation|ulator)?", re.IGNORECASE)
+"""A launch argument that chooses between the simulated and the real robot."""
+
+
+def sim_switches(source: str) -> tuple[tuple[str, str], ...]:
+    """The simulation switches a python launch file declares with a literal `true` or `false`
+    default, as (name, default). Each value starts a different system."""
+    try:
+        tree = parse_python(source)
+    except SyntaxError:
+        return ()
+    found: list[tuple[int, str, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _call_name(node.func) != "DeclareLaunchArgument":
+            continue
+        name, default = _arg(node, "name", 0), _arg(node, "default_value", 1)
+        if (
+            isinstance(name, ast.Constant)
+            and isinstance(name.value, str)
+            and SIM_SWITCH.fullmatch(name.value)
+            and isinstance(default, ast.Constant)
+            and str(default.value).lower() in ("true", "false")
+        ):
+            found.append((node.lineno, name.value, str(default.value).lower()))
+    return tuple(dict.fromkeys((name, value) for _line, name, value in sorted(found)))
 
 
 def required_frontend_arguments(text: str, suffix: str) -> tuple[str, ...]:

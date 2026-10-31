@@ -161,6 +161,37 @@ def commands(text: str) -> list[Command]:
     return out
 
 
+def _expand_loops(rows: Sequence[Command]) -> list[Command]:
+    """Unroll `foreach(<var> <item>...)` over literal items, so `add_executable(${node} ...)`
+    in a loop names each target. A loop over a variable stays as it is, because this reader
+    does not know the value at this point."""
+    out: list[Command] = []
+    index = 0
+    while index < len(rows):
+        row = rows[index]
+        index += 1
+        if row.name != "foreach" or not row.args:
+            out.append(row)
+            continue
+        depth, body = 1, []
+        while index < len(rows) and depth:
+            depth += {"foreach": 1, "endforeach": -1}.get(rows[index].name, 0)
+            if depth:
+                body.append(rows[index])
+            index += 1
+        name, items = row.args[0], list(row.args[1:])
+        if items[:2] == ["IN", "ITEMS"]:
+            items = items[2:]
+        if not items or any("${" in item or item == "IN" for item in items):
+            out.extend([row, *body, replace(row, name="endforeach", args=())])
+            continue
+        for item in items:
+            for child in _expand_loops(body):
+                args = tuple(arg.replace("${" + name + "}", item) for arg in child.args)
+                out.append(replace(child, args=args))
+    return out
+
+
 def _expand_functions(rows: Sequence[Command]) -> list[Command]:
     """Bind local CMake function arguments without executing the build description."""
     functions: dict[str, tuple[tuple[str, ...], list[Command]]] = {}
@@ -357,7 +388,7 @@ def scan_cmake(text: str, *, pkg: str = "") -> CmakeScan:
             )
         return out
 
-    for command in _expand_functions(commands(text)):
+    for command in _expand_functions(_expand_loops(commands(text))):
         auto = command.name in AMENT_AUTO
         if auto:
             command = replace(command, name=AMENT_AUTO[command.name])

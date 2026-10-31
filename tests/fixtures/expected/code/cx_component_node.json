@@ -73,5 +73,6 @@
     "timers": 0,
     "parameters": 0,
     "unresolved": 0
-  }
+  },
+  "parameter_reads": []
 }

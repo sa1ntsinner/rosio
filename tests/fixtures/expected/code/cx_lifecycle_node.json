@@ -156,5 +156,6 @@
       "class": "cx_nodes::BridgeLifecycle",
       "owner_symbol": "main"
     }
-  ]
+  ],
+  "parameter_reads": []
 }

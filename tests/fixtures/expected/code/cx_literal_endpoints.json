@@ -213,5 +213,6 @@
       "class": "cx_nodes::LiteralEndpoints",
       "owner_symbol": "main"
     }
-  ]
+  ],
+  "parameter_reads": []
 }

@@ -103,5 +103,6 @@
       "class": "cx_nodes::WrapperNode",
       "owner_symbol": "main"
     }
-  ]
+  ],
+  "parameter_reads": []
 }

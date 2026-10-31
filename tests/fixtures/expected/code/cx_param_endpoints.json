@@ -372,5 +372,6 @@
       "class": "cx_nodes::ParamEndpoints",
       "owner_symbol": "main"
     }
-  ]
+  ],
+  "parameter_reads": []
 }

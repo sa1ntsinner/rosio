@@ -1562,6 +1562,26 @@ check stored. The grouping is done by the rule, because the stamps collector rea
 layer. The standalone `rosio stamps` command has no atlas and votes per topic. The stored
 check results and the bag verdict are unchanged.
 
+The tenth first run trial moved several findings inside `1.31` with no new key. The C++
+reader writes the `parameter_reads` record block of section 2.2, which only the python reader
+wrote, so `param.read_undeclared` reaches a C++ `get_parameter` it never saw; a C++
+`get_parameter_or(name, default)` states that api where it stated `get_parameter`. A CMake
+`foreach` over literal names is unrolled, so `add_executable(${node} src/${node}.cpp)` in such
+a loop binds each executable to its source. A node class handing itself to a known wrapper
+(`tf2_ros::TransformBroadcaster`) is still read whole, because the wrapper creates only what
+its row states. `known_names.SERVICE_SCOPE` states the services an unread
+`robot_state_publisher`, `joint_state_publisher`, `spawner`, `ros2_control_node` or component
+container can serve, so `service.no_server` no longer abstains for a profile that starts one.
+`controller.undefined` counts a `<name>.type` key a file the profile reads sets whether or not
+it wins, is one finding per launch file and controller, and suggests only a controller sharing
+a word of its name. An `rclcpp::QoS(10)` with only the modifiers the reader spells is the
+default profile at that depth, a `message_filters::Subscriber` handed a QoS states it, and
+`qos.incompatible` compares a wrapper end whose QoS the source states. The renamed variant of
+`frame.not_in_urdf` also matches the same words in another order
+(`camera_depth_optical_frame` beside `depth_camera_optical_frame`). `rosio init` writes a
+commented profile for the other value of a simulation switch an entry point declares. No
+release had shipped, so no stored id or waiver existed.
+
 A reader pinned to `1.0` still loads a `1.31` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

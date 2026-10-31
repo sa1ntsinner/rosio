@@ -40,7 +40,7 @@ _OWN_DEFINITION = frozenset({"-p", "--param-file", "-t", "--controller-type"})
 manager's configuration need not define it."""
 
 
-def _executable(fact: model.LayerFact) -> tuple[str, str]:
+def executable(fact: model.LayerFact) -> tuple[str, str]:
     return str(fact.values.get("pkg") or ""), str(fact.values.get("executable") or "")
 
 
@@ -49,20 +49,28 @@ def _managers(atlas: model.Atlas) -> dict[str, list[str]]:
     out: dict[str, list[str]] = defaultdict(list)
     for node in atlas.by_kind(model.NodeKind.NODE.value):
         for fact in node.facts:
-            if fact.layer == DECLARED and _executable(fact) == MANAGER:
+            if fact.layer == DECLARED and executable(fact) == MANAGER:
                 out[fact.profile].append(node.id)
     return out
 
 
-def _defined(atlas: model.Atlas, manager: str, profile: str) -> set[str]:
-    """The controllers a `<name>.type` key defines for the manager in this profile."""
+def defined(atlas: model.Atlas, manager: str, profile: str) -> set[str]:
+    """The controllers a `<name>.type` key defines for the manager in this profile.
+
+    A key counts when a file the profile reads sets it, winning or not: the manager declares
+    `<name>.type` at run time from the controller names it is asked for, so a manager whose
+    source was read leaves the key undecided and no candidate wins.
+    """
     out: set[str] = set()
     for node in atlas.by_kind(model.NodeKind.PARAM.value):
         parsed = ids.parse_param(node.id)
         name, _, last = parsed.name.rpartition(".")
         if parsed.owner != manager or last != "type" or not name or "." in name:
             continue
-        if any(row.wins and row.profile == profile for row in node.candidates):
+        if any(
+            row.profile == profile and row.shadow_kind != "not_read_in_profile"
+            for row in node.candidates
+        ):
             out.add(name)
     return out
 
@@ -84,8 +92,16 @@ def _spawned(argv: list[str]) -> list[str]:
     return names
 
 
+_GENERIC_WORDS = frozenset({"controller", "broadcaster"})
+
+
 def _closest(name: str, known: set[str]) -> str:
-    match = difflib.get_close_matches(name, sorted(known), n=1, cutoff=0.6)
+    """A defined controller that shares a word of its own with the name asked for
+    (`arm_controller` for `arm_trajectory_controller`), never one that shares only
+    `controller` (`base_controller` for `arm_controller`)."""
+    words = set(name.split("_")) - _GENERIC_WORDS
+    related = sorted(item for item in known if words & set(item.split("_")))
+    match = difflib.get_close_matches(name, related, n=1, cutoff=0.0)
     return match[0] if match else ""
 
 
@@ -102,18 +118,20 @@ def controller_undefined(atlas: model.Atlas) -> list[model.Finding]:
     found: dict[tuple[str, str], list[tuple[str, model.LayerFact, str]]] = defaultdict(list)
     for node in atlas.by_kind(model.NodeKind.NODE.value):
         for fact in node.facts:
-            if fact.layer != DECLARED or _executable(fact) != SPAWNER:
+            if fact.layer != DECLARED or executable(fact) != SPAWNER:
                 continue
             if not rules.usable(fact) or len(managers.get(fact.profile, [])) != 1:
                 continue
-            defined = _defined(atlas, managers[fact.profile][0], fact.profile)
-            if not defined:
+            known = defined(atlas, managers[fact.profile][0], fact.profile)
+            if not known:
                 continue
             for name in _spawned([str(word) for word in fact.values.get("argv") or []]):
-                if name not in defined:
-                    found[(node.id, name)].append((fact.profile, fact, _closest(name, defined)))
+                if name not in known:
+                    # one launch line read in several profiles or namespaces is one finding
+                    site = fact.evidence[0].file if fact.evidence else node.id
+                    found[(site, name)].append((fact.profile, fact, _closest(name, known)))
     out: list[model.Finding] = []
-    for (spawner, name), rows in sorted(found.items()):
+    for (site, name), rows in sorted(found.items()):
         profiles = sorted({profile for profile, _fact, _near in rows})
         fact = rows[0][1]
         near = rows[0][2]
@@ -124,7 +142,7 @@ def controller_undefined(atlas: model.Atlas) -> list[model.Finding]:
             model.Finding(
                 rule="controller.undefined",
                 severity=rules.severity_of("controller.undefined"),
-                subject=spawner,
+                subject=site,
                 discriminator=name,
                 title=f"the spawner at {at} loads {name}, which no configuration defines",
                 detail=(
@@ -191,7 +209,7 @@ def controller_joint_missing(atlas: model.Atlas) -> list[model.Finding]:
             if not ids.is_synthetic(owners[0])
             else ""
         )
-        for controller in sorted(_defined(atlas, owners[0], profile)):
+        for controller in sorted(defined(atlas, owners[0], profile)):
             owner = ids.build_node(f"{namespace}/{controller}")
             for key in _JOINT_KEYS:
                 entity = atlas.entities.get(ids.build_param(owner, key))

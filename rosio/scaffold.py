@@ -353,6 +353,21 @@ def _include_only(
     )
 
 
+def _sim_switches(entry: Entrypoint) -> tuple[tuple[str, str], ...]:
+    """The simulation switches a python entry point declares that the profile leaves at their
+    default."""
+    from rosio.resolve.launch_exec import sim_switches
+
+    if entry.verb != "launch" or entry.origin is None or Path(entry.origin.path).suffix != ".py":
+        return ()
+    try:
+        source = Path(entry.origin.path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ()
+    stated = {key for key, _value in entry.args}
+    return tuple(row for row in sim_switches(source) if row[0] not in stated)
+
+
 def _required_arguments(entry: Entrypoint) -> tuple[str, ...]:
     from rosio.resolve.launch_exec import required_arguments, required_frontend_arguments
 
@@ -497,6 +512,20 @@ def _profile(profile: ProfileSpec) -> str:
                 *(f"    {name}: ''" for name in required),
             ]
             text += "".join(f"  # {line}\n" for line in lines)
+    for item in profile.entrypoints:
+        for name, default in _sim_switches(item):
+            other = "false" if default == "true" else "true"
+            variant = {
+                "slug": f"{profile.slug}_{'real' if other == 'false' else 'sim'}",
+                "label": f"{profile.label} {name}:={other}",
+                "entrypoints": [{item.verb: f"{item.pkg} {item.target}", "args": {name: other}}],
+            }
+            lines = [
+                f"{Path(item.target).name} starts another system with {name}:={other}, "
+                "which this profile does not read; uncomment to check it too:",
+                *yaml.safe_dump([variant], sort_keys=False).splitlines(),
+            ]
+            text += "".join(f"# {line}\n" for line in lines)
     for item in profile.entrypoints:
         names = _unset_environment(item)
         if not names:

@@ -561,9 +561,18 @@ def qos_incompatible(atlas: model.Atlas) -> list[model.Finding]:
     by_topic: dict[tuple[str, str, str], dict[str, list[Ended]]] = {}
     for edge in endpoint_edges(atlas, (PUBLISHES, SUBSCRIBES)):
         for profile in sorted(set(edge.profiles) or {model.ANY_PROFILE}):
+            facts = _layer_facts(edge, profile)
             if _via_wrapper(edge, profile):
-                continue
-            for layer, fact in _layer_facts(edge, profile).items():
+                # a wrapper picks its own profile unless the source hands it one
+                facts = {
+                    layer: fact
+                    for layer in model.LAYER_ORDER
+                    for fact in [edge.fact(layer, profile) or edge.fact(layer, model.ANY_PROFILE)]
+                    if fact is not None
+                    and fact.confidence != model.Confidence.UNKNOWN.value
+                    and qos_presets.policies(fact.values.get("qos"))
+                }
+            for layer, fact in facts.items():
                 sides = by_topic.setdefault((edge.dst, profile, layer), {})
                 sides.setdefault(edge.kind, []).append((edge, fact))
     found: dict[tuple[str, str], dict[str, tuple]] = {}
@@ -874,7 +883,7 @@ def service_no_server(atlas: model.Atlas) -> list[model.Finding]:
                 servers.setdefault((profile, key), {}).setdefault(edge.dst, set()).add(edge.src)
             else:
                 clients.setdefault((edge.dst, profile), []).append((edge, fact))
-    blind: dict[str, bool] = {}
+    blind: dict[str, tuple[set[str], tuple[str, ...]]] = {}
     # A remap whose target ends like the name may hand it to a node rosio did not read.
     remapped = {
         name
@@ -889,8 +898,9 @@ def service_no_server(atlas: model.Atlas) -> list[model.Finding]:
         if (channel, profile) in served or _library_service(name) or name in remapped:
             continue
         if profile not in blind:
-            blind[profile] = bool(_blind_owners(atlas, profile))
-        if blind[profile]:
+            blind[profile] = _blind_owners(atlas, profile)
+        owners, prefixes = blind[profile]
+        if owners or name.startswith(prefixes):
             continue
         calls = [row for row in calls if whole(row[0].src, profile)]
         if not calls:
@@ -912,18 +922,38 @@ def service_no_server(atlas: model.Atlas) -> list[model.Finding]:
     return [_no_server(key[0], rows) for key, rows in sorted(groups.items())]
 
 
-def _blind_owners(atlas: model.Atlas, profile: str) -> set[str]:
+def _blind_owners(atlas: model.Atlas, profile: str) -> tuple[set[str], tuple[str, ...]]:
+    """The nodes of a profile that could serve any name, and the name prefixes under which
+    an unread node whose services `known_names.SERVICE_SCOPE` states could serve one."""
     from rosio import join
-    from rosio.drift import frames
+    from rosio.drift import controllers, frames
+    from rosio.resolve import known_names
 
     wants = (model.Want.SERVICE_NAME.value, model.Want.ACTION_NAME.value)
     whole = frames.read_whole(atlas)
-    unread = {
-        node.id
-        for node in atlas.by_kind(model.NodeKind.NODE.value)
-        if stated(node, DECLARED, profile) is not None and not whole(node.id, profile)
-    }
-    return join.blind_nodes(atlas, wants, profile) | unread
+    unread: set[str] = set()
+    prefixes: list[str] = []
+    for node in atlas.by_kind(model.NodeKind.NODE.value):
+        fact = stated(node, DECLARED, profile)
+        if fact is None or whole(node.id, profile):
+            continue
+        scope = known_names.SERVICE_SCOPE.get(controllers.executable(fact))
+        if scope is None or (ids.is_synthetic(node.id) and scope != "none"):
+            unread.add(node.id)
+            continue
+        if scope == "none":
+            continue
+        fqn = ids.parse_node(node.id).fqn
+        prefixes.append(fqn + "/")
+        if scope == "controllers":
+            namespace = fqn.rpartition("/")[0]
+            loaded = controllers.defined(atlas, node.id, profile)
+            if loaded:
+                prefixes.extend(f"{namespace}/{name}/" for name in loaded)
+            else:
+                # a manager whose configuration was not read could load any controller
+                prefixes.append(f"{namespace}/")
+    return join.blind_nodes(atlas, wants, profile) | unread, tuple(prefixes)
 
 
 def _library_service(name: str) -> bool:
