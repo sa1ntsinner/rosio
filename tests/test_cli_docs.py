@@ -44,6 +44,16 @@ SERVED_TOOLS = (
 """The twelve the server exposes, in the order `serve/server.py` returns them."""
 
 
+USER_DOCS = (
+    "docs/commands.md",
+    "docs/assistants.md",
+    "docs/migrate.md",
+    "docs/bundle.md",
+    "docs/examples.md",
+)
+"""The pages the README sends a reader to."""
+
+
 def doc(name: str) -> str:
     path = ROOT / name
     if not path.is_file():
@@ -68,13 +78,13 @@ def block(text: str, after: str) -> list[str]:
 
 
 def test_the_readme_command_reference_lists_every_verb():
-    lines = block(doc("README.md"), "## Command reference")
+    lines = block(doc("docs/commands.md"), "## Command reference")
     published = {line.split()[1] for line in lines if line.startswith("rosio ")}
     assert published == set(cli.VERBS)
 
 
 def test_the_readme_init_line_names_every_init_flag():
-    lines = block(doc("README.md"), "## Command reference")
+    lines = block(doc("docs/commands.md"), "## Command reference")
     (line,) = [line for line in lines if line.startswith("rosio init ")]
     parser = cli.build_parser()
     init = next(
@@ -122,12 +132,12 @@ def test_the_readme_command_reference_is_the_parser(monkeypatch):
     monkeypatch.setenv("COLUMNS", "1000")
     published = [
         line.split("  #", 1)[0].rstrip()
-        for line in block(doc("README.md"), "## Command reference")
+        for line in block(doc("docs/commands.md"), "## Command reference")
         if line.startswith("rosio ")
     ]
     assert sorted(published) == sorted(_parser_lines())
     for flag in OUTPUT_FLAGS[1:]:
-        assert f"`{flag[1:-1]}`" in doc("README.md")
+        assert f"`{flag[1:-1]}`" in doc("docs/commands.md")
 
 
 def test_the_contract_verb_bullet_matches_the_cli():
@@ -164,7 +174,7 @@ def test_the_published_rule_counts_match_the_registry():
 
 
 def test_the_published_tool_names_match_the_server():
-    readme = doc("README.md")
+    readme = doc("docs/assistants.md")
     published = re.search(r"Twelve tools: (.+?)\.\s", flat(readme)).group(1)
     named = re.findall(r"`([a-z_]+)`", published)
     assert named == list(SERVED_TOOLS)
@@ -174,7 +184,7 @@ def test_the_published_tool_names_match_the_server():
 
 
 def test_the_published_skill_size_matches_the_template():
-    readme = doc("README.md")
+    readme = doc("docs/assistants.md")
     published = float(re.search(r"the skill file is ([\d.]+) KB", readme).group(1))
     written = len(agent_install.render("skill.md").encode("utf-8")) / 1024
     assert round(written, 1) == published
@@ -196,7 +206,8 @@ def _options(parser: argparse.ArgumentParser) -> set[str]:
     return found
 
 
-def test_every_flag_the_readme_names_exists_on_its_verb():
+@pytest.mark.parametrize("name", ["README.md", *USER_DOCS])
+def test_every_flag_a_document_names_exists_on_its_verb(name):
     parser = cli.build_parser()
     verbs = next(
         action.choices
@@ -205,7 +216,7 @@ def test_every_flag_the_readme_names_exists_on_its_verb():
     )
     shared = _options(parser) - {o for verb in verbs.values() for o in _options(verb)}
     unknown = []
-    for match in re.finditer(r"rosio ([a-z]+)\b([^\n`]*)", doc("README.md")):
+    for match in re.finditer(r"rosio ([a-z]+)\b([^\n`]*)", doc(name)):
         verb, rest = match.group(1), match.group(2).split("#", 1)[0]
         if verb not in verbs:
             continue

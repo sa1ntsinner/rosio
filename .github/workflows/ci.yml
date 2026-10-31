@@ -64,7 +64,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends python3-pip python3-venv \
-            ros-${{ matrix.distro }}-xacro ros-${{ matrix.distro }}-rosbag2-py \n            ros-${{ matrix.distro }}-nav2-common
+            ros-${{ matrix.distro }}-xacro ros-${{ matrix.distro }}-rosbag2-py \
+            ros-${{ matrix.distro }}-nav2-common
           if [ "${{ matrix.distro }}" = "jazzy" ]; then
             apt-get install -y --no-install-recommends ros-jazzy-rmw-zenoh-cpp
           fi

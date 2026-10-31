@@ -40,6 +40,7 @@ def test_an_unread_active_provider_prevents_a_claim_of_absence(tmp_path: Path):
     assert findings(atlas, "service.no_server") == []
 
 
+@pytest.mark.ros
 def test_unread_code_in_another_profile_does_not_hide_a_known_violation(tmp_path: Path):
     atlas = python_workspace(
         tmp_path,

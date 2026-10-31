@@ -101,6 +101,7 @@ def _dead_remap(tmp_path: Path) -> model.Atlas:
     return run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
 
 
+@pytest.mark.ros
 def test_a_remap_whose_source_the_node_never_names_is_a_dead_remap(tmp_path: Path):
     atlas = _dead_remap(tmp_path)
     dead = findings(atlas, "remap.matches_nothing")
@@ -304,6 +305,7 @@ def test_an_autostarted_lifecycle_node_is_managed(tmp_path: Path):
 # M3, one SetParameter line handed to a group
 
 
+@pytest.mark.ros
 def test_a_set_parameter_line_is_one_finding_that_never_asks_to_edit_a_dictionary(
     tmp_path: Path,
 ):
@@ -361,6 +363,7 @@ int main(int argc, char ** argv) {
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_twist_subscriber_and_a_polling_subscriber_subscribe(tmp_path: Path):
     package(
         tmp_path,
@@ -399,6 +402,7 @@ RCLCPP_COMPONENTS_REGISTER_NODE(calib::Calib)
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_polling_subscriber_a_header_builds_belongs_to_the_constructor(tmp_path: Path):
     package(
         tmp_path,
@@ -438,6 +442,7 @@ def test_the_remaps_one_file_writes_on_one_node_are_one_finding(tmp_path: Path):
 # M5, a missing parameters file a launch argument names
 
 
+@pytest.mark.ros
 def test_a_missing_default_cites_the_argument_and_names_the_file_one_slip_away(tmp_path: Path):
     package(
         tmp_path,
@@ -510,6 +515,7 @@ def test_the_probe_summary_counts_the_frames_a_transform_names():
 # H5, a static transform publisher's arguments are a broadcast
 
 
+@pytest.mark.ros
 def test_a_static_transform_publisher_broadcasts_the_frames_its_arguments_name(tmp_path: Path):
     package(
         tmp_path,
@@ -633,6 +639,7 @@ def test_a_rebuild_says_it_dropped_the_observed_layer(tmp_path: Path):
 # H3 and H6, saying why rather than stating an absence
 
 
+@pytest.mark.ros
 def test_a_parameter_a_built_name_could_declare_says_which_expression(tmp_path: Path):
     package(
         tmp_path,
@@ -836,6 +843,7 @@ def test_a_remap_a_node_could_take_through_unread_code_is_not_dead(
     assert found == []
 
 
+@pytest.mark.ros
 def test_a_remap_scoped_to_the_node_it_is_written_on_is_still_dead(tmp_path: Path):
     _atlas, found = _python_dead(tmp_path, "", '("ctrl:statos", "/x")')
     assert len(found) == 1
@@ -918,6 +926,7 @@ def test_a_cpp_remap_a_node_could_take_through_unread_code_is_not_dead(
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_cpp_remap_no_source_could_take_is_still_dead(tmp_path: Path):
     body = "rclcpp::spin_some(this->get_node_base_interface());"
     assert len(_cpp_dead(tmp_path, body, '("stat", "/x")')) == 1
@@ -941,6 +950,7 @@ def _undeclared(tmp_path: Path, profiles: list[tuple[str, str]]) -> list[model.F
     return findings(atlas, "param.set_undeclared")
 
 
+@pytest.mark.ros
 def test_a_profile_that_adds_a_node_moves_no_set_undeclared_id(tmp_path: Path):
     yaml_path = '__import__("os").path.join(__import__("os").path.dirname(__file__), "p.yaml")'
     package(
@@ -1000,12 +1010,14 @@ def _groups(tmp_path: Path, first: str, second: str) -> list[model.Finding]:
     return findings(atlas, "param.set_undeclared")
 
 
+@pytest.mark.ros
 def test_a_set_parameter_one_group_reads_is_still_reported_in_another(tmp_path: Path):
     (found,) = _groups(tmp_path, "rate", "rate")
     assert "/b" in found.detail and "/a " not in found.detail
     assert [row.line_hint for row in found.where] == [11]
 
 
+@pytest.mark.ros
 def test_two_set_parameter_lines_of_one_name_are_two_findings(tmp_path: Path):
     found = _groups(tmp_path, "speed", "speed")
     assert sorted([row.line_hint for row in item.where] for item in found) == [[7], [11]]
@@ -1025,6 +1037,7 @@ def _one_node(root: Path, node: str) -> model.Atlas:
     return run_twice(config(root, Entrypoint("launch", "p", "run.launch.py")))
 
 
+@pytest.mark.ros
 def test_a_key_added_to_a_launch_dict_moves_no_set_undeclared_id(tmp_path: Path):
     def ids_of(name: str, keys: str) -> list[str]:
         node = f'Node(package="p", executable="a", name="a", parameters=[{{{keys}}}])'
@@ -1062,6 +1075,7 @@ def test_a_site_edge_key_does_not_depend_on_the_order_a_qos_block_was_built_in()
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_header_endpoint_moved_to_its_constructor_cites_no_header_line(tmp_path: Path):
     package(
         tmp_path,
@@ -1166,6 +1180,7 @@ def _renamed(atlas: model.Atlas) -> list[model.Finding]:
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_frame_the_code_broadcasts_under_a_close_model_name_is_reported(tmp_path: Path):
     """Trial 7 D4: the lidar broadcasts base_link to laser_frame and the model calls the same
     part laser_link, which no rule said because a broadcast frame counts as tied."""
@@ -1266,6 +1281,7 @@ int main(int argc, char ** argv) {
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_nav2_transform_broadcaster_broadcasts_and_publishes_tf(tmp_path: Path):
     """The nav2 loopback simulator broadcasts through nav2::TransformBroadcaster, which the
     reader did not know, so its transforms carried no broadcaster and no /tf publisher."""
@@ -1381,6 +1397,7 @@ def generate_launch_description():
 """
 
 
+@pytest.mark.ros
 def test_a_profile_that_starts_one_more_node_of_a_set_parameter_moves_no_id(tmp_path: Path):
     package(
         tmp_path,
@@ -1413,6 +1430,7 @@ def test_a_profile_that_starts_one_more_node_of_a_set_parameter_moves_no_id(tmp_
     assert "/b" in both.detail and "/b" not in one.detail
 
 
+@pytest.mark.ros
 def test_a_set_parameter_is_located_by_its_group_and_never_by_a_line(tmp_path: Path):
     found = _groups(tmp_path, "speed", "speed")
     locators = sorted(row.locator for item in found for row in item.where)
@@ -1462,6 +1480,7 @@ def test_a_name_literal_is_no_file_path_and_no_comment():
     ] == ["/scan", "/tmp"]
 
 
+@pytest.mark.ros
 def test_an_action_client_built_by_keywords_is_an_endpoint_and_no_handoff(tmp_path: Path):
     atlas, found = _python_dead(
         tmp_path,

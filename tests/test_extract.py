@@ -1522,6 +1522,7 @@ def test_cli_rejects_a_workspace_that_is_not_there(tmp_path: Path, capsys):
     assert "does not exist" in capsys.readouterr().err
 
 
+@pytest.mark.ros
 def test_cli_fail_on_violation_reports_a_recorded_problem(tmp_path: Path, capsys):
     """The ROS 1 launch file in the fixture is refused, recorded, and never fatal."""
     from rosio.cli import main

@@ -245,10 +245,12 @@ def test_the_agent_facing_files_say_a_stale_key_reports_itself():
     assert "stale waiver reports itself" in text
 
 
-def test_the_readme_documents_the_waiver_file_beside_the_verb():
+def test_the_commands_page_documents_the_waiver_file_beside_the_verb():
     """The human document and the agent facing one carry the same flag, or the two readers of
     this tool get two different answers about the same gate."""
-    readme = (Path(ins.__file__).resolve().parents[2] / "README.md").read_text(encoding="utf-8")
+    readme = (Path(ins.__file__).resolve().parents[2] / "docs" / "commands.md").read_text(
+        encoding="utf-8"
+    )
     assert "--waivers FILE" in readme
     assert "rosio drift --waivers rosio-waivers.yaml" in readme
     assert "waiver matched nothing, delete it:" in readme

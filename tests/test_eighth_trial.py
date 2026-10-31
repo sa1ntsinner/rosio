@@ -170,6 +170,7 @@ def _components(tmp_path: Path, plugin: str, client: str = "") -> model.Atlas:
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_component_class_no_library_registers_names_the_closest_one(tmp_path: Path):
     atlas = _components(tmp_path, "fleet_nodes::DockSever")
     (found,) = findings(atlas, "plugin.unresolved")
@@ -189,6 +190,7 @@ def test_a_registered_component_class_is_not_unresolved(tmp_path: Path):
 # F3, an rclpy action client is one action endpoint with its type
 
 
+@pytest.mark.ros
 def test_an_rclpy_action_client_is_one_action_endpoint(tmp_path: Path):
     atlas = python_workspace(
         tmp_path,
@@ -200,6 +202,7 @@ def test_an_rclpy_action_client_is_one_action_endpoint(tmp_path: Path):
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_an_action_client_of_another_type_than_its_server_is_an_error(tmp_path: Path):
     atlas = _components(
         tmp_path, "fleet_nodes::DockServer", "        self.c = ActionClient(self, Undock, 'dock')\n"
@@ -240,6 +243,7 @@ LOOKUP = (
 )
 
 
+@pytest.mark.ros
 def test_a_frame_looked_up_by_name_that_no_static_publisher_names_has_no_publisher(
     tmp_path: Path,
 ):
@@ -321,6 +325,7 @@ def _service(tmp_path: Path, called: str) -> model.Atlas:
     )
 
 
+@pytest.mark.ros
 def test_a_client_of_a_name_nothing_serves_names_the_served_one(tmp_path: Path):
     (found,) = findings(_service(tmp_path, "set_drive_mode"), "service.no_server")
     assert found.severity == "warn"
@@ -381,6 +386,7 @@ def _include(tmp_path: Path, argument: str) -> model.Atlas:
     return run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
 
 
+@pytest.mark.ros
 def test_an_include_argument_the_included_file_never_declares_names_the_close_one(
     tmp_path: Path,
 ):
@@ -391,6 +397,7 @@ def test_an_include_argument_the_included_file_never_declares_names_the_close_on
     assert "run.launch.py" in found.say
 
 
+@pytest.mark.ros
 def test_an_argument_the_include_already_passes_is_not_offered_as_the_meant_one(
     tmp_path: Path,
 ):
@@ -497,6 +504,7 @@ def test_an_xml_include_argument_finding_is_about_the_launch_file():
     assert found.subject == "launchfile:p|run.launch.xml"
 
 
+@pytest.mark.ros
 def test_two_nodes_broadcasting_one_child_frame_is_a_finding(tmp_path: Path):
     package(
         tmp_path,
@@ -559,6 +567,7 @@ PLANNER = (
 )
 
 
+@pytest.mark.ros
 def test_a_bare_key_naming_a_namespaced_node_is_an_owner_name_mismatch(tmp_path: Path):
     yaml_text = "planner:\n  ros__parameters:\n    timeout: 5.0\n"
     atlas = _params(tmp_path, yaml_text, PLANNER.format("robot1"))
@@ -573,6 +582,7 @@ def test_a_bare_key_naming_a_root_node_is_no_mismatch(tmp_path: Path):
     assert findings(atlas, "param.owner_name_mismatch") == []
 
 
+@pytest.mark.ros
 def test_a_later_wildcard_block_shadowing_a_node_key_is_moved_not_deleted(tmp_path: Path):
     yaml_text = (
         "/robot1/planner:\n  ros__parameters:\n    timeout: 30.0\n"
@@ -613,6 +623,7 @@ ROBOT = launch(
 )
 
 
+@pytest.mark.ros
 def test_sim_time_mixed_cites_the_line_that_holds_the_value(tmp_path: Path):
     package(
         tmp_path,
@@ -636,6 +647,7 @@ def test_sim_time_mixed_cites_the_line_that_holds_the_value(tmp_path: Path):
 # F11, a launch static publisher publishes /tf_static
 
 
+@pytest.mark.ros
 def test_a_launch_static_publisher_publishes_tf_static(tmp_path: Path):
     package(tmp_path, "p", {"run.launch.py": launch(STATIC.format("a", "odom", "base_link"))})
     atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
@@ -667,6 +679,7 @@ RCLCPP_COMPONENTS_REGISTER_NODE(demo::Evaluator)
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_message_filters_member_initializer_takes_its_remap(tmp_path: Path):
     from tests.test_sixth_trial import launch as component_launch
 
@@ -856,6 +869,7 @@ def generate_launch_description():
 """
 
 
+@pytest.mark.ros
 def test_a_dead_remap_cites_the_line_that_writes_it(tmp_path: Path):
     package(
         tmp_path,
@@ -887,6 +901,7 @@ def test_rosio_param_shows_the_value_the_running_system_holds(tmp_path: Path):
     assert answer.data["profiles"][profile]["observed"] == 7.5
 
 
+@pytest.mark.ros
 def test_a_launch_configuration_nothing_declares_is_named_in_the_fix(tmp_path: Path):
     package(
         tmp_path,

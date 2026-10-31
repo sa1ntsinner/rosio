@@ -94,6 +94,7 @@ RCLCPP_COMPONENTS_REGISTER_NODE(demo::Server)
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_component_reaches_its_helpers_actions_and_twist_publisher(tmp_path: Path):
     """H2, H6 and M5: a composed nav2 server lost every endpoint a helper class makes, every
     action, and the `cmd_vel` its TwistPublisher makes, so no node published `cmd_vel`."""
@@ -289,6 +290,7 @@ def test_roll_pitch_yaw_become_a_quaternion():
     assert abs(float(found["rotation.w"][0])) < 1e-9
 
 
+@pytest.mark.ros
 def test_static_transform_publisher_in_a_launch_file_sets_its_frame_parameters(tmp_path: Path):
     package(
         tmp_path,
@@ -320,6 +322,7 @@ STEREO = (
 )
 
 
+@pytest.mark.ros
 def test_a_node_only_a_gated_off_site_loads_is_not_an_entity(tmp_path: Path):
     """Trial five item 12: an unnamed component behind a false condition became a synthetic
     node with a name blind spot, although no profile starts it."""
@@ -451,6 +454,7 @@ int main(int argc, char ** argv) {
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_configure_and_get_name_of_a_class_no_plugin_registers_name_nothing(tmp_path: Path):
     """Review 2: a node's own `configure(std::string)` and `getName()` made `ns + ".rate"` a
     node parameter `rate`, so `lidar.rate` in the yaml was called undeclared."""
@@ -513,6 +517,7 @@ int main(int argc, char ** argv) {
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_name_two_branches_build_hides_the_keys_of_both(tmp_path: Path):
     """Review 3: the blind spot kept the last assignment, so `front.a` was undeclared."""
     package(
@@ -703,6 +708,7 @@ int main(int c, char ** v) {
 
 
 @pytest.mark.cpp
+@pytest.mark.ros
 def test_a_component_reaches_the_base_class_its_header_defines(tmp_path: Path):
     """Review 7: the component library binds the bases of the class it registers, and only
     those, so another node of the package lends it nothing."""
@@ -730,6 +736,7 @@ def test_a_component_reaches_the_base_class_its_header_defines(tmp_path: Path):
     assert ("publishes", "topic:/leak") not in edges
 
 
+@pytest.mark.ros
 def test_an_angle_that_is_not_a_number_leaves_the_rotation_a_blind_spot(tmp_path: Path):
     """Review 8: `--yaw` that does not read dropped the rotation silently."""
     package(
@@ -778,6 +785,7 @@ def main():
 """
 
 
+@pytest.mark.ros
 def test_an_empty_python_frame_is_a_blind_spot_and_the_file_is_read(tmp_path: Path):
     """Review 9: `frame_id = ''` in python refused the whole file as a parse error."""
     package(

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from rosio import ids
 from tests.test_eighth_trial import LOOKUP, STATIC, findings, node, python_workspace
 
@@ -24,6 +26,7 @@ def test_a_frame_an_unread_node_could_broadcast_has_no_publisher_claim(tmp_path:
     assert findings(atlas, "frame.no_publisher") == []
 
 
+@pytest.mark.ros
 def test_a_frame_nothing_could_broadcast_still_has_no_publisher(tmp_path: Path):
     atlas = python_workspace(
         tmp_path,
@@ -79,6 +82,7 @@ def test_a_probe_files_against_the_profile_whose_launch_command_runs(monkeypatch
 # a get_parameter of a name the node never declares raises at that line
 
 
+@pytest.mark.ros
 def test_a_read_of_an_undeclared_parameter_is_reported_and_a_read_with_default_is_not(
     tmp_path: Path,
 ):
@@ -123,6 +127,7 @@ def test_a_frame_written_into_a_header_that_no_model_has_is_reported(tmp_path: P
 # a path does not run through a subscription the publisher's QoS never matches
 
 
+@pytest.mark.ros
 def test_a_path_does_not_cross_a_qos_refused_subscription(tmp_path: Path):
     from rosio import query
 
@@ -171,6 +176,7 @@ def test_a_publisher_driven_by_a_timer_states_its_period(tmp_path: Path):
 # a spawner that asks for a controller no configuration defines
 
 
+@pytest.mark.ros
 def test_a_spawner_of_an_undefined_controller_is_reported(tmp_path: Path):
     from rosio.config import Entrypoint
     from tests.test_seventh_trial import config, launch, package, run_twice

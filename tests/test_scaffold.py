@@ -60,6 +60,7 @@ def test_the_default_roots_are_left_out_so_a_later_build_is_read(workspace: Path
     assert [spec.kind for spec in read.roots] == ["src", "install"]
 
 
+@pytest.mark.ros
 def test_an_included_launch_file_that_needs_arguments_is_not_offered(workspace: Path) -> None:
     launch = next((workspace / "src").rglob("*.launch.py"))
     base = launch.with_name("needs_args.launch.py")
@@ -94,6 +95,7 @@ def _including(name: str, through_variable: bool = False, package: str = "lx_bri
     )
 
 
+@pytest.mark.ros
 def test_only_a_real_include_hides_a_launch_file_that_needs_arguments(workspace: Path) -> None:
     """`sim.launch.py` counted as included wherever `nav_sim.launch.py` was, and a comment
     naming a file counted as including it."""

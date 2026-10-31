@@ -277,6 +277,7 @@ def test_two_sites_of_one_node_with_different_gates_raise_nothing(full: model.At
     assert all("gated" not in fact.values for fact in node.facts)
 
 
+@pytest.mark.ros
 def test_counts_are_stable(full: model.Atlas) -> None:
     counters = full.counters
     assert counters["entities_by_kind"] == {
@@ -2005,6 +2006,7 @@ def test_a_ros2_xml_file_with_a_launch_suffix_is_not_called_ros1(tmp_path: Path)
     assert all("ROS 1" not in item.say for item in atlas.findings)
 
 
+@pytest.mark.ros
 def test_a_ros1_file_still_reads_as_a_ros1_file(ws: Workspace) -> None:
     atlas, _ctx = _run_profile(ws, "legacy", entry_for("legacy_ros1"))
     rows = [
@@ -3011,6 +3013,7 @@ def test_a_missing_package_names_the_trees_it_searched_by_label(ws: Workspace) -
     assert launch_declared.missing_package("'ROBOT_MODEL'") is None
 
 
+@pytest.mark.ros
 def test_a_node_of_an_xml_launch_file_cites_its_line(tmp_path: Path) -> None:
     package = tmp_path / "src" / "xml_demo"
     (package / "launch").mkdir(parents=True)
