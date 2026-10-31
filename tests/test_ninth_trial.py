@@ -143,3 +143,25 @@ def test_a_path_does_not_cross_a_qos_refused_subscription(tmp_path: Path):
         answer = query.path(atlas, start, end)
         assert answer.data["qos_cut"] is True
         assert "publishes" not in {hop["kind"] for hop in answer.data["hops"]}
+
+
+# ---------------------------------------------------------------------------
+# a publisher a timer callback drives states the timer's period
+
+
+def test_a_publisher_driven_by_a_timer_states_its_period(tmp_path: Path):
+    body = (
+        "        rate = self.declare_parameter('rate', 10.0).value\n"
+        "        self.pub = self.create_publisher(Twist, 'out', 10)\n"
+        "        self.create_timer(1.0 / rate, self.tick)\n"
+        "    def tick(self):\n"
+        "        self.pub.publish(Twist())\n"
+    )
+    atlas = python_workspace(tmp_path, {"beat": node("beat", body)})
+    periods = {
+        fact.values.get("period_s")
+        for edge in atlas.edges.values()
+        if edge.kind == "publishes" and edge.dst == "topic:/out"
+        for fact in edge.facts
+    }
+    assert periods == {0.1}

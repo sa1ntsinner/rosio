@@ -127,6 +127,13 @@ record and is not read.
 
 * `kind` on an endpoint is one of `publisher`, `subscriber`, `service_server`,
   `service_client`, `action_server`, `action_client`, `timer`.
+* A python `timer` row may carry `callback`, the qualified method `self.<method>` names, and,
+  when its period is read from a parameter, `period_form`: `inverse` with `period_numerator`
+  for `1.0 / rate`, or `direct`. A python `publisher` row may carry `attribute`, the member it
+  is assigned to, and `published_from`, the methods that call `publish` on that member. The
+  join states `period_s` on a coded `publishes` edge when every publish is in the callback of
+  one timer of the same source, from the parameter's winning value in that profile, and
+  states nothing when that value is unknown.
 * `name` is the raw name the source states, absolute or relative, absent when the source
   could not be read statically. A record that already states the name its wrapper creates is
   taken as it stands.
@@ -1039,7 +1046,10 @@ What was added, in the order it arrived:
   release had shipped, so no stored id existed. The coded file value `stamped_frames`, a
   `{frame, line_hint}` row for every literal a python or C++ source writes into a message
   header (`msg.header.frame_id = "camera_frame"`), which `frame.not_in_urdf` reports when no
-  model and no transform names the frame. In a profile that launches a node whose code was
+  model and no transform names the frame. The coded `publishes` edge value `period_s` and the
+  python endpoint row keys `callback`, `period_form`, `period_numerator`, `attribute` and
+  `published_from` (section 2.2), so `rate.below_declared` holds a measured rate against the
+  timer that drives a publisher; the C++ reader states no timer callback yet. In a profile that launches a node whose code was
   not read, which could broadcast any frame, it fires only when a model link names the same
   part with another suffix (`camera_link`). The model file attribute `mesh_lines`, the line
   that writes each missing mesh name as it is written, which `model.mesh_missing` cites.

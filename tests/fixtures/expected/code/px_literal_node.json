@@ -39,6 +39,7 @@
         "preset": null
       },
       "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "attribute": "odom_pub",
       "line_hint": 19
     },
     {
@@ -61,6 +62,7 @@
         "preset": null
       },
       "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "attribute": "ready_pub",
       "line_hint": 27
     },
     {
@@ -83,6 +85,7 @@
         "preset": null
       },
       "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "attribute": "cmd_pub",
       "line_hint": 20
     },
     {
@@ -159,6 +162,7 @@
       "period_s": 0.1,
       "period_state": "literal",
       "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
+      "callback": "px_nodes.literal_node.LiteralNode._publish",
       "line_hint": 37
     }
   ],

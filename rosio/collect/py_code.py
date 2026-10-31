@@ -379,6 +379,22 @@ def _line(node: ast.AST) -> int | None:
     return getattr(node, "lineno", None)
 
 
+def _period_form(period: ast.expr) -> dict[str, Any]:
+    """How a timer period follows the parameter it is read from: `1.0 / rate` is the inverse
+    scaled by the literal numerator, `period` itself is direct, anything else is not stated."""
+    if (
+        isinstance(period, ast.BinOp)
+        and isinstance(period.op, ast.Div)
+        and isinstance(period.left, ast.Constant)
+        and isinstance(period.left.value, int | float)
+        and not isinstance(period.left.value, bool)
+    ):
+        return {"period_form": "inverse", "period_numerator": float(period.left.value)}
+    if isinstance(period, ast.Name | ast.Attribute | ast.Call | ast.Subscript):
+        return {"period_form": "direct"}
+    return {}
+
+
 def _checked(condition: str | None, name: str) -> bool:
     """Whether a guard asks `has_parameter` for this name first."""
     return bool(condition) and "has_parameter(" in condition and repr(name)[1:-1] in condition
@@ -2042,6 +2058,9 @@ class PyFile:
         record["qos"] = self._qos(qos_node, ctx) if qos_node is not None else None
         if qos_node is None:
             record["qos_reason"] = "the call states no qos argument"
+        target = self._target
+        if kind == "publisher" and isinstance(target, ast.Attribute) and _is_self(target.value):
+            record["attribute"] = target.attr
         self.endpoints.append(record)
 
     def _action(self, node: ast.Call, ctx: Ctx, call: str) -> None:
@@ -2145,9 +2164,13 @@ class PyFile:
                 self.resolved_counts["other"] += 1
                 if val.from_parameter:
                     record["from_parameter"] = val.from_parameter
+                    record.update(_period_form(period))
             else:
                 record["unresolved_ref"] = f"other:{self._src(period)}"
                 self._blind("other", self._src(period), val.reason, ctx.symbol, period)
+        callback = args[1] if len(args) > 1 else self._keyword(node, "callback")
+        if isinstance(callback, ast.Attribute) and _is_self(callback.value):
+            record["callback"] = f"{ctx.symbol.rpartition('.')[0]}.{callback.attr}"
         if ctx.condition:
             record["condition"] = ctx.condition
             record.update(_guard_view(ctx.guard))
@@ -2565,6 +2588,28 @@ class PyFile:
 
     # -- output ------------------------------------------------------------
 
+    def _publishing(self) -> dict[str, set[str]]:
+        """The methods that call `self.<attribute>.publish(...)`, by attribute."""
+        out: dict[str, set[str]] = {}
+        for klass in self.tree.body:
+            if not isinstance(klass, ast.ClassDef):
+                continue
+            for method in klass.body:
+                if not isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                for call in ast.walk(method):
+                    func = call.func if isinstance(call, ast.Call) else None
+                    if (
+                        isinstance(func, ast.Attribute)
+                        and func.attr == "publish"
+                        and isinstance(func.value, ast.Attribute)
+                        and _is_self(func.value.value)
+                    ):
+                        out.setdefault(func.value.attr, set()).add(
+                            self._qual(klass.name, method.name)
+                        )
+        return out
+
     def _candidates(self) -> list[dict[str, Any]]:
         """Classes that might be wrappers, for the workspace pass to rule on.
 
@@ -2665,6 +2710,10 @@ class PyFile:
         }
         if literals:
             record["name_literals"] = sorted(literals)
+        publishing = self._publishing()
+        for row in self.endpoints:
+            if row.get("attribute") in publishing:
+                row["published_from"] = sorted(publishing[row["attribute"]])
         stamped = {
             (node.value.value, _line(node))
             for node in ast.walk(self.tree)

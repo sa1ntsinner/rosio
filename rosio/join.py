@@ -2920,6 +2920,9 @@ def _bind_endpoint(
             edge_values["qos"] = row.get("qos")
         if row.get("condition"):
             edge_values["condition"] = row.get("condition")
+        period = _publish_period(builder.atlas, item, carrier, row)
+        if period is not None:
+            edge_values["period_s"] = period
         _site_edge(
             builder,
             edge_kind,
@@ -2949,6 +2952,56 @@ def _bind_endpoint(
             report.remap_cases.append((item.profile, item.node_id, raw, bound.name))
         if count:
             builder.count_resolved(WANTS[entity_kind])
+
+
+def _publish_period(
+    atlas: model.Atlas, item: Instance, carrier: Carrier, row: dict[str, Any]
+) -> float | None:
+    """The period a publisher runs at, when every publish on it is in the callback of one timer
+    of the same source: the timer's literal period, or the period its parameter gives in this
+    profile. A parameter whose value in the profile is unknown states nothing."""
+    sources = set(row.get("published_from") or ())
+    if row.get("kind") != "publisher" or len(sources) != 1:
+        return None
+    timers = [
+        timer
+        for timer in carrier.endpoints
+        if timer.get("kind") == "timer" and timer.get("callback") in sources
+    ]
+    if len(timers) != 1 or not isinstance(timers[0].get("period_s"), int | float):
+        return None
+    timer = timers[0]
+    parameter = str(timer.get("from_parameter") or "")
+    if not parameter:
+        return float(timer["period_s"])
+    try:
+        entity = atlas.entities.get(ids.build_param(item.node_id, parameter))
+    except ContractError:
+        return None
+    chain = [row for row in (entity.candidates if entity else []) if row.profile == item.profile]
+    if not chain:
+        # nothing sets the parameter in this profile, so the code default holds
+        return float(timer["period_s"])
+    winner = next((candidate for candidate in chain if candidate.wins), None)
+    value = _number(winner.value) if winner is not None else None
+    if not value:
+        return None
+    if timer.get("period_form") == "inverse":
+        return float(timer.get("period_numerator") or 1.0) / value
+    if timer.get("period_form") == "direct":
+        return value
+    return None
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    try:
+        return float(str(value))
+    except ValueError:
+        return None
 
 
 def _type_id(row: dict[str, Any], type_name: str) -> str:
