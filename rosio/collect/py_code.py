@@ -135,14 +135,10 @@ not as the five endpoints rcl_action derives from the name."""
 
 _WRAPPER_KEYWORDS = {
     "message_filters.Subscriber": ("topic", "msg_type", "qos_profile"),
-    "rclpy.action.ActionClient": ("action_name", "action_type", ""),
-    "rclpy.action.ActionServer": ("action_name", "action_type", ""),
 }
-"""(name, type, qos) keyword of every python wrapper row whose caller supplies the name.
-A keyword argument is the same argument: `ActionServer(node=self, action_type=T,
-action_name='/x')` states its name, and read positionally it states none, which turns one
-action into five endpoints with no name. Signatures on humble: `rclpy/action/server.py:184`,
-`rclpy/action/client.py:114`, `message_filters/__init__.py:61`."""
+"""(name, type, qos) keyword of every python wrapper row whose caller supplies the name. A
+keyword argument is the same argument, and read positionally it states none. Signature on
+humble: `message_filters/__init__.py:61`. An rclpy action is read by `_action`, never here."""
 
 _LOOKUP_CALLS = ("lookup_transform", "can_transform")
 
