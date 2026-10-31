@@ -349,7 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--only",
         action="append",
         metavar="RULE",
-        help="report a single drift rule, repeatable",
+        help="report one drift rule, repeatable or comma separated",
     )
     drift.add_argument(
         "--waivers",
@@ -1127,6 +1127,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
             instances["bag"] = BagCollector(paths=tuple(bags))
             instances["stamps"] = StampsCollector(paths=tuple(bags))
+    _observed_dropped(extract_mod.out_path(cfg))
     started = time.perf_counter()
     atlas = extract_mod.run(cfg, ws, collectors=collectors, instances=instances, progress=say)
     elapsed = time.perf_counter() - started
@@ -1151,6 +1152,24 @@ def cmd_extract(args: argparse.Namespace) -> int:
         )
         return EXIT_CONTRACT
     return EXIT_OK
+
+
+def _observed_dropped(target) -> None:
+    """Say so when extract replaces an atlas a probe extended: extract starts a new atlas,
+    and the observed layer is only ever added by `rosio probe` afterwards."""
+    from rosio.extract import carries_layer
+    from rosio.model import Atlas, Layer
+
+    try:
+        old = Atlas.loads(target.read_text(encoding="utf-8")) if target.is_file() else None
+    except (OSError, ValueError, RosioError):
+        return
+    if old is not None and carries_layer(old, Layer.OBSERVED.value):
+        print(
+            f"{PROG} extract: {target} carried the observed layer, which this run replaces; "
+            f"run {PROG} probe again after it to keep it",
+            file=sys.stderr,
+        )
 
 
 def _progress(verb: str, *, quiet: bool):
@@ -1490,7 +1509,11 @@ def cmd_drift(args: argparse.Namespace) -> int:
             f"and this verb would report a clean stack. it declares {atlas.capabilities}, "
             f"and {DRIFT_CAPABILITY} is what says the rules ran, so extract it again"
         )
-    wanted = list(dict.fromkeys(args.only or []))
+    wanted = list(
+        dict.fromkeys(
+            rule.strip() for item in args.only or [] for rule in item.split(",") if rule.strip()
+        )
+    )
     unknown = [name for name in wanted if name not in rules.COMMITTED]
     if unknown:
         raise UsageError(

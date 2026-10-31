@@ -641,10 +641,10 @@ def _incompatible(
     more = f" ({pairs - 1} more pairs on this topic)" if pairs > 1 else ""
     if matched:
         feeding = ", ".join(sorted({human(edge.src) for edge, _fact in matched}))
-        title = f"{subscriber} gets nothing from {publisher} on {name}"
+        title = f"{subscriber} gets nothing from {publisher} on {name} in {slug(profile)}"
         outcome = f"so those two never connect and only {feeding} reaches it."
     else:
-        title = f"{subscriber} never receives {name}"
+        title = f"{subscriber} never receives {name} in {slug(profile)}"
         outcome = "so the two never connect and no message arrives."
     return model.Finding(
         rule="qos.incompatible",

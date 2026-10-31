@@ -108,6 +108,10 @@ CODE_TYPES = {
 """C++ declaration type to the value type a yaml reader spells. A vector of anything maps to
 list, handled below, and an unmapped spelling is skipped rather than guessed."""
 
+ROS_TYPE_WORDS = {"float": "double", "int": "integer", "str": "string", "list": "array"}
+"""The parameter type words ROS spells, for text only: the comparison stays on the yaml
+reader's value types."""
+
 _LIST_MARKERS = ("vector<", "[]")
 
 
@@ -761,6 +765,8 @@ def type_changed(atlas: model.Atlas) -> list[model.Finding]:
             slug = rules.slug_of(profile)
             win_at = rules.where(winner.source)
             declared_at = rules.where(coded.evidence[0] if coded.evidence else None)
+            value_type = ROS_TYPE_WORDS.get(winner.value_type, winner.value_type)
+            declared_type = ROS_TYPE_WORDS.get(declared_type, declared_type)
             out.append(
                 model.Finding(
                     rule="param.type_changed",
@@ -769,13 +775,13 @@ def type_changed(atlas: model.Atlas) -> list[model.Finding]:
                     discriminator=slug,
                     title=f"{name} has two types in profile {slug}",
                     detail=(
-                        f"{owner_text} {name} is {winner.value_type} where it wins and is "
+                        f"{owner_text} {name} is {value_type} where it wins and is "
                         f"declared {declared_type} in code, inside one profile."
                     ),
                     fix=f"Make the value at {win_at} a {declared_type}, or change the declaration.",
                     say=(
                         f"In profile {slug}, {owner_text} {name} is "
-                        f"{rules.value_text(winner.value)} ({winner.value_type}) at {win_at} "
+                        f"{rules.value_text(winner.value)} ({value_type}) at {win_at} "
                         f"while {declared_at} declares it {declared_type}. The node refuses "
                         "the value at start up."
                     ),
