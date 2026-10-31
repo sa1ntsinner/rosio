@@ -520,6 +520,7 @@ def test_the_unreadable_target_is_a_blind_spot_with_its_line(tmp_path: Path) -> 
     assert [row["kind"] for row in plugins_collect.problems(build)] == ["target_name_unresolved"]
 
 
+@pytest.mark.unreadable
 def test_a_file_the_reader_cannot_open_is_named_by_its_id(tmp_path: Path) -> None:
     """The refusal is recorded on a run, which is compared data, so it must hold no machine
     path: the same refusal on two boxes is otherwise two different atlases."""
@@ -536,6 +537,7 @@ def test_a_file_the_reader_cannot_open_is_named_by_its_id(tmp_path: Path) -> Non
     assert "Errno" in message
 
 
+@pytest.mark.unreadable
 def test_the_refusal_of_one_workspace_is_the_refusal_of_its_copy(tmp_path: Path) -> None:
     """One workspace at two absolute paths refuses the same file with the same words."""
     messages = []

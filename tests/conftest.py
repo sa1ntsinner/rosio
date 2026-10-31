@@ -24,6 +24,12 @@ def _ros_available() -> bool:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        # root opens a file whatever its mode, so a file made unreadable stays readable
+        skip_root = pytest.mark.skip(reason="root can read a file whatever its mode")
+        for item in items:
+            if "unreadable" in item.keywords:
+                item.add_marker(skip_root)
     if _ros_available():
         return
     skip_ros = pytest.mark.skip(reason="no sourced ROS 2 environment")

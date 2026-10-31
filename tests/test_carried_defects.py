@@ -307,6 +307,7 @@ def test_with_no_roots_a_plain_path_is_still_a_repository_file():
 # the installer refusal the attack surfaced: a filesystem error is a rosio error
 
 
+@pytest.mark.unreadable
 def test_a_read_only_project_root_is_a_rosio_error_and_not_an_oserror(tmp_path):
     root = tmp_path / "project"
     root.mkdir()
@@ -320,6 +321,7 @@ def test_a_read_only_project_root_is_a_rosio_error_and_not_an_oserror(tmp_path):
     assert "--dry-run" in str(caught.value)
 
 
+@pytest.mark.unreadable
 def test_a_read_only_file_is_a_rosio_error_and_the_exit_code_is_usage(tmp_path, capsys):
     root = tmp_path / "project"
     home = tmp_path / "home"

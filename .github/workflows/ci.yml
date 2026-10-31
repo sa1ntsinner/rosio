@@ -44,7 +44,7 @@ jobs:
       - name: install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,mcp,stamps]"
+          python -m pip install -e ".[dev,cpp,mcp,stamps]"
       - name: pytest
         env:
           ROSIO_SKIP_ROS: "1"
@@ -64,7 +64,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends python3-pip python3-venv \
-            ros-${{ matrix.distro }}-xacro ros-${{ matrix.distro }}-rosbag2-py
+            ros-${{ matrix.distro }}-xacro ros-${{ matrix.distro }}-rosbag2-py \n            ros-${{ matrix.distro }}-nav2-common
           if [ "${{ matrix.distro }}" = "jazzy" ]; then
             apt-get install -y --no-install-recommends ros-jazzy-rmw-zenoh-cpp
           fi

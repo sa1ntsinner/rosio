@@ -464,6 +464,7 @@ def test_a_urdf_that_is_not_parsable_xml_still_costs_its_entity(
     assert [row["file"] for row in run.attrs["exceptions"]] == [file_id]
 
 
+@pytest.mark.unreadable
 def test_a_urdf_this_process_cannot_open_leaves_the_same_shape(
     static_root: Path, tmp_path: Path
 ) -> None:

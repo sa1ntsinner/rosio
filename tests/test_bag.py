@@ -523,6 +523,7 @@ def test_one_unreadable_bag_does_not_empty_the_layer(whole_bag: Path, tmp_path: 
     assert fact.values["topics"] == []
 
 
+@pytest.mark.unreadable
 def test_a_directory_that_cannot_be_listed_does_not_cost_the_bag_beside_it(
     whole_bag: Path, tmp_path: Path
 ) -> None:

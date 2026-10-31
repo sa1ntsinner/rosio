@@ -302,6 +302,7 @@ def test_an_unreadable_definition_does_not_empty_the_layer(tmp_path: Path) -> No
     assert atlas.counters["resolution_rate"]["type"] == 0.5
 
 
+@pytest.mark.unreadable
 def test_a_generator_list_this_process_cannot_read_is_a_refusal(tmp_path: Path) -> None:
     """The generator list is the discovery key, so a build file that cannot be opened is a
     refusal of its own and never a silent fall back to a directory scan."""

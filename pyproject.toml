@@ -98,4 +98,5 @@ markers = [
   "cpp: needs the cpp extra (tree-sitter)",
   "slow: takes more than a second",
   "join_refused: expects the extract to record a refused join pass",
+  "unreadable: makes a file unreadable, which root reads anyway",
 ]
