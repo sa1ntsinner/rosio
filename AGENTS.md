@@ -331,6 +331,16 @@ Rules:
    resolution table (`nav2_controller/controller_server`,
    `nav2_collision_monitor/collision_monitor`, `nav2_map_server/map_saver_server`, and so
    on). It lives in `rosio/resolve/known_names.py` and is data, cited as evidence.
+   Beside it, `ENDPOINT_TABLE` lists the endpoints of
+   `robot_state_publisher/robot_state_publisher` and
+   `joint_state_publisher/joint_state_publisher`, checked against the humble and jazzy
+   sources, with the source and reading method in each row. The join states declared endpoint edges only when it found no coded
+   carrier and no read source for that executable, applying the same namespace and remap
+   rules as coded endpoints. Each edge carries `via_known_wrapper` and cites its table row.
+   This is a partial list, never proof that another endpoint is absent. A row holds only
+   what both releases state alike: `ros2_control_node` subscribes `~/robot_description` on
+   humble and `robot_description` on jazzy, and the join does not know the release, so it
+   has no row.
 
 ### 3.5 Supersession
 
@@ -1063,6 +1073,12 @@ What was added, in the order it arrived:
   `rate.below_declared` holds a measured rate against the timer that drives a publisher; the
   C++ reader states the same keys for bound methods and timer lambdas, and for publisher
   members whose publish calls it reads. No release had shipped, so no stored id existed.
+  Declared `publishes` and `subscribes` edges from the known executable endpoint table
+  use the existing `raw_name`, `type`, `qos`, `remapped`, `remap` and `via_known_wrapper`
+  keys, with the table row as evidence. They bind only executables whose source the coded
+  layer did not read, and state no complete endpoint inventory. They add graph connections
+  and can retire remap blind spots, so findings about those gaps can go. No schema key or
+  stored id form changed, and the minor stays `31`.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace

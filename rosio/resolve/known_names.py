@@ -28,14 +28,21 @@ confirms `map_saver` by listing it in `lifecycle_nodes` for exactly that executa
 executable creates for itself. A costmap is a full ros node that no launch file names, so a
 yaml block keyed on it owns a node the launch layer never saw, and the whole block reads as
 a name mismatch until this table binds it.
+
+`ENDPOINT_TABLE` holds a partial list of endpoints, the same on humble and jazzy. The join
+uses it only when the executable has no read source, and each row states its own provenance.
+`ros2_control_node` is not in it: humble subscribes `~/robot_description` and jazzy
+`robot_description`, and the join does not know which release a profile runs.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from rosio.resolve.wrappers import WrapperEndpoint
+
 DISTRO_ROOT = "/opt/ros/humble"
-"""Where every row was checked. Recorded so a row can be rechecked on another distro."""
+"""Where the name and child rows were checked, unless their evidence names another distro."""
 
 CHILD_NAMESPACE_RULE = "<child>/<child>"
 """How a child node's fully qualified name is formed under the parent's namespace.
@@ -44,6 +51,80 @@ CHILD_NAMESPACE_RULE = "<child>/<child>"
 namespace equal to the node's name", so the controller server's local costmap runs as
 `/local_costmap/local_costmap` and a yaml block keyed `local_costmap` twice owns it. Every
 row below uses this rule, and a package that ever needs another one states it per row."""
+
+
+@dataclass(frozen=True)
+class KnownEndpoints:
+    """A partial endpoint list, the same on humble and jazzy, used only without read source."""
+
+    pkg: str
+    executable: str
+    endpoints: tuple[WrapperEndpoint, ...]
+    evidence: str
+
+
+ENDPOINT_TABLE: tuple[KnownEndpoints, ...] = (
+    KnownEndpoints(
+        pkg="robot_state_publisher",
+        executable="robot_state_publisher",
+        endpoints=(
+            WrapperEndpoint(
+                "publisher",
+                "robot_description",
+                "std_msgs/msg/String",
+                qos="reliable, transient local, keep last, depth 1",
+            ),
+            WrapperEndpoint(
+                "publisher",
+                "/tf",
+                "tf2_msgs/msg/TFMessage",
+                qos="reliable, volatile, keep last, depth 100",
+            ),
+            WrapperEndpoint(
+                "publisher",
+                "/tf_static",
+                "tf2_msgs/msg/TFMessage",
+                qos="reliable, transient local, keep last, depth 1",
+            ),
+            WrapperEndpoint(
+                "subscriber",
+                "joint_states",
+                "sensor_msgs/msg/JointState",
+                qos="best effort, volatile, keep last, depth 5",
+            ),
+        ),
+        evidence="Jazzy /opt/ros/jazzy lib/librobot_state_publisher_node.so (3.3.4), read "
+        "with strings and c++filt for names, types and broadcaster symbols; read upstream "
+        "robot_state_publisher 3.3.4 src/robot_state_publisher.cpp:129,132,144 for constructors "
+        "and QoS; read installed include/tf2_ros/tf2_ros/transform_broadcaster.hpp:97, "
+        "static_transform_broadcaster.hpp:95 and qos.hpp:46,63 for TF names, types and QoS, "
+        "include/rmw/rmw/qos_profiles.h:25,51 for sensor and default policies; upstream "
+        "humble src/robot_state_publisher.cpp:132,144 states the same names and QoS",
+    ),
+    KnownEndpoints(
+        pkg="joint_state_publisher",
+        executable="joint_state_publisher",
+        endpoints=(
+            WrapperEndpoint(
+                "publisher",
+                "joint_states",
+                "sensor_msgs/msg/JointState",
+                qos="reliable, volatile, keep last, depth 10",
+            ),
+            WrapperEndpoint(
+                "subscriber",
+                "robot_description",
+                "std_msgs/msg/String",
+                qos="reliable, transient local, keep last, depth 1",
+            ),
+        ),
+        evidence="Read Jazzy /opt/ros/jazzy lib/python3.12/site-packages/"
+        "joint_state_publisher/joint_state_publisher.py (2.4.3):405,407,425 for names, types "
+        "and QoS; read lib/python3.12/site-packages/rclpy/qos.py:83,94,96 and "
+        "include/rmw/rmw/qos_profiles.h:51 for default policies; upstream humble "
+        "joint_state_publisher.py:309 subscribes the same robot_description",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -553,10 +634,12 @@ __all__ = [
     "CHILD_NAMESPACE_RULE",
     "CHILD_TABLE",
     "DISTRO_ROOT",
+    "ENDPOINT_TABLE",
     "INDEX",
     "INTERFACE_CONSTANTS",
     "TABLE",
     "ChildNode",
+    "KnownEndpoints",
     "KnownName",
     "child_nodes",
     "child_rows",

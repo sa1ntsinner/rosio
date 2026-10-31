@@ -64,6 +64,8 @@ def _declared_node(
     name_source: str = model.NameSource.UNKNOWN.value,
     known_name: str = "",
     disc: str = "",
+    pkg: str = PKG,
+    executable: str = EXE,
 ) -> None:
     slug = ids.parse_profile(profile)
     launchfile = ids.build_launchfile(PKG, "launch/bridge.launch.py")
@@ -74,8 +76,8 @@ def _declared_node(
     builder.node(launchent)
     builder.node(node_id, name_source=name_source)
     values: dict[str, Any] = {
-        "pkg": PKG,
-        "executable": EXE,
+        "pkg": pkg,
+        "executable": executable,
         "namespace": namespace,
         "remaps": remaps,
     }
@@ -88,7 +90,7 @@ def _declared_node(
         launchent,
         join.DECLARED,
         profile=profile,
-        values={"pkg": PKG, "executable": EXE, "namespace": namespace, "remaps": remaps},
+        values={"pkg": pkg, "executable": executable, "namespace": namespace, "remaps": remaps},
     )
     builder.edge(
         model.EdgeKind.LAUNCHES.value,
@@ -131,6 +133,112 @@ def builder() -> model.AtlasBuilder:
 
 # ---------------------------------------------------------------------------
 # reading what the collectors left
+
+
+@pytest.mark.parametrize(
+    ("pkg", "executable", "expected"),
+    [
+        (
+            "robot_state_publisher",
+            "robot_state_publisher",
+            {
+                ("publishes", "topic:/robot/description"),
+                ("publishes", "topic:/robot/tf"),
+                ("publishes", "topic:/tf_static"),
+                ("subscribes", "topic:/robot/joint_states"),
+            },
+        ),
+        (
+            "joint_state_publisher",
+            "joint_state_publisher",
+            {
+                ("publishes", "topic:/robot/joint_states"),
+                ("subscribes", "topic:/robot/description"),
+            },
+        ),
+    ],
+)
+def test_known_executable_endpoints_bind_without_source(pkg, executable, expected):
+    from rosio import schema
+    from rosio.drift import frames, topics
+
+    builder = model.AtlasBuilder()
+    _profile(builder, "nx_navigation")
+    node = "node:/robot/driver"
+    _declared_node(
+        builder,
+        node,
+        REAL,
+        pkg=pkg,
+        executable=executable,
+        namespace="/robot",
+        name="driver",
+        name_source="literal",
+        remaps=[
+            ["robot_description", "description"],
+            ["robot_description", "wrong"],
+            ["driver:/tf", "tf"],
+        ],
+    )
+    site = next(edge.src for edge in builder.atlas.in_edges(node) if edge.kind == "launches")
+    builder.unresolved(
+        model.Unresolved(
+            want="other",
+            role="remap",
+            owner=site,
+            expr="robot_description:=description",
+            reason="endpoint kind unknown",
+        )
+    )
+    join.join(builder)
+    atlas = builder.atlas
+    ends = [edge for edge in atlas.out_edges(node) if edge.kind in ("publishes", "subscribes")]
+    assert {(edge.kind, edge.dst) for edge in ends} == expected
+    for edge in ends:
+        fact = edge.fact(join.DECLARED, REAL)
+        assert fact.values["via_known_wrapper"] is True
+        assert fact.values["type"] in (
+            "std_msgs/msg/String",
+            "sensor_msgs/msg/JointState",
+            "tf2_msgs/msg/TFMessage",
+        )
+        assert fact.values["qos"]
+        assert any(
+            source.file == "file:@repo|rosio/resolve/known_names.py" for source in fact.evidence
+        )
+    assert not frames.remap_unresolved(atlas)
+    assert not frames.remap_matches_nothing(atlas)
+    assert not topics.topic_no_publisher(atlas)
+    assert not topics.topic_no_subscriber(atlas)
+    assert schema.validate(atlas.to_json()) == []
+    once = atlas.canonical_bytes()
+    join.join(builder)
+    assert builder.atlas.canonical_bytes() == once
+
+
+def test_known_endpoints_do_not_supplement_read_source():
+    builder = model.AtlasBuilder()
+    _profile(builder, "nx_navigation")
+    node = "node:/driver"
+    _declared_node(
+        builder,
+        node,
+        REAL,
+        remaps=[],
+        name="driver",
+        name_source="literal",
+        pkg="robot_state_publisher",
+        executable="robot_state_publisher",
+    )
+    exe = "exe:robot_state_publisher|robot_state_publisher"
+    source = "file:robot_state_publisher|src/main.cpp"
+    builder.node(exe)
+    builder.fact(exe, join.DECLARED, values={"sources": [source]})
+    builder.fact(source, join.CODED, values={"language": "cpp"})
+    join.join(builder)
+    assert not [
+        edge for edge in builder.atlas.out_edges(node) if edge.kind in ("publishes", "subscribes")
+    ]
 
 
 def test_a_coded_carrier_is_bound_to_its_executable(builder):

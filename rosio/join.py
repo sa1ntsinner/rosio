@@ -872,8 +872,10 @@ def join(builder: model.AtlasBuilder) -> JoinReport:
         found, via = index.of(item)
         if found:
             rows.append((_own_arguments(atlas, item, found), found, via))
-        elif _unregistered(item, components):
-            _unregistered_blind(builder, item)
+        else:
+            _bind_known_endpoints(builder, item, report)
+            if _unregistered(item, components):
+                _unregistered_blind(builder, item)
     report.instances = len(rows)
     report.executables_bound = len({_exe_id(item) for item, _, via in rows if via == "executable"})
     report.components_joined = len(
@@ -889,6 +891,73 @@ def join(builder: model.AtlasBuilder) -> JoinReport:
         atlas.x[MARKER] = report.summary()
     builder.recompute()
     return report
+
+
+def _bind_known_endpoints(builder: model.AtlasBuilder, item: Instance, report: JoinReport) -> None:
+    row = next(
+        (
+            row
+            for row in known_names.ENDPOINT_TABLE
+            if (row.pkg, row.executable) == (item.pkg, item.executable)
+        ),
+        None,
+    )
+    if row is None or not item.namespace:
+        return
+    atlas = builder.atlas
+    if any(
+        CODED in entity.layers and _exe_id(item) in executables_of(atlas, entity.id)
+        for entity in atlas.by_kind("file")
+        if ids.parse_file(entity.id).package == item.pkg
+    ):
+        return
+    table = ids.build_file(ids.REPO_PKG, "rosio/resolve/known_names.py")
+    builder.node(table, attrs={"vendored_table": True})
+    evidence = [
+        model.Source(file=table, root="src", locator=f"ENDPOINT_TABLE:{item.pkg}/{item.executable}")
+    ]
+    node = atlas.entities[item.node_id]
+    fact = node.fact(DECLARED, item.profile)
+    for endpoint in row.endpoints:
+        bound = apply_remaps(endpoint.name, item.namespace, item.name, item.remaps)
+        if bound is None:
+            continue
+        kind, entity_kind = ENDPOINT_EDGES[endpoint.kind]
+        target = BUILDERS[entity_kind](bound.name)
+        builder.node(target)
+        builder.fact(
+            target,
+            DECLARED,
+            profile=item.profile,
+            run=fact.run if fact else None,
+            values={"name": bound.name},
+            confidence=fact.confidence if fact else model.Confidence.RESOLVED.value,
+            evidence=evidence,
+        )
+        values: dict[str, Any] = {
+            "raw_name": endpoint.name,
+            "type": endpoint.type,
+            "qos": endpoint.qos,
+            "via_known_wrapper": True,
+            "remapped": bound.rule is not None,
+        }
+        if bound.rule is not None:
+            values["remap"] = list(bound.rule)
+            report.remap_cases.append((item.profile, item.node_id, endpoint.name, bound.name))
+        builder.edge(
+            kind,
+            item.node_id,
+            target,
+            key=ids.edge_key(
+                profile=item.profile, executable=_exe_id(item), raw_name=endpoint.name, kind=kind
+            ),
+            layer=DECLARED,
+            profile=item.profile,
+            run=fact.run if fact else None,
+            values=values,
+            confidence=fact.confidence if fact else model.Confidence.RESOLVED.value,
+            evidence=evidence,
+        )
 
 
 AUTO_DECLARED = frozenset({"use_sim_time"})

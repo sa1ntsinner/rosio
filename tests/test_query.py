@@ -1421,6 +1421,15 @@ def test_a_reason_names_a_remap_only_for_a_name_a_remap_resolves():
     assert "remap" not in query.reason_text("not_stated_in_source", "param_name")
 
 
+def test_an_endpoint_table_citation_names_the_endpoints():
+    row = Source(
+        file=query.NAME_TABLE, locator="ENDPOINT_TABLE:robot_state_publisher/robot_state_publisher"
+    )
+    assert query.site(row) == (
+        "the endpoints rosio's table states for robot_state_publisher/robot_state_publisher"
+    )
+
+
 def test_explain_says_where_the_rest_of_a_cut_fact_line_is():
     """slam_toolbox: `coded in` ended in `...` with nothing saying what was cut."""
     builder = model.AtlasBuilder()

@@ -47,7 +47,10 @@ python and C++ timer callbacks with the same endpoint row keys `callback`, `peri
 `type.incompatible`, `service.no_server`,
 `launch.argument_undeclared` and `frame.broadcast_twice`, the include fact values
 `args_unread` and `arg_lines`, the `component_class_unregistered` blind spot reason, and
-the declared `publishes` edge of a `static_transform_publisher` to `/tf_static`; the coded
+the declared `publishes` edge of a `static_transform_publisher` to `/tf_static`;
+declared endpoint edges from the known executable table when source was not read,
+using the existing `raw_name`, `type`, `qos`, `remapped`, `remap` and `via_known_wrapper`
+keys and citing the table row; the coded
 file values `name_literals` and, on a python source,
 `node_handoffs`; the `remap.matches_nothing` rule, the `launch_set_parameter` mechanism, the
 `autostart` mechanism of a `manages_lifecycle` edge, the file attribute `similar_files`, and

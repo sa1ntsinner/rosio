@@ -124,7 +124,9 @@ def site(source: Source | Mapping[str, Any] | None, *, locator: bool = False, ta
         return ""
     row = source.to_json() if isinstance(source, Source) else dict(source)
     if row.get("file") == NAME_TABLE:
-        # The committed name table is data inside rosio, not a file of the workspace.
+        entry = str(row.get("locator") or "it")
+        if entry.startswith("ENDPOINT_TABLE:"):
+            return f"the endpoints rosio's table states for {entry.removeprefix('ENDPOINT_TABLE:')}"
         return f"the node name rosio's table states for {row.get('locator') or 'it'}"
     text = file_label(str(row.get("file", "")))
     line = row.get("line_hint")
