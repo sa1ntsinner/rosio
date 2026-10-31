@@ -809,6 +809,23 @@ def _type_of(spelling: str) -> str:
     return CODE_TYPES.get(text, "")
 
 
+def refused_type(node: model.Node, profile: str, winner: model.Candidate) -> tuple[str, str]:
+    """The type of the winning value and the type the code declares, in ROS words, when the
+    two differ and the node therefore refuses the value at start up; empty otherwise."""
+    if not winner.value_type or winner.value_type == "unknown" or _substitution(winner.value):
+        return "", ""
+    coded = node.fact(CODED, profile)
+    if not rules.usable(coded):
+        return "", ""
+    declared_type = _type_of(str(coded.values.get("type") or ""))
+    if not declared_type or declared_type == winner.value_type:
+        return "", ""
+    return (
+        ROS_TYPE_WORDS.get(winner.value_type, winner.value_type),
+        ROS_TYPE_WORDS.get(declared_type, declared_type),
+    )
+
+
 @rules.register("param.type_changed")
 def type_changed(atlas: model.Atlas) -> list[model.Finding]:
     """A declaration type disagreeing with the value that wins, inside one profile.
@@ -826,24 +843,15 @@ def type_changed(atlas: model.Atlas) -> list[model.Finding]:
             if not _live(node, profile):
                 continue
             winner = next((row for row in chain if row.wins), None)
-            if (
-                winner is None
-                or not winner.value_type
-                or winner.value_type == "unknown"
-                or _substitution(winner.value)
-            ):
+            if winner is None:
+                continue
+            value_type, declared_type = refused_type(node, profile, winner)
+            if not declared_type:
                 continue
             coded = node.fact(CODED, profile)
-            if not rules.usable(coded):
-                continue
-            declared_type = _type_of(str(coded.values.get("type") or ""))
-            if not declared_type or declared_type == winner.value_type:
-                continue
             slug = rules.slug_of(profile)
             win_at = rules.where(winner.source)
             declared_at = rules.where(coded.evidence[0] if coded.evidence else None)
-            value_type = ROS_TYPE_WORDS.get(winner.value_type, winner.value_type)
-            declared_type = ROS_TYPE_WORDS.get(declared_type, declared_type)
             out.append(
                 model.Finding(
                     rule="param.type_changed",

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from rosio import here, ids
+from rosio.drift import params as drift_params
 from rosio.errors import ContractError, UsageError
 from rosio.model import (
     ANY_PROFILE,
@@ -34,6 +35,7 @@ from rosio.model import (
     strip_volatile,
 )
 from rosio.render import plural
+from rosio.resolve import qos_presets
 
 DEFAULT_LIMIT = 12
 """Rows per section. A reader who needs more asks for one entity at a time."""
@@ -751,6 +753,14 @@ def param(
                 f"    effective {_value(effective.value)} ({effective.value_type})"
                 f"   edit {site(effective.source, tag=tag)}"
             )
+            winner = next((row for row in chain if row.wins and row.profile == item), None)
+            got, wants = drift_params.refused_type(entity, item, winner) if winner else ("", "")
+            if wants:
+                data["profiles"][item]["refused"] = {"value_type": got, "declared_type": wants}
+                lines.append(
+                    f"    the code declares it {wants}, so the node refuses this {got} value "
+                    "at start up (param.type_changed)"
+                )
         running = entity.fact("observed", item)
         if running is not None and "value" in running.values:
             data["profiles"][item]["observed"] = running.values["value"]
@@ -1260,8 +1270,10 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
         # Between two frames the question is the transform tree, which is what a lookup walks.
         hops = _shortest(atlas, start, end, max_hops, TREE_EDGE_KINDS)
         tree_route = bool(hops)
+    cut = False
     if not tree_route:
         hops = _shortest(atlas, start, end, max_hops, DATA_EDGE_KINDS)
+        cut = not hops and bool(_shortest(atlas, start, end, max_hops, DATA_EDGE_KINDS, False))
     data_route = bool(hops) and not tree_route
     if not hops:
         hops = _shortest(atlas, start, end, max_hops)
@@ -1273,6 +1285,7 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
         "data_route": data_route,
         "tree_route": tree_route,
         "data_direction": _data_direction(hops) if data_route else "",
+        "qos_cut": cut,
     }
     if not hops:
         return Answer(
@@ -1286,6 +1299,11 @@ def path(atlas: Atlas, source: str, target: str, *, max_hops: int = MAX_PATH_HOP
             ],
         )
     lines = [f"{plural(len(hops), 'hop')} from {label(start)} to {label(end)}", *notes]
+    if cut:
+        lines.append(
+            "  the only data route crosses a topic whose subscription requests a QoS its "
+            "publisher never offers, so no message travels it (qos.incompatible)"
+        )
     if tree_route:
         lines.append("  through the transform tree, -> tf_parent goes up to a parent")
     elif not data_route:
@@ -1336,17 +1354,22 @@ def _shortest(
     end: str,
     max_hops: int,
     kinds: frozenset[str] | None = None,
+    qos: bool = True,
 ) -> list[dict[str, Any]]:
+    """Breadth first, so the first route found is a shortest one. With `qos`, a hop from a
+    publisher's topic down to a subscription that publisher's QoS can never match is no hop."""
     if start == end:
         return []
     seen = {start}
-    queue: deque[tuple[str, list[dict[str, Any]]]] = deque([(start, [])])
+    queue: deque[tuple[str, list[dict[str, Any]], Edge | None]] = deque([(start, [], None)])
     while queue:
-        current, trail = queue.popleft()
+        current, trail, came = queue.popleft()
         if len(trail) >= max_hops:
             continue
         for edge, forward in _neighbours(atlas, current):
             if kinds is not None and edge.kind not in kinds:
+                continue
+            if qos and came is not None and _qos_refuses(came, edge, forward):
                 continue
             other = edge.dst if forward else edge.src
             if other in seen:
@@ -1355,8 +1378,28 @@ def _shortest(
             if other == end:
                 return [*trail, step]
             seen.add(other)
-            queue.append((other, [*trail, step]))
+            queue.append((other, [*trail, step], edge))
     return []
+
+
+def _qos_refuses(came: Edge, edge: Edge, forward: bool) -> bool:
+    """Whether a publisher edge followed by a subscription edge read backwards share no profile,
+    or every pair of their facts in a shared profile states QoS that never match, so no message
+    crosses from one to the other."""
+    if came.kind != "publishes" or edge.kind != "subscribes" or forward:
+        return False
+    verdicts = [
+        bool(
+            qos_presets.incompatible(
+                qos_presets.policies(pub.values.get("qos")),
+                qos_presets.policies(sub.values.get("qos")),
+            )
+        )
+        for pub in came.facts
+        for sub in edge.facts
+        if pub.profile == sub.profile or ANY_PROFILE in (pub.profile, sub.profile)
+    ]
+    return all(verdicts)
 
 
 def _neighbours(atlas: Atlas, entity_id: str) -> list[tuple[Edge, bool]]:
