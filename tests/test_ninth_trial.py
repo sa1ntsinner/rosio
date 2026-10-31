@@ -87,6 +87,8 @@ def test_a_read_of_an_undeclared_parameter_is_reported_and_a_read_with_default_i
         "        self.get_parameter('timeout').value\n"
         "        self.get_parameter('watchdog').value\n"
         "        self.get_parameter_or('limit', 2.0)\n"
+        "        if self.has_parameter('gain'):\n"
+        "            self.get_parameter('gain').value\n"
     )
     atlas = python_workspace(tmp_path, {"sup": node("sup", body)})
     found = findings(atlas, "param.read_undeclared")

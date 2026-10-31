@@ -1032,7 +1032,10 @@ What was added, in the order it arrived:
 * in `1.31`, the rule id `param.read_undeclared`. An rclpy read spelled
   `get_parameter_or(...).value`, or through a one hop accessor, states that call as its
   `api` where it stated `get_parameter_value`, so a reader can tell a read that raises from
-  one that answers a default, which moved the keys of those `reads_param` edges once. No
+  one that answers a default, which moved the keys of those `reads_param` edges once. A python
+  `get_parameter` under a guard asking `has_parameter` for the name states the api
+  `get_parameter_checked`, and `has_parameter(name)` is no longer read as the value of that
+  parameter, so a guard on it is no `guard_parameters` term. No
   release had shipped, so no stored id existed. The coded file value `stamped_frames`, a
   `{frame, line_hint}` row for every literal a python or C++ source writes into a message
   header (`msg.header.frame_id = "camera_frame"`), which `frame.not_in_urdf` reports when no

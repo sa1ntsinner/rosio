@@ -33,8 +33,9 @@ comparison can become definitive.
 that profile. The read itself is not counted as a declaration, everything else that declares
 a name is: the node's bound code, the code it reaches, a generated parameter library and a
 known wrapper. A node built to take undeclared parameters, or one whose setting is not a
-literal, abstains, and so does a name a declaration built at run time could spell. A read
-guarded by `has_parameter` is not recognised and is still reported.
+literal, abstains, and so does a name a declaration built at run time could spell. A python
+read under a guard that asks `has_parameter` for the name first is not one that raises; the
+C++ reader does not recognise that guard yet, so such a C++ read is still reported.
 
 ## Served snapshots
 

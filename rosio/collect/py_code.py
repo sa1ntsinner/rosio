@@ -379,6 +379,11 @@ def _line(node: ast.AST) -> int | None:
     return getattr(node, "lineno", None)
 
 
+def _checked(condition: str | None, name: str) -> bool:
+    """Whether a guard asks `has_parameter` for this name first."""
+    return bool(condition) and "has_parameter(" in condition and repr(name)[1:-1] in condition
+
+
 def _is_header_frame(node: ast.AST) -> bool:
     """`<message>.header.frame_id` as an assignment target."""
     return (
@@ -1978,6 +1983,9 @@ class PyFile:
         if not (name.known and isinstance(name.value, str)):
             return Val(expr=text, reason=name.reason or "call_result")
         target = target if target is not None else self._target
+        if api == "get_parameter" and _checked(ctx.condition, name.value):
+            # a read under `if self.has_parameter(name)` never meets an undeclared name
+            api = "get_parameter_checked"
         read = {
             "api": "get_parameter_value" if want_value and api == "get_parameter" else api,
             **({"via": api} if api in self.accessors else {}),
@@ -1989,6 +1997,9 @@ class PyFile:
             declared["reads"].append(read)
         else:
             self.param_reads.append({"name": name.value, "owner_symbol": ctx.symbol, **read})
+        if api == "has_parameter":
+            # whether the name is declared, never its value
+            return Val(expr=text, reason="call_result")
         value = Val(expr=text, state="resolved_from_parameter", from_parameter=name.value)
         if declared is not None and declared.get("default") is not None:
             value = replace(value, known=True, value=declared["default"])
