@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "icon": "media/icon.png",
   "galleryBanner": {
-    "color": "#0d1017",
+    "color": "#111111",
     "theme": "dark"
   },
   "repository": {
