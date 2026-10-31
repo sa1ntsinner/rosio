@@ -165,3 +165,36 @@ def test_a_publisher_driven_by_a_timer_states_its_period(tmp_path: Path):
         for fact in edge.facts
     }
     assert periods == {0.1}
+
+
+# ---------------------------------------------------------------------------
+# a spawner that asks for a controller no configuration defines
+
+
+def test_a_spawner_of_an_undefined_controller_is_reported(tmp_path: Path):
+    from rosio.config import Entrypoint
+    from tests.test_seventh_trial import config, launch, package, run_twice
+
+    controllers = (
+        "controller_manager:\n  ros__parameters:\n    arm_controller:\n"
+        "      type: joint_trajectory_controller/JointTrajectoryController\n"
+    )
+    spawn = 'Node(package="controller_manager", executable="spawner", arguments=["{}"])'
+    root = tmp_path / "src" / "c"
+    package(
+        tmp_path,
+        "c",
+        {
+            "ctl.yaml": controllers,
+            "run.launch.py": launch(
+                'Node(package="controller_manager", executable="ros2_control_node", '
+                f'parameters=["{root / "ctl.yaml"}"])',
+                spawn.format("arm_trajectory_controller"),
+                spawn.format("arm_controller"),
+            ),
+        },
+    )
+    atlas = run_twice(config(tmp_path, Entrypoint("launch", "c", "run.launch.py")))
+    found = findings(atlas, "controller.undefined")
+    assert [item.discriminator for item in found] == ["arm_trajectory_controller"]
+    assert "arm_controller" in found[0].say

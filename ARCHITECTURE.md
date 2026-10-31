@@ -105,6 +105,7 @@ others.
 | `rosio/drift/middleware.py` | observed middleware groups and missing Zenoh routers, scoped by profile |
 | `rosio/drift/frames.py` | frames with no broadcaster, orphan roots, config frames absent from every urdf, parent geometry disagreement, remaps and lifecycle |
 | `rosio/drift/plugins.py` | what a selector list loads, what it leaves behind, and what it names that no manifest exports, which is what gates the parameter family |
+| `rosio/drift/controllers.py` | ros2_control: a spawned controller no configuration defines, a controller joint the robot model lacks |
 | `rosio/drift/build.py` | build staleness, unloadable launch files, resolution rate below budget, and the completeness of the extraction itself |
 | `rosio/query.py` | the small context surface behind the CLI slices: explain, param, query, path, diff, unresolved, drift |
 

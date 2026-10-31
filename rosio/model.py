@@ -37,7 +37,8 @@ from rosio.errors import ContractError
 
 SCHEMA_MINOR = "31"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the rule `param.read_undeclared`, the coded file value `stamped_frames`, the
+stored id: the rules `param.read_undeclared`, `controller.undefined` and
+`controller.joint_missing`, the coded file value `stamped_frames`, the
 model file attribute `mesh_lines` and the `publishes` edge value `period_s`; the rules
 `type.incompatible`, `service.no_server`,
 `launch.argument_undeclared` and `frame.broadcast_twice`, the include fact values

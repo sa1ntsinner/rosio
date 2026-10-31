@@ -79,6 +79,8 @@ COMMITTED = (
     "launch.argument_undeclared",
     "frame.broadcast_twice",
     "param.read_undeclared",
+    "controller.undefined",
+    "controller.joint_missing",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -145,6 +147,8 @@ SEVERITY: dict[str, str] = {
     "launch.argument_undeclared": WARN,
     "frame.broadcast_twice": WARN,
     "param.read_undeclared": WARN,
+    "controller.undefined": ERROR,
+    "controller.joint_missing": ERROR,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {
@@ -179,6 +183,7 @@ while a mesh only the source holds is a missing install line."""
 
 FAMILIES = (
     "rosio.drift.build",
+    "rosio.drift.controllers",
     "rosio.drift.frames",
     "rosio.drift.nodes",
     "rosio.drift.middleware",

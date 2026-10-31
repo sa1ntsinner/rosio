@@ -1036,23 +1036,25 @@ What was added, in the order it arrived:
   `static_transform_publisher` to `/tf_static`, marked `via_known_wrapper` like the one a
   `ros2 run` publisher has.
 
-* in `1.31`, the rule id `param.read_undeclared`. An rclpy read spelled
-  `get_parameter_or(...).value`, or through a one hop accessor, states that call as its
-  `api` where it stated `get_parameter_value`, so a reader can tell a read that raises from
-  one that answers a default, which moved the keys of those `reads_param` edges once. A python
-  `get_parameter` under a guard asking `has_parameter` for the name states the api
-  `get_parameter_checked`, and `has_parameter(name)` is no longer read as the value of that
-  parameter, so a guard on it is no `guard_parameters` term. No
-  release had shipped, so no stored id existed. The coded file value `stamped_frames`, a
-  `{frame, line_hint}` row for every literal a python or C++ source writes into a message
-  header (`msg.header.frame_id = "camera_frame"`), which `frame.not_in_urdf` reports when no
-  model and no transform names the frame. The coded `publishes` edge value `period_s` and the
-  python endpoint row keys `callback`, `period_form`, `period_numerator`, `attribute` and
-  `published_from` (section 2.2), so `rate.below_declared` holds a measured rate against the
-  timer that drives a publisher; the C++ reader states no timer callback yet. In a profile that launches a node whose code was
-  not read, which could broadcast any frame, it fires only when a model link names the same
-  part with another suffix (`camera_link`). The model file attribute `mesh_lines`, the line
-  that writes each missing mesh name as it is written, which `model.mesh_missing` cites.
+* in `1.31`, the rule ids `param.read_undeclared`, `controller.undefined` and
+  `controller.joint_missing`, the last two a family of their own in
+  `rosio/drift/controllers.py`. An rclpy read spelled `get_parameter_or(...).value`, or
+  through a one hop accessor, states that call as its `api` where it stated
+  `get_parameter_value`, so a reader can tell a read that raises from one that answers a
+  default, which moved the keys of those `reads_param` edges once. A python `get_parameter`
+  under a guard asking `has_parameter` for the name states the api `get_parameter_checked`,
+  and `has_parameter(name)` is no longer read as the value of that parameter, so a guard on it
+  is no `guard_parameters` term. The coded file value `stamped_frames`, a `{frame, line_hint}`
+  row for every literal a python or C++ source writes into a message header
+  (`msg.header.frame_id = "camera_frame"`), which `frame.not_in_urdf` reports when no model and
+  no transform names the frame; in a profile that launches a node whose code was not read,
+  which could broadcast any frame, it fires only when a model link names the same part with
+  another suffix (`camera_link`). The model file attribute `mesh_lines`, the line that writes
+  each missing mesh name as it is written, which `model.mesh_missing` cites. The coded
+  `publishes` edge value `period_s` and the python endpoint row keys `callback`,
+  `period_form`, `period_numerator`, `attribute` and `published_from` (section 2.2), so
+  `rate.below_declared` holds a measured rate against the timer that drives a publisher; the
+  C++ reader states no timer callback yet. No release had shipped, so no stored id existed.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace
@@ -1558,7 +1560,8 @@ rmw.mixed                   zenoh.router_unreachable      qos.incompatible
 param.sim_time_mixed        launch.file_not_installed     model.mesh_missing
 build.unbuilt               build.underlay                remap.matches_nothing
 type.incompatible           service.no_server             launch.argument_undeclared
-frame.broadcast_twice       param.read_undeclared
+frame.broadcast_twice       param.read_undeclared         controller.undefined
+controller.joint_missing
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -1680,6 +1683,21 @@ run time could be this one, and on `get_parameter_or` and the out parameter form
 a default. It names a declared name close to the one read. It is not `param.set_undeclared`,
 which is a file setting a value nobody reads, a line that does nothing, while this one is code
 that crashes.
+
+`controller.undefined` is `error`. It fires once per spawner and controller name when a
+`controller_manager` `spawner` asks the profile's one `ros2_control_node` for a controller no
+parameters file the manager is handed defines by a `<name>.type` key, so the spawner fails and
+the controller never runs. It names a defined controller close to the one asked for. It is
+silent where the profile starts no manager or several, where the manager's configuration
+defines no controller at all (an unread or unbuilt file), and on a spawner that hands the
+controller its own type or parameters file (`-t`, `-p`).
+
+`controller.joint_missing` is `error`. It fires once per controller parameter and joint when a
+controller the manager defines lists, under `joints` or `joint`, a joint the one robot model
+the profile loads does not declare, so the hardware exports no interface for it and the
+controller fails to configure. The value is the candidate ranked first in the profile, because
+the manager hands the block to a controller no launch line names and no candidate wins. It is
+silent unless the profile starts one manager and loads one model whose joints were read.
 
 A composable node whose `plugin=` names a class that no `rclcpp_components` registration or
 `RCLCPP_COMPONENTS_REGISTER_NODE` of the workspace names is a case of `plugin.unresolved` and
@@ -1937,6 +1955,7 @@ One owner per module per milestone. Do not edit a module you do not own in your 
 | `rosio/drift/engine.py` | M3 | run order, rule isolation, deduplication, waivers, filtering and the counters |
 | `rosio/drift/{build,frames,nodes,params,plugins,time,topics}.py` | M3 | one module per rule family |
 | `rosio/drift/middleware.py` | M5 | mixed middleware and missing Zenoh routers per observed profile |
+| `rosio/drift/controllers.py` | M3 | ros2_control: spawned controllers no configuration defines, controller joints the model lacks |
 | `rosio/query.py` | M3 | CLI slices: explain, param, query, path, diff, unresolved, drift |
 | `rosio/render/__init__.py` | M4 | the render package surface, pure functions of a loaded atlas |
 | `rosio/render/report.py` | M4 | ATLAS_REPORT.md |
