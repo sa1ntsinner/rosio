@@ -826,7 +826,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.30`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.31`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -1028,6 +1028,12 @@ What was added, in the order it arrived:
   `rclcpp_components_register_nodes` line of the build registers for that target; and a declared `publishes` edge from a launch
   `static_transform_publisher` to `/tf_static`, marked `via_known_wrapper` like the one a
   `ros2 run` publisher has.
+
+* in `1.31`, the rule id `param.read_undeclared`. An rclpy read spelled
+  `get_parameter_or(...).value`, or through a one hop accessor, states that call as its
+  `api` where it stated `get_parameter_value`, so a reader can tell a read that raises from
+  one that answers a default, which moved the keys of those `reads_param` edges once. No
+  release had shipped, so no stored id existed.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace
@@ -1471,7 +1477,7 @@ at `info` and takes no part in other stamp checks or their reference medians. Ty
 zero stamp means start now produce no finding, mixed zero stamps keep their error, and each
 `time.*` fix names only its own check.
 
-A reader pinned to `1.0` still loads a `1.30` file: `Atlas.from_json` compares the major
+A reader pinned to `1.0` still loads a `1.31` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -1519,7 +1525,7 @@ rmw.mixed                   zenoh.router_unreachable      qos.incompatible
 param.sim_time_mixed        launch.file_not_installed     model.mesh_missing
 build.unbuilt               build.underlay                remap.matches_nothing
 type.incompatible           service.no_server             launch.argument_undeclared
-frame.broadcast_twice
+frame.broadcast_twice       param.read_undeclared
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -1630,6 +1636,17 @@ two methods). Two nodes whose remaps send `/tf` and `/tf_static` to different to
 two trees, the way two robots in their own namespaces do, so one child frame in each is no
 clash. It is not `frame.parent_differs`, which compares the robot models of the
 profiles with each other.
+
+`param.read_undeclared` is `warn`. It fires once per parameter of a node whose code reads it
+with `get_parameter(name)`, in rclcpp or rclpy, when no code the node runs declares the name.
+Both libraries raise `ParameterNotDeclaredException` on that read, so the node stops the first
+time the line runs, whatever a file sets. It is decided the way `param.set_undeclared` decides
+a key (`join.reading`), with the read itself not counted as a declaration: silent on a node
+that takes undeclared parameters, on one whose code was not read whole, where a name built at
+run time could be this one, and on `get_parameter_or` and the out parameter form, which answer
+a default. It names a declared name close to the one read. It is not `param.set_undeclared`,
+which is a file setting a value nobody reads, a line that does nothing, while this one is code
+that crashes.
 
 A composable node whose `plugin=` names a class that no `rclcpp_components` registration or
 `RCLCPP_COMPONENTS_REGISTER_NODE` of the workspace names is a case of `plugin.unresolved` and

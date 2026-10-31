@@ -725,6 +725,83 @@ def declared_unread(atlas: model.Atlas) -> list[model.Finding]:
     return out
 
 
+_THROWING_READS = frozenset({"get_parameter", "get_parameter_value"})
+"""The read forms that raise on a name the node never declared: rclcpp `get_parameter(name)`
+and rclpy `get_parameter(name)`. `get_parameter_or` and the out parameter form answer a
+default instead."""
+
+
+@rules.register("param.read_undeclared")
+def read_undeclared(atlas: model.Atlas) -> list[model.Finding]:
+    """The code reads a parameter that no declaration it runs ever names.
+
+    rclcpp and rclpy both raise `ParameterNotDeclaredException` there unless the node takes
+    undeclared parameters, so the node dies the first time the line runs, whatever a file
+    sets. Decided the way `param.set_undeclared` decides a key, with the read itself not
+    counted as a declaration, and silent where a name built at run time could be this one.
+    """
+    blind, declared = join.parameter_declarations(atlas, reads=False)
+    sites: dict[str, list[model.LayerFact]] = defaultdict(list)
+    for edge in atlas.edges.values():
+        if edge.kind != model.EdgeKind.READS_PARAM.value:
+            continue
+        for fact in edge.facts:
+            if rules.usable(fact) and fact.values.get("api") in _THROWING_READS:
+                sites[edge.dst].append(fact)
+    out: list[model.Finding] = []
+    for param_id in sorted(sites):
+        node = atlas.get(param_id)
+        if node is None:
+            continue
+        facts = [
+            fact
+            for fact in sites[param_id]
+            if join.reading(atlas, node, fact.profile, blind, declared) == join.UNDECLARED_STATE
+        ]
+        if not facts:
+            continue
+        parsed = ids.parse_param(param_id)
+        owner_text = rules.node_text(parsed.owner)
+        where = sorted({row for fact in facts for row in fact.evidence}, key=model.Source.sort_key)
+        at = rules.where(where[0] if where else None)
+        profiles = sorted({fact.profile for fact in facts} - {model.ANY_PROFILE})
+        near = _nearest_name(
+            parsed.name,
+            set().union(*(join.declared_in(declared, parsed.owner, p) for p in profiles))
+            if profiles
+            else set(),
+        )
+        meant = f" It declares {near}, which is likely what was meant." if near else ""
+        out.append(
+            model.Finding(
+                rule="param.read_undeclared",
+                severity=rules.severity_of("param.read_undeclared"),
+                subject=param_id,
+                discriminator="-",
+                title=f"{owner_text} reads {parsed.name}, which it never declares",
+                detail=(
+                    f"{at} reads {parsed.name} with get_parameter, and no code {owner_text} "
+                    "runs declares it. rclcpp and rclpy raise ParameterNotDeclaredException "
+                    f"on that read, so the node stops when the line runs.{meant}"
+                ),
+                fix=(
+                    f"Rename the read at {at} to {near}."
+                    if near
+                    else f"Declare {parsed.name} before it is read, or read it with "
+                    "get_parameter_or."
+                ),
+                say=(
+                    f"{at} reads {parsed.name} on {owner_text} without declaring it, so the "
+                    f"node raises ParameterNotDeclaredException there.{meant}"
+                ),
+                profiles=profiles,
+                layers=[CODED],
+                where=where,
+            )
+        )
+    return out
+
+
 def _type_of(spelling: str) -> str:
     text = spelling.strip()
     if any(marker in text for marker in _LIST_MARKERS):

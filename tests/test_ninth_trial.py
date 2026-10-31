@@ -73,3 +73,21 @@ def test_a_probe_files_against_the_profile_whose_launch_command_runs(monkeypatch
     monkeypatch.setattr(proc, "scan", lambda root=proc.PROC, domain=None: [running])
     (chosen,) = cli._running_profiles((spec("real", "false"), spec("sim", "true")))
     assert chosen.slug == "sim"
+
+
+# ---------------------------------------------------------------------------
+# a get_parameter of a name the node never declares raises at that line
+
+
+def test_a_read_of_an_undeclared_parameter_is_reported_and_a_read_with_default_is_not(
+    tmp_path: Path,
+):
+    body = (
+        "        self.declare_parameter('timeout', 1.0)\n"
+        "        self.get_parameter('timeout').value\n"
+        "        self.get_parameter('watchdog').value\n"
+        "        self.get_parameter_or('limit', 2.0)\n"
+    )
+    atlas = python_workspace(tmp_path, {"sup": node("sup", body)})
+    found = findings(atlas, "param.read_undeclared")
+    assert [item.subject for item in found] == [ids.build_param("node:/sup", "watchdog")]

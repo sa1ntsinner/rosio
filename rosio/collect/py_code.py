@@ -1972,7 +1972,7 @@ class PyFile:
             return Val(expr=text, reason=name.reason or "call_result")
         target = target if target is not None else self._target
         read = {
-            "api": "get_parameter_value" if want_value else api,
+            "api": "get_parameter_value" if want_value and api == "get_parameter" else api,
             **({"via": api} if api in self.accessors else {}),
             "target": self._src(target) if target is not None else None,
             "line_hint": _line(node),

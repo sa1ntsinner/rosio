@@ -78,6 +78,7 @@ COMMITTED = (
     "service.no_server",
     "launch.argument_undeclared",
     "frame.broadcast_twice",
+    "param.read_undeclared",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -143,6 +144,7 @@ SEVERITY: dict[str, str] = {
     "service.no_server": WARN,
     "launch.argument_undeclared": WARN,
     "frame.broadcast_twice": WARN,
+    "param.read_undeclared": WARN,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {

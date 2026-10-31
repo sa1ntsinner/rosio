@@ -1157,7 +1157,7 @@ def parameter_libraries(atlas: model.Atlas) -> dict[str, tuple[set[str], list[st
 
 
 def parameter_declarations(
-    atlas: model.Atlas,
+    atlas: model.Atlas, reads: bool = True
 ) -> tuple[dict[str, list[str]], dict[tuple[str, str], set[str]]]:
     """The `param_name` blind sites and the declared names `reading` takes.
 
@@ -1170,11 +1170,12 @@ def parameter_declarations(
     In the node's own packages only the classes it reaches count; another package it reaches
     counts whole, less the code that states a node of its own, because a second executable
     declaring a name says nothing about this node. A name that code builds at run time is a
-    blind spot of the node, keyed by the node id.
+    blind spot of the node, keyed by the node id. With `reads` false a read of a name counts
+    for nothing, which is what tells a declaration apart from a read that would throw.
     """
     found = carriers(atlas)
     blind = blind_names(atlas, model.Want.PARAM_NAME.value)
-    declared = declared_names(atlas)
+    declared = declared_names(atlas, reads)
     generated = parameter_libraries(atlas)
     reach = _Reach(atlas, found)
     classes: dict[str, set[str]] = {}
@@ -1189,7 +1190,7 @@ def parameter_declarations(
         if not carrier.file:
             continue
         pkg = ids.parse_file(carrier.file).package
-        for row in (*carrier.parameters, *carrier.parameter_reads):
+        for row in (*carrier.parameters, *(carrier.parameter_reads if reads else ())):
             try:
                 name = ids.normalise_param_name(str(row.get("name") or ""))
             except ContractError:
@@ -1273,7 +1274,7 @@ def parameter_declarations(
     return blind, declared
 
 
-def declared_names(atlas: model.Atlas) -> dict[tuple[str, str], set[str]]:
+def declared_names(atlas: model.Atlas, reads: bool = True) -> dict[tuple[str, str], set[str]]:
     """Owner node id and profile to the parameter names its source declares or reads back.
 
     A read of a name no declaration carries is the code using the value all the same, through
@@ -1288,7 +1289,7 @@ def declared_names(atlas: model.Atlas) -> dict[tuple[str, str], set[str]]:
             if fact.layer == CODED and fact.values.get("declared_in_code"):
                 out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
     for edge in atlas.edges.values():
-        if edge.kind == model.EdgeKind.READS_PARAM.value:
+        if reads and edge.kind == model.EdgeKind.READS_PARAM.value:
             parsed = ids.parse_param(edge.dst)
             for fact in edge.facts:
                 out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
