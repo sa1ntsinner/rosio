@@ -150,7 +150,7 @@ export class Server implements vscode.Disposable {
   }
 
   graph(profile: string | undefined, focus?: string, depth?: number): Promise<GraphData> {
-    return this.request<GraphData>("rosio/graph", { profile, focus, depth }).then((graph) => ({
+    return this.request<GraphData>("rosio/graph", { profile, focus, depth, wrappers: true }).then((graph) => ({
       profile: graph?.profile ?? profile ?? null,
       nodes: graph?.nodes ?? [],
       channels: graph?.channels ?? [],

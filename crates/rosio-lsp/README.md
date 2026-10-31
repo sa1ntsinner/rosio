@@ -54,7 +54,7 @@ refresh hints when the client supports `workspace/inlayHint/refresh`.
 | `rosio/launchTree` | `{profile?}` | Launch profiles with nested launch entities and source locations |
 | `rosio/frameTree` | `{profile?}` | TF forest with geometry, broadcasters, listeners and findings |
 | `rosio/paramTree` | `{profile?}` | Parameters by owning node, with the winning value and the candidate chain |
-| `rosio/graph` | `{profile?, focus?, depth?}` | Nodes, topics, services and actions with the endpoint edges between them |
+| `rosio/graph` | `{profile?, focus?, depth?, wrappers?}` | Nodes, topics, services and actions with the endpoint edges between them |
 | `rosio/robotModel` | `{model?, profile?}` | One urdf or xacro model: links, joints, roots and the TF broadcasts into it |
 | `rosio/unresolved` | `{}` | `[{id, want, expr, reason, owner, resolvableBy, locations: [{uri, line}]}]` in atlas order, `owner` as the owning entity's label, or its id when no such entity exists |
 | `rosio/mesh` | `{file}` | `{file, format, triangles, truncated, triangleCount, bounds}` or `{file, format, refused}` |
@@ -132,7 +132,11 @@ are returned as they are; `label` is always the entity label. `findings` counts 
 the entity in the profile. `type` is set when the channel's `uses_type` edges name exactly one
 type. `qos` holds `reliability`, `durability`, `history`, `depth` and `preset` from the link's
 effective values in the profile, each only when stated, and is absent when none is. `wrapper`
-is true when a fact in the profile or the edge attributes mark it `via_known_wrapper`.
+is true for library endpoints: action internals, parameter services, lifecycle services under
+their lifecycle node, and fixed library channels. A subscription or call to a quiet name stays
+visible unless marked `via_known_wrapper`. Library endpoints and channels only they use stay
+out by default. Pass `wrappers: true` to include them. The editor requests them so its local
+toggle can show them.
 `rawName` is the name the source spelled. `at` is `{uri, line, approximate}` from the first
 evidence row of the profile's facts that maps to a local file. With `focus`, only entities
 within `depth` hops (default 1) of that id over the kept links are returned, so depth 1 from a

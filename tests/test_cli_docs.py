@@ -218,6 +218,19 @@ def test_every_flag_the_readme_names_exists_on_its_verb():
 # the language server
 
 
+def test_lsp_graph_library_tables_match_python():
+    from rosio.drift.topics import LIFECYCLE_TAILS, quiet_names, quiet_suffixes
+
+    source = (ROOT / "crates/rosio-lsp/src/queries/graph.rs").read_text(encoding="utf-8")
+    for name, values in (
+        ("QUIET_NAMES", quiet_names()),
+        ("QUIET_SUFFIXES", quiet_suffixes()),
+        ("LIFECYCLE_TAILS", LIFECYCLE_TAILS),
+    ):
+        rows = "\n".join(f'    "{value}",' for value in sorted(values))
+        assert f"const {name}: &[&str] = &[\n{rows}\n];" in source
+
+
 def test_the_server_readme_documents_every_custom_method():
     source = "".join(
         path.read_text(encoding="utf-8")

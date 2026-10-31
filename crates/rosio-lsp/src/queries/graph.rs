@@ -8,6 +8,30 @@ use std::collections::{BTreeMap, BTreeSet};
 const LINK_KINDS: [&str; 4] = ["publishes", "subscribes", "serves", "calls"];
 const CHANNEL_KINDS: [&str; 3] = ["topic", "service", "action"];
 const QOS_KEYS: [&str; 5] = ["reliability", "durability", "history", "depth", "preset"];
+const QUIET_NAMES: &[&str] = &[
+    "/diagnostics",
+    "/parameter_events",
+    "/rosout",
+    "/tf",
+    "/tf_static",
+];
+const QUIET_SUFFIXES: &[&str] = &[
+    "/describe_parameters",
+    "/get_parameter_types",
+    "/get_parameters",
+    "/get_type_description",
+    "/list_parameters",
+    "/set_parameters",
+    "/set_parameters_atomically",
+];
+const LIFECYCLE_TAILS: &[&str] = &[
+    "change_state",
+    "get_available_states",
+    "get_available_transitions",
+    "get_state",
+    "get_transition_graph",
+    "transition_event",
+];
 /// Most nodes and channels one answer carries.
 const LIMIT: usize = 400;
 
@@ -115,6 +139,48 @@ fn channel_type(atlas: &Atlas, id: &str, p: Option<&str>) -> Option<String> {
     }
 }
 
+fn library_end(atlas: &Atlas, edge: &Value, p: Option<&str>) -> bool {
+    let Some(channel) = edge["dst"]
+        .as_str()
+        .and_then(|id| crate::ids::parse(id).ok())
+    else {
+        return false;
+    };
+    let name = &channel.segments[0];
+    let quiet = QUIET_NAMES.contains(&name.as_str())
+        || QUIET_SUFFIXES.iter().any(|tail| name.ends_with(tail));
+    let wrapper = edge["attrs"]["via_known_wrapper"] == true
+        || facts(edge, p)
+            .iter()
+            .any(|f| f["values"]["via_known_wrapper"] == true);
+    if (wrapper && quiet) || name.contains("/_action/") {
+        return true;
+    }
+    if !matches!(edge["kind"].as_str(), Some("serves" | "publishes")) {
+        return false;
+    }
+    if quiet {
+        return true;
+    }
+    let Some((parent, tail)) = name.rsplit_once('/') else {
+        return false;
+    };
+    let Some(owner_id) = edge["src"].as_str() else {
+        return false;
+    };
+    let Some(owner) = atlas.entities.get(owner_id) else {
+        return false;
+    };
+    LIFECYCLE_TAILS.contains(&tail)
+        && crate::ids::parse(owner_id).is_ok_and(|id| !id.synthetic && id.segments[0] == parent)
+        && facts(owner, None).iter().any(|f| {
+            f["values"]["form"] == "lifecycle_node"
+                || f["values"]["lifecycle_state"]
+                    .as_str()
+                    .is_some_and(|state| !state.is_empty())
+        })
+}
+
 /// Nodes, the topics, services and actions they use, and the endpoint edges between them.
 pub(super) fn graph(atlas: &Atlas, index: &Index, params: &Value) -> Value {
     let wanted = profile(params);
@@ -173,6 +239,17 @@ pub(super) fn graph(atlas: &Atlas, index: &Index, params: &Value) -> Value {
         }
         entities.retain(|id, _| reached.contains(id));
     }
+    let library_only: BTreeSet<_> = edges
+        .iter()
+        .filter(|(_, e)| library_end(atlas, e, p))
+        .map(|(_, e)| e.fields.dst.as_str())
+        .collect();
+    let edges: Vec<_> = edges
+        .into_iter()
+        .filter(|(_, e)| params["wrappers"] == true || !library_end(atlas, e, p))
+        .collect();
+    let shown: BTreeSet<_> = edges.iter().map(|(_, e)| e.fields.dst.as_str()).collect();
+    entities.retain(|id, _| !library_only.contains(id) || shown.contains(id));
     let truncated = entities.len() > LIMIT;
     if truncated {
         let mut order: Vec<_> = entities
@@ -198,10 +275,7 @@ pub(super) fn graph(atlas: &Atlas, index: &Index, params: &Value) -> Value {
                 .map(|v| &v["value"])
                 .filter(|v| !v.is_null())
         };
-        let wrapper = facts(edge, p)
-            .iter()
-            .any(|f| f["values"]["via_known_wrapper"] == true)
-            || edge["attrs"]["via_known_wrapper"] == true;
+        let wrapper = library_end(atlas, edge, p);
         let mut row = json!({
             "id": id,
             "src": fields.src,
@@ -330,10 +404,10 @@ mod tests {
             ids(&rover["nodes"]),
             ["node:/safety_stop", "node:/scan_filter"]
         );
-        assert_eq!(rover["channels"].as_array().unwrap().len(), 3);
-        assert_eq!(rover["links"].as_array().unwrap().len(), 4);
+        assert_eq!(rover["channels"].as_array().unwrap().len(), 2);
+        assert_eq!(rover["links"].as_array().unwrap().len(), 3);
         assert_eq!(rover["truncated"], false);
-        let scan = &rover["channels"][2];
+        let scan = &rover["channels"][1];
         assert_eq!(scan["type"], "sensor_msgs/msg/LaserScan");
         assert_eq!(scan["findings"], 1);
         let sim = run(json!({"profile": "profile:sim"}));
@@ -364,7 +438,9 @@ mod tests {
 
     #[test]
     fn links_state_qos_wrapper_and_site_only_when_the_atlas_does() {
-        let result = run(json!({"profile": "rover"}));
+        let hidden = run(json!({"profile": "rover"}));
+        assert!(!ids(&hidden["channels"]).contains(&"topic:/diagnostics"));
+        let result = run(json!({"profile": "rover", "wrappers": true}));
         let links = result["links"].as_array().unwrap();
         let diagnostics = &links[1];
         assert_eq!(diagnostics["dst"], "topic:/diagnostics");
@@ -389,6 +465,33 @@ mod tests {
         assert_eq!(subscribe["agreement"], "differ");
         assert_eq!(subscribe["conflicts"], json!(["qos.reliability"]));
         assert!(subscribe.get("qos").is_none());
+
+        let mut fixture: Value = serde_json::from_str(ATLAS).unwrap();
+        fixture["entities"]["node:/safety_stop"]["facts"] =
+            json!([{"values":{"form":"lifecycle_node"}}]);
+        let atlas = Atlas::parse(&fixture.to_string()).unwrap();
+        for (kind, name, wrapper, hidden) in [
+            ("publishes", "/dock/_action/feedback", false, true),
+            ("calls", "/dock/_action/send_goal", false, true),
+            ("serves", "/safety_stop/get_parameters", false, true),
+            ("calls", "/safety_stop/get_parameters", false, false),
+            ("serves", "/safety_stop/get_state", false, true),
+            ("serves", "/scan_filter/get_state", false, false),
+            ("publishes", "/parameter_events", false, true),
+            ("publishes", "/rosout", false, true),
+            ("subscribes", "/clock", false, false),
+            ("subscribes", "/tf", true, true),
+            ("subscribes", "/scan", true, false),
+        ] {
+            let edge = json!({"kind":kind,"src":"node:/safety_stop",
+                "dst":crate::ids::build("topic", &[name]),
+                "facts":[{"profile":"profile:rover","values":{"via_known_wrapper":wrapper}}]});
+            assert_eq!(
+                library_end(&atlas, &edge, Some("profile:rover")),
+                hidden,
+                "{name}"
+            );
+        }
     }
 
     #[test]
