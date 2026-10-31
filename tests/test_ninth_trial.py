@@ -49,3 +49,27 @@ def test_one_frame_in_two_namespaced_tf_trees_is_not_broadcast_twice(tmp_path: P
         tmp_path, {}, ROBOT_STATIC.format("robot1"), ROBOT_STATIC.format("robot2")
     )
     assert findings(atlas, "frame.broadcast_twice") == []
+
+
+# ---------------------------------------------------------------------------
+# a probe files its observation against the profile whose launch command runs
+
+
+def test_a_probe_files_against_the_profile_whose_launch_command_runs(monkeypatch):
+    from rosio import cli
+    from rosio.collect import proc
+    from rosio.config import Entrypoint, ProfileSpec
+
+    def spec(slug, sim):
+        entry = Entrypoint("launch", "arm_bringup", "arm.launch.py", (("use_sim", sim),))
+        return ProfileSpec(slug=slug, entrypoints=(entry,))
+
+    running = proc.RosProcess(
+        argv=("ros2", "launch", "arm_bringup", "arm.launch.py", "use_sim:=true"),
+        verb="launch",
+        target="arm_bringup arm.launch.py",
+    )
+    monkeypatch.setattr(proc, "available", lambda root=proc.PROC: True)
+    monkeypatch.setattr(proc, "scan", lambda root=proc.PROC, domain=None: [running])
+    (chosen,) = cli._running_profiles((spec("real", "false"), spec("sim", "true")))
+    assert chosen.slug == "sim"

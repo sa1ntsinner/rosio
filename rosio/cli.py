@@ -1798,7 +1798,11 @@ def cmd_probe(args: argparse.Namespace) -> int:
         print(model.dumps(payload), end="")
     elif not args.quiet:
         print(f"{PROG} probe: {target} ({_bytes(target)})")
-        print(f"  domain {domain}, window {args.duration:g}s, settle {settle:g}s")
+        filed = cfg.profiles[0].slug if len(cfg.profiles) == 1 else "every profile"
+        print(
+            f"  domain {domain}, window {args.duration:g}s, settle {settle:g}s, "
+            f"filed against {filed}"
+        )
         print(f"  observed: {_counts(seen)}")
         _print_summary(report, elapsed, written)
         _stale_note(target, written)
@@ -1873,6 +1877,8 @@ def _probe_config(args: argparse.Namespace, source):
                 f"this config declares: {', '.join(sorted(known)) or 'none'}"
             )
         profiles = tuple(spec for spec in cfg.profiles if spec.slug == args.profile)
+    elif len(profiles) > 1:
+        profiles = _running_profiles(profiles)
     out_dir = args.out or (str(source.parent) if args.atlas else "") or cfg.out_dir
     return dataclasses.replace(
         cfg,
@@ -1882,6 +1888,58 @@ def _probe_config(args: argparse.Namespace, source):
         deterministic=(
             DEFAULT_DETERMINISTIC if args.deterministic is None else bool(args.deterministic)
         ),
+    )
+
+
+def _running_profiles(profiles):
+    """The one profile whose launch entry points run on this machine, read from the process
+    table. Filing the observation of one running system against several profiles reports
+    every node of the others as missing, so a probe that sees launch commands and cannot
+    tell which profile they are asks. With no launch command it files against every profile
+    and says so."""
+    from pathlib import Path
+
+    from rosio.collect import proc
+
+    running = []
+    if proc.available():
+        for row in proc.scan(domain=proc.probed_domain()):
+            if row.verb != "launch" or " " not in row.target:
+                continue
+            pkg, target = row.target.split(" ", 1)
+            passed = dict(
+                token.split(":=", 1) for token in row.argv if ":=" in token and "__" not in token
+            )
+            running.append((pkg, Path(target).name, passed))
+
+    def runs(spec) -> bool:
+        launches = [item for item in spec.entrypoints if item.verb == "launch"]
+        return bool(launches) and all(
+            any(
+                pkg == item.pkg
+                and name == Path(item.target).name
+                and all(passed.get(key) == value for key, value in item.args)
+                for pkg, name, passed in running
+            )
+            for item in launches
+        )
+
+    found = [spec for spec in profiles if runs(spec)]
+    if len(found) == 1:
+        return tuple(found)
+    if not running:
+        print(
+            f"{PROG}: no ros2 launch command runs here, so the observation is filed against "
+            "every profile; name the one that runs with --profile",
+            file=sys.stderr,
+        )
+        return profiles
+    names = ", ".join(spec.slug for spec in profiles)
+    seen = "; ".join(f"ros2 launch {pkg} {name}" for pkg, name, _passed in running) or "none"
+    raise UsageError(
+        f"this configuration declares several profiles ({names}) and the running launch "
+        f"commands ({seen}) match {len(found) or 'none'} of them. name the one that runs "
+        "with --profile"
     )
 
 

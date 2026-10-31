@@ -1444,7 +1444,10 @@ about the `launchfile` entity when one exists, which moved those finding ids. An
 `param.orphan_block` is silent on the block of a controller that manager loads by a
 `<name>.type` key and on a parameters file only sites switched off in the profile hand. `rosio
 init` comments a profile out only when a file of the same package includes it with no
-condition and no argument, read by package and path rather than by file name. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
+condition and no argument, read by package and path rather than by file name. `rosio
+probe` without `--profile` over several profiles files the observation against the one
+profile whose `ros2 launch` commands run, with their arguments, and asks for `--profile` when
+the running launch commands match none or several. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
 key a later `/**` block of the same file overrides says to move or trim that block, and a bare
 yaml key that is the last segment of a namespaced node's name is `param.owner_name_mismatch`
 rather than `param.orphan_block`. `param.sim_time_mixed` cites the line that writes a value an
