@@ -638,6 +638,14 @@ def _mesh_links(atlas: Atlas, model_id: str) -> dict[str, list[str]]:
     return {key: sorted(value) for key, value in out.items()}
 
 
+def _mesh_site(node: model.Node, name: str) -> Source:
+    """The line of the model file that writes the mesh name, when the file writes it as is."""
+    line = (node.attrs.get("mesh_lines") or {}).get(name)
+    return Source(
+        file=node.id, locator=name if line else "", line_hint=line, root=model.Root.SRC.value
+    )
+
+
 @rules.register(RULE_MESH_MISSING)
 def model_mesh_missing(atlas: Atlas) -> list[Finding]:
     """A robot model some profile loads names a package mesh that is not there.
@@ -677,6 +685,7 @@ def model_mesh_missing(atlas: Atlas) -> list[Finding]:
         elsewhere = node.attrs.get("meshes_elsewhere") or {}
         for name, uninstalled in sorted(cases):
             package, _, relpath = name[len(_PACKAGE_URI) :].partition("/")
+            at = rules.where(_mesh_site(node, name))
             used_by = links.get(name) or []
             drawn = (
                 f"links {', '.join(used_by)} draw"
@@ -693,7 +702,7 @@ def model_mesh_missing(atlas: Atlas) -> list[Finding]:
                     "does not, so the build file never installs it"
                 )
                 say = (
-                    f"{label} names the mesh {name}, which {package} never installs, so the "
+                    f"{at} names the mesh {name}, which {package} never installs, so the "
                     f"{drawn} nothing in {named}; {fix}."
                 )
                 variant = ""
@@ -706,7 +715,7 @@ def model_mesh_missing(atlas: Atlas) -> list[Finding]:
                     fix = f"change the mesh filename {name} in {label} to {held}"
                     why += f", while the package holds a file of that name at {held}"
                     say = (
-                        f"{label} names the mesh {name}, which no tree holds, so the {drawn} "
+                        f"{at} names the mesh {name}, which no tree holds, so the {drawn} "
                         f"nothing in {named}; {package} holds the file at {held}, so change "
                         f"the filename in {label} to that."
                     )
@@ -716,7 +725,7 @@ def model_mesh_missing(atlas: Atlas) -> list[Finding]:
                         f"holds, or commit the mesh at {package}/{relpath}"
                     )
                     say = (
-                        f"{label} names the mesh {name}, which no tree holds, so the {drawn} "
+                        f"{at} names the mesh {name}, which no tree holds, so the {drawn} "
                         f"nothing in {named}; correct the filename in {label} or commit "
                         "the mesh."
                     )
@@ -736,7 +745,7 @@ def model_mesh_missing(atlas: Atlas) -> list[Finding]:
                     discriminator=_disc(name),
                     layers=[model.Layer.DECLARED.value],
                     profiles=profiles,
-                    where=[Source(file=model_id, root=model.Root.SRC.value), *readers],
+                    where=[_mesh_site(node, name), *readers],
                 )
             )
     return findings

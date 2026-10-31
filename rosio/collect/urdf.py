@@ -1454,6 +1454,22 @@ def _spelled(ws: Any, filename: str) -> tuple[str, bool]:
     return (f"package://{package}/{relative}" if package else ws.stated_value(local)), True
 
 
+def _mesh_lines(path: str, names: list[str]) -> dict[str, int]:
+    """The line of the model file that writes each mesh name, for a name it writes as is."""
+    if not names:
+        return {}
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    out: dict[str, int] = {}
+    for name in names:
+        at = text.find(name)
+        if at >= 0:
+            out[name] = text.count("\n", 0, at) + 1
+    return out
+
+
 def _file_entity(ctx: CollectContext, path: str, found: UrdfModel) -> str:
     ws = ctx.ws
     builder = ctx.builder
@@ -1492,6 +1508,9 @@ def _file_entity(ctx: CollectContext, path: str, found: UrdfModel) -> str:
                 head = spelled[: len(spelled) - len(_package_relative(spelled))]
                 elsewhere[spelled] = [head + item for item in moved]
     attrs.update({key: sorted(rows) for key, rows in absent.items() if rows})
+    lines = _mesh_lines(path, sorted({*absent["meshes_not_installed"], *absent["meshes_absent"]}))
+    if lines:
+        attrs["mesh_lines"] = lines
     if elsewhere:
         attrs["meshes_elsewhere"] = dict(sorted(elsewhere.items()))
     builder.node(file_id, attrs=attrs)

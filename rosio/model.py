@@ -37,7 +37,8 @@ from rosio.errors import ContractError
 
 SCHEMA_MINOR = "31"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the rule `param.read_undeclared`; the rules `type.incompatible`, `service.no_server`,
+stored id: the rule `param.read_undeclared`, the coded file value `stamped_frames` and the
+model file attribute `mesh_lines`; the rules `type.incompatible`, `service.no_server`,
 `launch.argument_undeclared` and `frame.broadcast_twice`, the include fact values
 `args_unread` and `arg_lines`, the `component_class_unregistered` blind spot reason, and
 the declared `publishes` edge of a `static_transform_publisher` to `/tf_static`; the coded

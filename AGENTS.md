@@ -1038,7 +1038,8 @@ What was added, in the order it arrived:
   header (`msg.header.frame_id = "camera_frame"`), which `frame.not_in_urdf` reports when no
   model and no transform names the frame. In a profile that launches a node whose code was
   not read, which could broadcast any frame, it fires only when a model link names the same
-  part with another suffix (`camera_link`).
+  part with another suffix (`camera_link`). The model file attribute `mesh_lines`, the line
+  that writes each missing mesh name as it is written, which `model.mesh_missing` cites.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace
