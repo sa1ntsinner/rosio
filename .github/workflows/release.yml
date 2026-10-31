@@ -146,7 +146,7 @@ jobs:
         run: |
           set -e
           for package in packages/*.vsix; do
-            npx --yes @vscode/vsce@4.1.0 publish --packagePath "$package" --oidc
+            npx --yes @vscode/vsce@4.1.0 publish --packagePath "$package" --oidc --skip-duplicate
           done
       - name: open vsx
         env:
