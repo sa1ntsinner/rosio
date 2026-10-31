@@ -438,8 +438,12 @@ class _MarkupLines:
                 parser = __import__(module, fromlist=["Parser"]).Parser
             except ImportError:
                 continue
-            self.originals.append((parser, parser.__dict__["load"]))
-            parser.load = classmethod(reader)
+            original = parser.__dict__["load"]
+            self.originals.append((parser, original))
+            if isinstance(original, staticmethod):  # humble
+                parser.load = staticmethod(lambda file, read=reader, cls=parser: read(cls, file))
+            else:
+                parser.load = classmethod(reader)
 
     def restore(self) -> None:
         for parser, original in self.originals:
