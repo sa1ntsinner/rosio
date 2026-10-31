@@ -9,6 +9,12 @@ GAP_DT_FACTOR = 5.0
 GAP_MIN_S = 0.5
 GAP_COUNT_DT_FACTOR = 3.0
 JITTER_PERCENTILE = 0.95
+ZERO_MEANS_NOW = {
+    "trajectory_msgs/msg/JointTrajectory",
+    "trajectory_msgs/msg/MultiDOFJointTrajectory",
+    "control_msgs/action/FollowJointTrajectory",
+    "control_msgs/action/FollowJointTrajectory_Goal",
+}
 
 
 def largest_backward_step(stamps):
@@ -100,6 +106,8 @@ def check_zero_stamps(series):
         if not zeros:
             continue
         all_zero = len(zeros) == len(stamps)
+        if all_zero and entry.msgtype in ZERO_MEANS_NOW:
+            continue
         first_receive = entry.receive_times[zeros[0]]
         if all_zero:
             message = f"{topic} never sets the stamp, all {len(stamps)} messages are zero"
@@ -109,7 +117,7 @@ def check_zero_stamps(series):
             Finding(
                 check="zero_stamps",
                 topic=topic,
-                severity="error",
+                severity="info" if all_zero else "error",
                 message=message,
                 evidence={
                     "count": len(zeros),

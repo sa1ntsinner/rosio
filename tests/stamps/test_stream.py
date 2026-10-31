@@ -1,5 +1,8 @@
 import pytest
 
+from rosio import ids, model
+from rosio.collect.stamps import analyze, check_rows
+from rosio.drift import time
 from rosio.stamps.checks import CHECKS
 from rosio.stamps.model import TopicSeries
 from rosio.stamps.stream import (
@@ -60,7 +63,8 @@ def test_frozen_skips_short_topic():
 def test_zero_stamps_mixed():
     stamps = [0.0, 0.0, 100.2, 100.3]
     receive = [200.0, 200.1, 200.2, 200.3]
-    findings = check_zero_stamps(series("/scan", stamps, receive))
+    findings, _ = analyze(series("/scan", stamps, receive))
+    findings = [row for row in findings if row.check == "zero_stamps"]
     assert len(findings) == 1
     assert findings[0].severity == "error"
     assert findings[0].evidence["count"] == 2
@@ -69,11 +73,69 @@ def test_zero_stamps_mixed():
 
 
 def test_zero_stamps_all():
-    stamps = [0.0] * 5
-    receive = [200.0 + i * 0.1 for i in range(5)]
-    findings = check_zero_stamps(series("/scan", stamps, receive))
-    assert findings[0].evidence["all_zero"] is True
-    assert "never sets the stamp" in findings[0].message
+    receive = steady(50, start=1700000000.0)
+    data = {}
+    for topic in ("/a", "/b", "/c", "/d"):
+        data.update(series(topic, [0.0] * 50, receive))
+        data[topic].msgtype = ""
+    for topic in ("/scan", "/imu", "/pose"):
+        data.update(series(topic, receive, receive))
+    findings, verdict = analyze(data)
+    problems = [row for row in findings if row.check != "stamp_rate"]
+    assert [(row.topic, row.check, row.severity) for row in problems] == [
+        (topic, "zero_stamps", "info") for topic in ("/a", "/b", "/c", "/d")
+    ]
+    assert all(row.evidence["all_zero"] for row in problems)
+    assert "never sets the stamp" in problems[0].message
+    assert verdict["level"] == "info"
+
+
+@pytest.mark.parametrize(
+    "msgtype",
+    [
+        "trajectory_msgs/msg/JointTrajectory",
+        "trajectory_msgs/msg/MultiDOFJointTrajectory",
+        "control_msgs/action/FollowJointTrajectory",
+        "control_msgs/action/FollowJointTrajectory_Goal",
+    ],
+)
+def test_zero_stamps_mean_now(msgtype):
+    data = series("/command", [0.0] * 50, steady(50, start=1700000000.0))
+    data["/command"].msgtype = msgtype
+    findings, verdict = analyze(data)
+    assert findings == []
+    assert verdict["level"] == "ok"
+
+
+@pytest.mark.parametrize("layer", ["observed", "recorded"])
+def test_zero_stamps_atlas_info(layer):
+    findings, _ = analyze(series("/scan", [0.0] * 50, steady(50, start=1700000000.0)))
+    values = {"stamps": {"checks": check_rows(findings, "/scan")}}
+    builder = model.AtlasBuilder()
+    subject = (
+        ids.build_topic("/scan") if layer == "observed" else ids.build_bagtopic("run", "/scan")
+    )
+    builder.fact(subject, layer, values={"volatile": values} if layer == "observed" else values)
+    found = time.zero(builder.atlas)
+    assert len(found) == 1
+    assert found[0].severity == "info"
+
+
+def test_stamp_fix_names_only_its_check():
+    findings, verdict = analyze(series("/scan", [100.0, 0.0, 99.0]))
+    builder = model.AtlasBuilder()
+    builder.fact(ids.build_bag("run"), "recorded", values={"stamp_verdict": verdict})
+    builder.fact(
+        ids.build_bagtopic("run", "/scan"),
+        "recorded",
+        values={"stamps": {"checks": check_rows(findings, "/scan")}},
+    )
+    (zero,) = time.zero(builder.atlas)
+    (backward,) = time.backward(builder.atlas)
+    assert "acquisition time" in zero.fix
+    assert "monotonic" not in zero.fix
+    assert "monotonic" in backward.fix
+    assert "zero stamp" not in backward.fix
 
 
 def test_zero_stamps_clean():

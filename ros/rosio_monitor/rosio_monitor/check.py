@@ -9,7 +9,7 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from rclpy.utilities import remove_ros_args
 
-from rosio.stamps.checks import CHECKS
+from rosio.stamps.checks import run_checks as check_stamps
 from rosio.stamps.model import TopicSeries
 from rosio.stamps.verdict import NOT_ANALYZED, diagnose
 from rosio_monitor import time_sources
@@ -64,9 +64,7 @@ def to_series(windows, types):
 
 
 def run_checks(series):
-    findings = []
-    for check in CHECKS.values():
-        findings.extend(check(series))
+    findings = check_stamps(series)
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 3), f.check, f.topic))
     return findings
 

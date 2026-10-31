@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from rosio import ids, model
@@ -14,21 +13,6 @@ SYMPTOM = (
     "A consumer can report a TF error because the timestamp on the message is earlier "
     "than all the data in the transform cache, even when that consumer is not at fault."
 )
-
-
-def _fix(atlas: model.Atlas, verdict_on: str, topic: str, profile: str, fallback: str) -> str:
-    """Quote the verdict's hypotheses for this topic, from a bag fact or a live probe run."""
-    entity = atlas.entities.get(verdict_on)
-    fact = entity.fact(RECORDED, profile) if entity else None
-    if entity and entity.kind == model.NodeKind.RUN.value:
-        hypotheses = entity.attrs.get("volatile", {}).get("stamp_verdict", {}).get("hypotheses", [])
-    elif rules.usable(fact):
-        hypotheses = fact.values.get("stamp_verdict", {}).get("hypotheses", [])
-    else:
-        return fallback
-    pattern = re.compile(r"(?<![\w/])" + re.escape(topic) + r"(?![\w/])")
-    matching = [text for text in hypotheses if pattern.search(text) or text.startswith("All ")]
-    return " ".join(matching) if matching else fallback
 
 
 def _publish_sources(atlas: model.Atlas, topic: str, profile: str) -> list[model.Source]:
@@ -91,7 +75,6 @@ def _findings(
                     say = f"{topic} in the running system has a {kind}."
                     extra = {"volatile": {"measured": measured}}
                     detail = f"Header stamps in the running system fail the {check} check."
-                    verdict_on = fact.run
                     where = _publish_sources(atlas, entity.id, fact.profile)
                 else:
                     identity = ids.parse_bagtopic(entity.id)
@@ -100,17 +83,20 @@ def _findings(
                     heading = f"{topic}: {kind} of {shown}"
                     say = f"{topic} in recording {identity.bag} has a {kind} of {shown}."
                     detail = f"{result['message']}."
-                    verdict_on = ids.build_bag(identity.bag)
                     where = rules.sources(fact.evidence)
                 out.append(
                     model.Finding(
                         rule=rule,
-                        severity=rules.severity_of(rule, variant),
+                        severity=(
+                            "info"
+                            if rule == "time.zero" and evidence.get("all_zero")
+                            else rules.severity_of(rule, variant)
+                        ),
                         subject=entity.id,
                         title=heading,
                         say=say,
                         detail=f"{detail} {SYMPTOM}",
-                        fix=_fix(atlas, verdict_on, topic, fact.profile, fallback),
+                        fix=fallback,
                         where=where,
                         discriminator=fact.profile if fact.profile != model.ANY_PROFILE else "",
                         profiles=[] if fact.profile == model.ANY_PROFILE else [fact.profile],
@@ -137,6 +123,7 @@ def backward(atlas: model.Atlas) -> list[model.Finding]:
         "Backward stamp step",
         "largest_backward_jump",
         "s",
+        "The source clock stepped backwards or messages were reordered. "
         "Keep the source clock monotonic and publish messages in stamp order.",
     )
 
@@ -150,7 +137,7 @@ def epoch_offset(atlas: model.Atlas) -> list[model.Finding]:
         "Stamp epoch offset",
         "median_offset_s",
         "s",
-        "Use the receiver's timescale and synchronize the source clock.",
+        "Use the receiver's timescale, check the PTP timescale and synchronize the source clock.",
     )
 
 

@@ -15,4 +15,18 @@ def _merge(modules):
 
 CHECKS = _merge(MODULES)
 
-__all__ = ["CHECKS", "MODULES", "clock", "stream"]
+
+def stamped_series(series):
+    return {topic: entry for topic, entry in series.items() if any(entry.stamps)}
+
+
+def run_checks(series):
+    stamped = stamped_series(series)
+    return [
+        result
+        for name, check in sorted(CHECKS.items())
+        for result in check(series if name == "zero_stamps" else stamped)
+    ]
+
+
+__all__ = ["CHECKS", "MODULES", "clock", "run_checks", "stream"]

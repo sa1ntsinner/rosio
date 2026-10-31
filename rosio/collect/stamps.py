@@ -11,7 +11,7 @@ from rosio import extra_line, ids, model
 from rosio.collect import CollectContext, register
 from rosio.collect.bag import BAG_PKG, METADATA_NAME, STORAGE_SUFFIXES, BagCollector
 from rosio.errors import CollectorError
-from rosio.stamps.checks import CHECKS
+from rosio.stamps.checks import run_checks
 from rosio.stamps.model import TopicSeries
 from rosio.stamps.read import read_topic_series_report
 from rosio.stamps.verdict import diagnose
@@ -47,7 +47,7 @@ def rounded(value: Any, key: str = "") -> Any:
 
 def analyze(series: dict[str, TopicSeries]) -> tuple[list[Any], dict[str, Any]]:
     """Use one check order and verdict shape for recorded and live samples."""
-    results = [result for name in sorted(CHECKS) for result in CHECKS[name](series)]
+    results = run_checks(series)
     verdict = diagnose(series, results)
     return results, {"level": verdict.level, "hypotheses": sorted(verdict.hypotheses)}
 

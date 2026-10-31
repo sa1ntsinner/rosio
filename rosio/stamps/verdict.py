@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from statistics import median
 
+from .checks import stamped_series
+
 SEVERITY_RANK = {"error": 0, "warning": 1, "info": 2}
 NOT_ANALYZED = "no topics with headers were found, nothing was analyzed"
 MIN_TOPICS_FOR_GLOBAL = 3
@@ -153,7 +155,7 @@ def diagnose(series, findings):
 
     epoch = _by_check(findings, "epoch_offset")
     hypotheses = []
-    shared = _global_timescale(epoch, topics)
+    shared = _global_timescale(epoch, _topics(stamped_series(series), epoch))
     if shared:
         hypotheses.append(shared)
     elif epoch:

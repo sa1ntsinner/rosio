@@ -11,7 +11,7 @@ from pathlib import Path
 
 from rosio import __version__, model
 
-from .checks import CHECKS
+from .checks import run_checks
 from .model import TopicSeries
 from .read import read_topic_series_report
 from .verdict import diagnose
@@ -74,9 +74,7 @@ def run(args: argparse.Namespace) -> int:
     for notice in report.notices:
         print(f"NOTICE {notice}", file=sys.stderr)
 
-    findings = []
-    for check in CHECKS.values():
-        findings.extend(check(series))
+    findings = run_checks(series)
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 3), f.check, f.topic))
 
     verdict = diagnose(series, findings)
