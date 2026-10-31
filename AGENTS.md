@@ -1439,7 +1439,10 @@ and the topics and services they named went. A C++ endpoint type spelled through
 alias of the file or of the class is stated as the type it names, which moved the values of
 those edges. A `message_filters::Subscriber` built in a constructor's member initializer is an
 endpoint. `launch.argument_undeclared` and the component case of `plugin.unresolved` are
-about the `launchfile` entity when one exists, which moved those finding ids. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
+about the `launchfile` entity when one exists, which moved those finding ids. An unnamed
+`ros2_control_node` is `/controller_manager`, which moved its synthetic node id, and
+`param.orphan_block` is silent on the block of a controller that manager loads by a
+`<name>.type` key and on a parameters file only sites switched off in the profile hand. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
 key a later `/**` block of the same file overrides says to move or trim that block, and a bare
 yaml key that is the last segment of a namespaced node's name is `param.owner_name_mismatch`
 rather than `param.orphan_block`. `param.sim_time_mixed` cites the line that writes a value an

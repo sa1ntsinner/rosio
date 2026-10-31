@@ -251,6 +251,14 @@ TABLE: tuple[KnownName, ...] = (
         "bare navsat_transform literal",
     ),
     KnownName(
+        pkg="controller_manager",
+        executable="ros2_control_node",
+        name="controller_manager",
+        evidence="ros2_control jazzy controller_manager/src/ros2_control_node.cpp:46 "
+        'manager_node_name = "controller_manager"',
+        note="Each controller it loads runs as a node of the controller's own name.",
+    ),
+    KnownName(
         pkg="robot_state_publisher",
         executable="robot_state_publisher",
         name="robot_state_publisher",

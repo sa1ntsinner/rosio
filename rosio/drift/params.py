@@ -854,6 +854,8 @@ def _blocks(atlas: model.Atlas) -> list[_Block]:
     # one profile reads would hide the profile that ignores it; the fact state decides.
     rows: dict[tuple[str, str, str], list[_BlockRow]] = defaultdict(list)
     shared: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    loaded = _controllers(atlas)
+    off = _handed_only_off(atlas)
     for node in _params(atlas):
         name = ids.parse_param(node.id).name
         for fact in node.facts:
@@ -863,12 +865,16 @@ def _blocks(atlas: model.Atlas) -> list[_Block]:
             selector = str(fact.values.get("selector") or "")
             if state not in ORPHAN_STATES or not selector:
                 continue
+            if (fact.profile, selector.strip("/")) in loaded:
+                continue
             owner = str(fact.values.get("owner") or "")
             if owner and _starts(atlas, owner, fact.profile):
                 continue
             keys = {row.file: row for row in fact.evidence}
             for site in _write_sites(node, fact.profile):
                 if owner and _block_of(site) != selector:
+                    continue
+                if (fact.profile, site.file) in off:
                     continue
                 rows[(fact.profile, site.file, selector)].append(
                     _BlockRow(state, name, site, keys.get(site.file))
@@ -901,6 +907,46 @@ def _blocks(atlas: model.Atlas) -> list[_Block]:
                 live_in=tuple(sorted(shared[(profile, file_id, selector)])),
             )
         )
+    return out
+
+
+def _handed_only_off(atlas: model.Atlas) -> set[tuple[str, str]]:
+    """(profile, file) of every parameters file that launch sites hand in a profile while
+    each of those sites is off there, a condition read false. The file configures nothing in
+    that profile, so none of its blocks is dead there."""
+    live: dict[tuple[str, str], bool] = {}
+    for site in atlas.by_kind(model.NodeKind.LAUNCHENT.value):
+        for fact in site.facts:
+            if fact.layer != DECLARED or not rules.usable(fact):
+                continue
+            on = rules.site_live(site, fact.profile)
+            for read in fact.values.get("file_reads") or []:
+                if isinstance(read, dict) and read.get("role") == "parameters_file":
+                    key = (fact.profile, str(read.get("file") or ""))
+                    live[key] = live.get(key, False) or on
+    return {key for key, on in live.items() if not on}
+
+
+def _controllers(atlas: model.Atlas) -> set[tuple[str, str]]:
+    """(profile, name) of every controller a ros2_control controller manager of the profile
+    is told to load by a `<name>.type` key. The controller runs as a node of that name inside
+    the manager's process, so a block keyed on it is read."""
+    managers = {
+        entity.id: {
+            fact.profile
+            for fact in entity.facts
+            if fact.layer == DECLARED and fact.values.get("executable") == "ros2_control_node"
+        }
+        for entity in atlas.by_kind(model.NodeKind.NODE.value)
+    }
+    out: set[tuple[str, str]] = set()
+    for node in _params(atlas):
+        parsed = ids.parse_param(node.id)
+        name, _, last = parsed.name.rpartition(".")
+        if last != "type" or not name or "." in name:
+            continue
+        for profile in managers.get(parsed.owner, ()):
+            out.add((profile, name))
     return out
 
 
