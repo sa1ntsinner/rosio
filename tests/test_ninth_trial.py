@@ -137,6 +137,7 @@ def test_a_path_does_not_cross_a_qos_refused_subscription(tmp_path: Path):
             ),
         },
     )
-    answer = query.path(atlas, "/cam", "/mon")
-    assert answer.data["qos_cut"] is True
-    assert "publishes" not in {hop["kind"] for hop in answer.data["hops"]}
+    for start, end in (("/cam", "/mon"), ("/mon", "/cam")):
+        answer = query.path(atlas, start, end)
+        assert answer.data["qos_cut"] is True
+        assert "publishes" not in {hop["kind"] for hop in answer.data["hops"]}

@@ -1390,11 +1390,12 @@ def _shortest(
 
 
 def _qos_refuses(came: Edge, edge: Edge, forward: bool) -> bool:
-    """Whether a publisher edge followed by a subscription edge read backwards share no profile,
-    or every pair of their facts in a shared profile states QoS that never match, so no message
-    crosses from one to the other."""
-    if came.kind != "publishes" or edge.kind != "subscribes" or forward:
+    """Whether the two ends met on one topic, a publisher and a subscription in either order,
+    share no profile, or every pair of their facts in a shared profile states QoS that never
+    match, so no message crosses between them."""
+    if forward or came.dst != edge.dst or {came.kind, edge.kind} != {"publishes", "subscribes"}:
         return False
+    publisher, subscription = (came, edge) if came.kind == "publishes" else (edge, came)
     verdicts = [
         bool(
             qos_presets.incompatible(
@@ -1402,8 +1403,8 @@ def _qos_refuses(came: Edge, edge: Edge, forward: bool) -> bool:
                 qos_presets.policies(sub.values.get("qos")),
             )
         )
-        for pub in came.facts
-        for sub in edge.facts
+        for pub in publisher.facts
+        for sub in subscription.facts
         if pub.profile == sub.profile or ANY_PROFILE in (pub.profile, sub.profile)
     ]
     return all(verdicts)
