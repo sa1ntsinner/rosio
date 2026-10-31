@@ -1564,7 +1564,8 @@ agree with their own layers and can never connect, which is a defect at `error`.
 `service.no_server` is `warn`. It fires when a node calls a service or an action that no node
 of the profile serves, and only when the caller's source was read whole the way
 `remap.matches_nothing` reads it, no node of the profile holds a service or action name the
-reader could not follow, no remap target ends in the name, and a node whose whole source was
+reader could not follow, every declared node in that profile was read whole, no remap target
+ends in the name, and a node whose whole source was
 read serves another name of the same type. It names that name, in the caller's namespace
 first and then the closest by spelling, because a client of a name nobody serves is nearly
 always a typo or a rename. A service with no server of its type anywhere stays a question of

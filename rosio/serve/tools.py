@@ -39,25 +39,29 @@ MAX_LIMIT = 50
 
 
 # ---------------------------------------------------------------------------
-# the atlas, loaded once
+# validated snapshots
 
 
 class AtlasSource:
-    """One atlas, read from disk on the first question and answered from memory after."""
+    """One validated snapshot per call, reused only while its input bytes match."""
 
     def __init__(
         self, path: str | Path, *, confined: bool = False, workspace: str | Path = ""
     ) -> None:
         self.path = Path(path).expanduser()
         self._atlas: Atlas | None = None
+        self._content: bytes | None = None
         self.confined = confined
         """Whether a tool that reads the file system keeps to the served workspace, which
         is how the http transport serves a caller who is not the person who started it."""
         self.stated = Path(workspace).expanduser() if str(workspace) else None
 
     def atlas(self) -> Atlas:
-        if self._atlas is None:
-            self._atlas = load(self.path)
+        target, content = _read_atlas(self.path)
+        if self._atlas is None or content != self._content:
+            atlas = _decode_atlas(target, content)
+            self._atlas = atlas
+            self._content = content
         return self._atlas
 
     @property
@@ -83,7 +87,26 @@ class AtlasSource:
         return target.is_file()
 
 
+def _read_atlas(path: str | Path) -> tuple[Path, bytes]:
+    target = Path(path).expanduser()
+    if target.is_dir():
+        target = target / ATLAS_NAME
+    try:
+        return target, target.read_bytes()
+    except OSError as exc:
+        reason = "no atlas" if isinstance(exc, FileNotFoundError) else "cannot read atlas"
+        raise UsageError(
+            f"{reason} at {target.absolute()} yet. build one with: "
+            f"rosio extract <workspace> --out {target.parent.absolute()}"
+        ) from exc
+
+
 def load(path: str | Path) -> Atlas:
+    target, content = _read_atlas(path)
+    return _decode_atlas(target, content)
+
+
+def _decode_atlas(target: Path, content: bytes) -> Atlas:
     """Read one atlas.json, validated, with a message a caller can act on.
 
     Every answer this module gives is a statement about a workspace, so the document is
@@ -95,17 +118,9 @@ def load(path: str | Path) -> Atlas:
     newer minor is allowed to add, and section 9a says a reader tolerates them. Wrong types
     on the closed fields are refused by the loader itself, in both cases.
     """
-    target = Path(path).expanduser()
-    if target.is_dir():
-        target = target / ATLAS_NAME
-    if not target.is_file():
-        raise UsageError(
-            f"no atlas at {target.absolute()} yet. build one with: rosio extract <workspace> "
-            f"--out {target.parent.absolute()}, then ask again"
-        )
     try:
-        payload = json.loads(target.read_text(encoding="utf-8"))
-    except ValueError as exc:
+        payload = json.loads(content.decode("utf-8"))
+    except (ValueError, UnicodeError) as exc:
         raise UsageError(f"{target} does not parse as json: {exc}") from exc
     try:
         atlas = Atlas.from_json(payload)

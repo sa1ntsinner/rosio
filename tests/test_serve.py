@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -187,14 +188,67 @@ def test_a_missing_atlas_names_the_command_that_writes_one(tmp_path: Path):
     assert "rosio extract" in str(caught.value)
 
 
-def test_a_directory_is_accepted_and_the_atlas_is_read_once(atlas_file: Path):
+def test_a_directory_is_accepted_and_unchanged_content_reuses_the_atlas(atlas_file: Path):
     source = tools.AtlasSource(atlas_file.parent)
 
     assert not source.loaded
     first = source.atlas()
-    atlas_file.unlink()
-
     assert source.atlas() is first
+
+
+def test_a_long_lived_source_reads_replacement_without_mutating_old_answers(atlas_file: Path):
+    source = tools.AtlasSource(atlas_file)
+    first = source.atlas()
+    replacement = build()
+    replacement.x["revision"] = "second"
+    staged = atlas_file.with_suffix(".new")
+    staged.write_bytes(replacement.to_bytes())
+    staged.replace(atlas_file)
+
+    second = source.atlas()
+    assert second.x["revision"] == "second"
+    assert "revision" not in first.x
+    assert source.atlas() is second
+
+
+@pytest.mark.parametrize("content", [None, b"{broken"])
+def test_a_source_never_falls_back_to_cached_answers_on_invalid_input(atlas_file: Path, content):
+    source = tools.AtlasSource(atlas_file)
+    source.atlas()
+    if content is None:
+        atlas_file.unlink()
+    else:
+        atlas_file.write_bytes(content)
+    with pytest.raises(UsageError):
+        source.atlas()
+    atlas_file.write_bytes(build().to_bytes())
+    assert source.atlas().entities
+
+
+def test_equal_file_metadata_does_not_hide_a_changed_snapshot(atlas_file: Path):
+    first = build()
+    first.x["revision"] = "first"
+    atlas_file.write_bytes(first.to_bytes())
+    source = tools.AtlasSource(atlas_file)
+    before = source.atlas()
+    metadata = atlas_file.stat()
+    atlas_file.write_bytes(atlas_file.read_bytes().replace(b'"first"', b'"other"'))
+    os.utime(atlas_file, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+    assert atlas_file.stat().st_size == metadata.st_size
+    assert source.atlas().x["revision"] == "other"
+    assert before.x["revision"] == "first"
+
+
+def test_existing_tool_bindings_follow_validated_replacements(atlas_file: Path):
+    functions = {item.__name__: item for item in server.bindings(tools.AtlasSource(atlas_file))}
+    assert "param.shadowed" in functions["drift"]()
+    replacement = build()
+    replacement.findings.clear()
+    builder = model.AtlasBuilder()
+    builder.atlas = replacement
+    builder.recompute()
+    atlas_file.write_bytes(replacement.to_bytes())
+    assert "param.shadowed" not in functions["drift"]()
 
 
 def test_a_newer_schema_major_is_refused_with_a_way_out(tmp_path: Path, atlas: model.Atlas):
@@ -577,12 +631,13 @@ def test_every_tool_answers_from_the_bound_atlas(atlas_file: Path):
     assert "topic_name" in functions["unresolved"]()
 
 
-def test_only_the_first_call_reads_the_file(atlas_file: Path):
+def test_each_tool_checks_that_its_snapshot_is_still_available(atlas_file: Path):
     functions = {item.__name__: item for item in server.bindings(tools.AtlasSource(atlas_file))}
     functions["overview"]()
     atlas_file.unlink()
 
-    assert "param.shadowed" in functions["drift"]()
+    with pytest.raises(UsageError, match="no atlas"):
+        functions["drift"]()
 
 
 # ---------------------------------------------------------------------------

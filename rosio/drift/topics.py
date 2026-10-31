@@ -494,7 +494,7 @@ def type_key(text: str) -> tuple[str, str] | None:
     parts = [part for part in text.replace("::", "/").split("/") if part]
     if len(parts) == 3 and parts[1] in ("msg", "srv", "action"):
         return (parts[0], parts[2])
-    if len(parts) == 2:
+    if len(parts) == 2 and "::" not in text:
         return (parts[0], parts[1])
     return None
 
@@ -913,9 +913,16 @@ def service_no_server(atlas: model.Atlas) -> list[model.Finding]:
 
 def _blind_owners(atlas: model.Atlas, profile: str) -> set[str]:
     from rosio import join
+    from rosio.drift import frames
 
     wants = (model.Want.SERVICE_NAME.value, model.Want.ACTION_NAME.value)
-    return join.blind_nodes(atlas, wants, profile)
+    whole = frames.read_whole(atlas)
+    unread = {
+        node.id
+        for node in atlas.by_kind(model.NodeKind.NODE.value)
+        if stated(node, DECLARED, profile) is not None and not whole(node.id, profile)
+    }
+    return join.blind_nodes(atlas, wants, profile) | unread
 
 
 def _library_service(name: str) -> bool:
