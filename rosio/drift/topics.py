@@ -354,7 +354,7 @@ def _lonely(
         )
         for topic_id in sorted(present):
             name = ids.parse_topic(topic_id)
-            if is_quiet(name) or topic_id in ends[missing_kind]:
+            if library_channel(name, None) or topic_id in ends[missing_kind]:
                 continue
             live = [edge for edge in present[topic_id] if stated(edge, OBSERVED, profile)]
             if not live:
@@ -1093,6 +1093,9 @@ def endpoint_observed_only(atlas: model.Atlas) -> list[model.Finding]:
                 continue
             name = ids.label_for(edge.dst)
             if library_channel(name, owner):
+                continue
+            # The time source of a node run with use_sim_time subscribes /clock itself.
+            if edge.kind == SUBSCRIBES and name == "/clock":
                 continue
             label = human(edge.src)
             where = slug(profile)

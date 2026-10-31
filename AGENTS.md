@@ -1451,7 +1451,10 @@ the running launch commands match none or several. A path inside a package enter
 compared data as `<package>/<path inside it>`, read from the nearest `package.xml`, so the
 source copy and the install copy of one file are one value and a `colcon build` moves no
 launch entity, synthetic node or finding id; the ids that held a root relative path moved
-once. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
+once. `topic.no_publisher` and `topic.no_subscriber` skip the topics behind an
+action, `endpoint.observed_only` skips a `/clock` subscription, which the time source of a
+node run with `use_sim_time` makes, and the graph states no missing end on
+`/parameter_events`, `/rosout` or `/clock`. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
 key a later `/**` block of the same file overrides says to move or trim that block, and a bare
 yaml key that is the last segment of a namespaced node's name is `param.owner_name_mismatch`
 rather than `param.orphan_block`. `param.sim_time_mixed` cites the line that writes a value an

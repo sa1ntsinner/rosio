@@ -652,6 +652,15 @@ def _library_end(atlas: Atlas, edge: Edge, wanted: str) -> bool:
     )
 
 
+LIBRARY_CHANNELS = frozenset({"/parameter_events", "/rosout", "/clock"})
+"""Channels whose missing end belongs to the client library or a simulator: every node
+publishes the first two, and a node run with use_sim_time subscribes the third."""
+
+
+def _library_name(name: str) -> bool:
+    return name in LIBRARY_CHANNELS
+
+
 def _blind_text(atlas: Atlas, kind: str, wanted: str, cache: dict[str, int]) -> str:
     """How many nodes of the profile hold a name of this channel kind the reader could not
     follow, so a missing side reads as not found rather than as absent."""
@@ -975,6 +984,8 @@ def graph(
         rules = chosen.rules[entity_id]
         flags = f" [{', '.join(rules)}]" if rules else ""
         sides = []
+        # A library channel's missing end is the library's, every node or a simulator.
+        library = _library_name(slices.label(entity_id))
         for edge_kind, verb, none in _SIDES[kind]:
             # one entry per distinct QoS, so a clip never cuts into a bracket
             ends = _merged_ends(
@@ -990,6 +1001,8 @@ def graph(
             implicit = chosen.lifecycle.get(entity_id)
             if not named and implicit and implicit[0] == edge_kind:
                 named = [f"{slices.label(implicit[1])} (lifecycle node)"]
+            if not named and library:
+                continue
             sides.append(
                 f"{verb} {_named(named, more='more')}"
                 if named
