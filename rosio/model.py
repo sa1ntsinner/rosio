@@ -39,7 +39,10 @@ SCHEMA_MINOR = "31"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
 stored id: the rules `param.read_undeclared`, `controller.undefined` and
 `controller.joint_missing`, the coded file value `stamped_frames`, the
-model file attribute `mesh_lines` and the `publishes` edge value `period_s`; the rules
+model file attribute `mesh_lines` and the `publishes` edge value `period_s`, inferred from
+python and C++ timer callbacks with the same endpoint row keys `callback`, `period_form`,
+`period_numerator`, `attribute` and `published_from`; recorded rate comparisons through
+`samples`, with no new key; the rules
 `type.incompatible`, `service.no_server`,
 `launch.argument_undeclared` and `frame.broadcast_twice`, the include fact values
 `args_unread` and `arg_lines`, the `component_class_unregistered` blind spot reason, and

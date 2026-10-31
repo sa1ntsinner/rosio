@@ -996,6 +996,18 @@ def _measured_rate(fact: model.LayerFact) -> float | None:
     return None
 
 
+def _recorded_topics(atlas: model.Atlas) -> dict[str, list[tuple[model.Node, model.Edge]]]:
+    out: dict[str, list[tuple[model.Node, model.Edge]]] = {}
+    for edge in sorted(atlas.edges.values(), key=lambda row: row.id):
+        if edge.kind != "samples":
+            continue
+        entity = atlas.entities.get(edge.src)
+        if entity is None or entity.kind != "bagtopic":
+            continue
+        out.setdefault(edge.dst, []).append((entity, edge))
+    return out
+
+
 def _authority(stated_by: dict[str, float | None]) -> str:
     """Which layer's rate the measurement is held against.
 
@@ -1017,17 +1029,24 @@ def rate_below_declared(atlas: model.Atlas) -> list[model.Finding]:
     probes of one slow system produce the same compared bytes.
     """
     out: list[model.Finding] = []
+    recorded = _recorded_topics(atlas)
     for edge, profile, facts in (
         view for group in _sites(atlas, (PUBLISHES,)) for view in _views(group)
     ):
         if _via_wrapper(edge, profile):
             continue
         live = facts.get(OBSERVED)
-        if live is None:
-            continue
-        measured = _measured_rate(live)
-        if measured is None:
-            continue
+        measured = _measured_rate(live) if live is not None else None
+        measurements = (
+            [("", live, measured)]
+            if measured is not None
+            else [
+                (entity.id, fact, _measured_rate(fact))
+                for entity, samples in recorded.get(edge.dst, [])
+                if stated(samples, "recorded", profile) is not None
+                and (fact := stated(entity, "recorded", profile)) is not None
+            ]
+        )
         stated_by = {
             layer: _expected_rate(fact)
             for layer, fact in facts.items()
@@ -1037,35 +1056,40 @@ def rate_below_declared(atlas: model.Atlas) -> list[model.Finding]:
             continue
         layer = _authority(stated_by)
         expected = stated_by[layer]
-        if expected is None or measured >= expected * (1.0 - RATE_TOLERANCE):
+        if expected is None:
             continue
         label = f"{human(edge.src)} publishing {ids.label_for(edge.dst)}"
-        out.append(
-            model.Finding(
-                rule="rate.below_declared",
-                severity=rules.severity_of("rate.below_declared"),
-                subject=_ref(edge),
-                title=f"{label} runs slower than the {expected:g} Hz it states",
-                detail=(
-                    f"in {slug(profile)} the {layer} layer states {expected:g} Hz for this "
-                    f"publisher and the running system stays more than "
-                    f"{int(RATE_TOLERANCE * 100)} percent under it"
-                ),
-                fix=(
-                    "find what blocks the publishing loop, or state the rate the node can "
-                    "actually hold"
-                ),
-                say=(
-                    f"{label} states {expected:g} Hz and runs below it, so anything "
-                    "downstream that assumes the stated rate is working on stale data."
-                ),
-                discriminator=disc_for(profile),
-                profiles=[profile] if profile != model.ANY_PROFILE else [],
-                layers=[layer, OBSERVED],
-                where=evidence_of(facts.get(layer), live),
-                extra={"volatile": {"measured": f"{measured:g} Hz"}},
+        for identity, measurement, measured in measurements:
+            if measured is None or measured >= expected * (1.0 - RATE_TOLERANCE):
+                continue
+            measured_layer = "recorded" if identity else OBSERVED
+            out.append(
+                model.Finding(
+                    rule="rate.below_declared",
+                    severity=rules.severity_of("rate.below_declared"),
+                    subject=_ref(edge),
+                    title=f"{label} runs slower than the {expected:g} Hz it states",
+                    detail=(
+                        f"in {slug(profile)} the {layer} layer states {expected:g} Hz for this "
+                        f"publisher and the {measured_layer} layer measures more than "
+                        f"{int(RATE_TOLERANCE * 100)} percent under it"
+                    ),
+                    fix=(
+                        "find what blocks the publishing loop, or state the rate the node can "
+                        "actually hold"
+                    ),
+                    say=(
+                        f"{label} states {expected:g} Hz and the {measured_layer} layer measures "
+                        "a rate below it, so anything "
+                        "downstream that assumes the stated rate is working on stale data."
+                    ),
+                    discriminator=disc_for(profile, identity) if identity else disc_for(profile),
+                    profiles=[profile] if profile != model.ANY_PROFILE else [],
+                    layers=[layer, measured_layer],
+                    where=evidence_of(facts.get(layer), measurement),
+                    extra={"volatile": {"measured": f"{measured:g} Hz"}},
+                )
             )
-        )
     return out
 
 

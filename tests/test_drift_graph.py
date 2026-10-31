@@ -849,6 +849,44 @@ def test_rate_below_declared_has_a_stable_id() -> None:
     assert left.fingerprint == right.fingerprint
 
 
+def test_rate_uses_recorded_samples_only_without_an_observed_rate():
+    builder = model.AtlasBuilder()
+    profile = builder.add_profile("recording")
+    node = ids.build_node("/sensor")
+    topic = ids.build_topic("/samples")
+    builder.node(node, name_source="literal")
+    builder.node(topic)
+    edge = builder.edge(
+        "publishes",
+        node,
+        topic,
+        key="timer",
+        layer=CODED,
+        profile=profile,
+        values={"period_s": 0.05},
+    )
+    bagtopic = ids.build_bagtopic("run", "/samples")
+    builder.fact(bagtopic, "recorded", profile=profile, values={"volatile": {"rate_hz": 5}})
+    builder.edge("samples", bagtopic, topic, layer="recorded", profile=profile)
+    found = topic_rules.rate_below_declared(builder.build())
+    assert len(found) == 1
+    assert "recorded" in found[0].detail
+    assert found[0].layers == [CODED, "recorded"]
+    builder.edge(
+        "publishes",
+        node,
+        topic,
+        key=edge.key,
+        layer=OBSERVED,
+        profile=profile,
+        values={"volatile": {"rate_hz": 20}},
+    )
+    assert topic_rules.rate_below_declared(builder.build()) == []
+    edge.facts = [fact for fact in edge.facts if fact.layer != OBSERVED]
+    builder.atlas.entities[bagtopic].facts[0].profile = ids.build_profile("other")
+    assert topic_rules.rate_below_declared(builder.build()) == []
+
+
 # ---------------------------------------------------------------------------
 # endpoint.observed_only
 

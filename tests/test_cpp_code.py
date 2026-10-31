@@ -772,6 +772,55 @@ private:
 """
 
 
+@pytest.mark.parametrize("expression", ["1.0 / rate_", "(1.0 / rate_)"])
+def test_timer_callbacks_link_member_publishers(expression):
+    text = """
+    class Sensor : public rclcpp::Node {
+      Sensor() : Node("sensor") {
+        declare_parameter<double>("rate", 20.0);
+        get_parameter("rate", rate_);
+        pub_ = create_publisher<std_msgs::msg::String>("out", 10);
+        timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / rate_),
+                                  std::bind(&Sensor::tick, this));
+        other_ = create_publisher<std_msgs::msg::String>("other", 10);
+        second_ = create_wall_timer(100ms, [this]() { other_->publish(msg); });
+        third_ = create_wall_timer(std::chrono::milliseconds(250),
+                                  std::bind(&Sensor::slow, this));
+        double period = 1.0 / rate_;
+        fourth_ = create_wall_timer(std::chrono::duration<double>(period),
+                                   std::bind(&Sensor::aliased, this));
+        this->rate_ = 1.0 / rate_;
+        fifth_ = create_wall_timer(std::chrono::duration<double>(this->rate_),
+                                  std::bind(&Sensor::mutated, this));
+      }
+      void tick() { pub_->publish(msg); }
+      void slow() {}
+    };
+    """
+    text = text.replace("1.0 / rate_", expression)
+    unit = cpp.parse_text(text, path="sensor.cpp")
+    cpp.analyse([unit])
+    rows = cpp.file_report(unit)["endpoints"]
+    timers = {row["callback"]: row for row in rows if row["kind"] == "timer"}
+    publishers = {row["attribute"]: row for row in rows if row["kind"] == "publisher"}
+    assert timers["Sensor::tick"]["period_s"] == 0.05
+    assert timers["Sensor::tick"]["from_parameter"] == "rate"
+    assert timers["Sensor::tick"]["period_form"] == "inverse"
+    assert timers["Sensor::tick"]["period_numerator"] == 1.0
+    assert publishers["pub_"]["published_from"] == ["Sensor::tick"]
+    (callback,) = publishers["other_"]["published_from"]
+    assert callback.startswith("Sensor::Sensor::lambda_")
+    assert timers[callback]["period_s"] == 0.1
+    assert timers["Sensor::slow"]["period_s"] == 0.25
+    assert "period_form" not in timers["Sensor::aliased"]
+    assert "period_form" not in timers["Sensor::mutated"]
+    moved = cpp.parse_text("\n\n" + text, path="sensor.cpp")
+    cpp.analyse([moved])
+    assert [row.get("callback") for row in cpp.file_report(moved)["endpoints"]] == [
+        row.get("callback") for row in rows
+    ]
+
+
 @needs_cpp
 def test_a_timer_period_json_cannot_hold_records_a_blind_spot(tmp_path: Path) -> None:
     """This one left no trace at all: the rate resolved count dropped, no blind spot

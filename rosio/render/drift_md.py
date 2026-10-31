@@ -370,6 +370,8 @@ def _silences(atlas: Atlas, gates: Sequence[dict[str, str]]) -> list[str]:
     rows = []
     for rule in quiet:
         needs = NEEDS_LAYER.get(rule)
+        if rule == "rate.below_declared" and "recorded" in present:
+            needs = None
         if rule in failed:
             reason = "the rule failed this run and its result was not trusted"
         elif unrecorded:

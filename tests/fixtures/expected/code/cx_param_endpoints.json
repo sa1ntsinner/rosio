@@ -39,6 +39,8 @@
         "durability": null,
         "preset": null
       },
+      "attribute": "cmd_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
       "line_hint": 38
     },
@@ -60,6 +62,8 @@
         "durability": null,
         "preset": null
       },
+      "attribute": "ground_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
       "line_hint": 45
     },
@@ -83,6 +87,8 @@
         "durability": null,
         "preset": null
       },
+      "attribute": "health_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
       "line_hint": 41
     },
@@ -104,6 +110,8 @@
         "durability": null,
         "preset": null
       },
+      "attribute": "status_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
       "line_hint": 43
     },
@@ -160,6 +168,9 @@
       "period_s": 0.05,
       "period_state": "resolved_from_parameter",
       "from_parameter": "publish_rate_hz",
+      "callback": "cx_nodes::ParamEndpoints::ParamEndpoints::lambda_bcc20bf3",
+      "period_form": "inverse",
+      "period_numerator": 1.0,
       "owner_symbol": "cx_nodes::ParamEndpoints::ParamEndpoints",
       "line_hint": 66
     }

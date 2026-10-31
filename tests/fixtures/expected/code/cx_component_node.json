@@ -50,6 +50,8 @@
         "durability": "transient_local",
         "preset": null
       },
+      "attribute": "markers_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::MarkerComponent::MarkerComponent",
       "line_hint": 18
     }

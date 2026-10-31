@@ -39,6 +39,8 @@
         "preset": null
       },
       "publisher_kind": "lifecycle",
+      "attribute": "odom_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::BridgeLifecycle::on_configure",
       "line_hint": 34
     },
@@ -60,6 +62,8 @@
         "preset": null
       },
       "publisher_kind": "lifecycle",
+      "attribute": "state_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::BridgeLifecycle::on_configure",
       "line_hint": 35
     },
@@ -94,6 +98,7 @@
       "name_state": "not_applicable",
       "period_s": 0.05,
       "period_state": "literal",
+      "callback": "cx_nodes::BridgeLifecycle::on_activate::lambda_2c2d8c10",
       "owner_symbol": "cx_nodes::BridgeLifecycle::on_activate",
       "line_hint": 52
     }

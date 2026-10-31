@@ -37,6 +37,8 @@
         "durability": null,
         "preset": null
       },
+      "attribute": "odom_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
       "line_hint": 28
     },
@@ -57,6 +59,8 @@
         "durability": "transient_local",
         "preset": null
       },
+      "attribute": "ready_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
       "line_hint": 33
     },
@@ -79,6 +83,8 @@
         "durability": null,
         "preset": null
       },
+      "attribute": "cmd_pub_",
+      "published_from": [],
       "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
       "line_hint": 31
     },
@@ -179,6 +185,7 @@
       "name_state": "not_applicable",
       "period_s": 0.05,
       "period_state": "literal",
+      "callback": "cx_nodes::LiteralEndpoints::LiteralEndpoints::lambda_bcc20bf3",
       "owner_symbol": "cx_nodes::LiteralEndpoints::LiteralEndpoints",
       "line_hint": 58
     }

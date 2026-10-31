@@ -418,6 +418,10 @@ class Endpoint:
     """Why a period that folded cannot be written. Empty when nothing folded, which is a
     different answer and gets a different state."""
     unknown_count: str = ""
+    callback: str = ""
+    period_form: str = ""
+    period_numerator: float | None = None
+    attribute: str = ""
     lifecycle: bool = False
     construction: str = ""
     conditional_site: bool = False
@@ -548,6 +552,7 @@ class Unit:
     """Nodes a free function creates from a node type itself, named by the type."""
     members: dict[tuple[str, str], Ref] = field(default_factory=dict)
     endpoints: list[Endpoint] = field(default_factory=list)
+    publishing: dict[tuple[str, str], set[str]] = field(default_factory=dict)
     params: list[ParamSite] = field(default_factory=list)
     reads: list[ParamRead] = field(default_factory=list)
     callbacks: list[ParamCallback] = field(default_factory=list)
@@ -909,6 +914,7 @@ class _Reader:
         self.scopes: list[dict[str, Ref]] = [{}]
         self.frames: dict[str, dict[str, Ref]] = {}
         self.numbers: dict[str, tuple[float, str]] = {}
+        self.direct_numbers: set[str] = set()
         self.defaults: dict[str, Ref] = {}
         self.exprs: dict[str, tuple[str, bool]] = {}
         self.member_types: dict[str, str] = {}
@@ -1545,6 +1551,11 @@ class _Reader:
         self._track_helper(text.removeprefix("this->"), right)
         if left.type == "field_expression":
             self._frame_assignment(left, right)
+            argument = _child(left, "argument")
+            if argument is not None and argument.type == "this":
+                member = _child(left, "field")
+                if member is not None:
+                    self._track_number(_flat(member, self.src), right)
         elif left.type == "identifier":
             operator = _child(node, "operator")
             value = self.resolve(right)
@@ -1579,8 +1590,31 @@ class _Reader:
 
     def _track_number(self, name: str, value: Any) -> None:
         number, source = self._number(value)
+        direct = self._number_direct(value)
+        self.numbers.pop(name, None)
+        self.direct_numbers.discard(name)
+        parent = value.parent
+        operator = _child(parent, "operator") if parent is not None else None
+        if operator is not None and _text(operator, self.src) != "=":
+            return
         if number is not None:
             self.numbers[name] = (number, source)
+            if source and direct:
+                self.direct_numbers.add(name)
+
+    def _number_direct(self, node: Any) -> bool:
+        if node is None:
+            return False
+        if node.type == "parenthesized_expression" and node.named_child_count == 1:
+            return self._number_direct(node.named_children[0])
+        if node.type == "call_expression":
+            name, receiver, template = _call_parts(node, self.src)
+            if name.startswith("as_"):
+                return self._number_direct(receiver)
+            return (
+                name in READ_CALLS or self._declare_shape(name, _args(node), template) is not None
+            )
+        return _flat(node, self.src).removeprefix("this->") in self.direct_numbers
 
     def _number(self, node: Any) -> tuple[float | None, str]:
         """A numeric value and the parameter it came from, following one function.
@@ -1634,7 +1668,17 @@ class _Reader:
                 return None, ""
         if node.type == "call_expression":
             arguments = _args(node)
-            name, _receiver, _template = _call_parts(node, self.src)
+            name, receiver, template = _call_parts(node, self.src)
+            declare = self._declare_shape(name, arguments, template)
+            if declare is not None:
+                parameter = self.resolve(declare[0])
+                value, _ = self._number(declare[1])
+                return value, parameter.value if parameter.resolved else ""
+            if name.startswith("as_") and receiver is not None:
+                return self._number(receiver)
+            if name in READ_CALLS and arguments:
+                parameter = self.resolve(arguments[0])
+                return self.numbers.get(parameter.value, (None, ""))
             if name in ("duration", "double") and arguments:
                 return self._number(arguments[0])
         return None, ""
@@ -1771,6 +1815,17 @@ class _Reader:
             return
         arguments = _args(node)
         types = _template_types(template, self.src)
+        if name == "publish" and receiver is not None and self.klass:
+            member = _flat(receiver, self.src).removeprefix("this->")
+            if re.fullmatch(r"\w+", member):
+                symbol = self.sym
+                parent = node.parent
+                while parent is not None and parent.type != "function_definition":
+                    if parent.type == "lambda_expression":
+                        symbol = self._lambda_symbol(parent)
+                        break
+                    parent = parent.parent
+                self.unit.publishing.setdefault((self.klass, member), set()).add(symbol)
         if receiver is None and name[:1].isupper():
             # `VehicleInfoUtils(*this).getVehicleInfo()` constructs a temporary helper
             scope = _scope_text(node, self.src)
@@ -1985,9 +2040,21 @@ class _Reader:
                 condition=self.condition,
                 guard=self.guard,
                 unknown_count="loop" if self._in_loop(node) else "",
+                attribute=self._publisher_member(node) if kind == "publisher" else "",
             )
         )
         return True
+
+    def _publisher_member(self, node: Any) -> str:
+        parent = node.parent
+        if parent is None or not self.klass:
+            return ""
+        target = _child(parent, "left") if parent.type == "assignment_expression" else None
+        member = _flat(target, self.src).removeprefix("this->") if target is not None else ""
+        return member if re.fullmatch(r"\w+", member) else ""
+
+    def _lambda_symbol(self, node: Any) -> str:
+        return f"{self.sym}::lambda_{ids.digest(_flat(node, self.src))}"
 
     def _image_endpoints(self, symbol: str, arguments: Sequence[Any], node: Any) -> None:
         row = wrappers.lookup(symbol, "cpp")
@@ -2185,6 +2252,7 @@ class _Reader:
             number = self.numbers.get(ref.value) if ref.resolved else None
             if number is not None:
                 self.numbers[target.strip("&* ")] = number
+                self.direct_numbers.add(target.strip("&* ").removeprefix("this->"))
         api = "get_parameter_out" if target else "get_parameter"
         if api == "get_parameter" and ref.resolved and _checked(self.condition, str(ref.value)):
             # a read under `if (has_parameter(name))` never meets an undeclared name
@@ -2296,15 +2364,69 @@ class _Reader:
                 )
             )
 
+    def _timer_callback(self, node: Any) -> str:
+        """The callback a timer argument names: a lambda, or `std::bind(&Class::method, this)`."""
+        if node.type == "lambda_expression":
+            return self._lambda_symbol(node)
+        if node.type != "call_expression":
+            return ""
+        function, _, _ = _call_parts(node, self.src)
+        bound = _args(node)
+        if function != "bind" or len(bound) != 2 or _flat(bound[1], self.src) != "this":
+            return ""
+        method = _flat(bound[0], self.src)
+        if not re.fullmatch(r"&[\w:]+", method):
+            return ""
+        short = self.klass.rpartition("::")[2]
+        if self.klass and method[1:].startswith(short + "::"):
+            return self.klass + method[1 + len(short) :]
+        return method[1:]
+
+    def _period_form(self, node: Any, source: str) -> tuple[str, float | None]:
+        """How a period read from a parameter is built: `direct` for `duration<double>(rate)`,
+        `inverse` with its numerator for `duration<double>(1.0 / rate)`."""
+        if node.type != "call_expression":
+            return "", None
+        function, _, _ = _call_parts(node, self.src)
+        values = _args(node)
+        if function != "duration" or not values:
+            return "", None
+        value = values[0]
+        while value.type == "parenthesized_expression" and value.named_child_count == 1:
+            value = value.named_children[0]
+        if value.type != "binary_expression":
+            return ("direct", None) if self._number_direct(value) else ("", None)
+        operator = _child(value, "operator")
+        right = _child(value, "right")
+        first, first_source = self._number(_child(value, "left"))
+        _, second_source = self._number(right)
+        if (
+            operator is not None
+            and _text(operator, self.src) == "/"
+            and first is not None
+            and not first_source
+            and second_source == source
+            and right is not None
+            and right.type in ("identifier", "field_identifier", "field_expression")
+            and self._number_direct(right)
+        ):
+            return "inverse", first
+        return "", None
+
     def _timer(self, name: str, arguments: Sequence[Any], node: Any) -> None:
         period: float | None = None
         expr = ""
         source = ""
         reason = ""
+        period_form = ""
+        numerator = None
+        callback = next(filter(None, (self._timer_callback(item) for item in arguments)), "")
         for item in arguments:
             seconds, text, from_parameter, refused = self._duration(item)
             if text:
                 period, expr, source, reason = seconds, text, from_parameter, refused
+                if source:
+                    period_form, numerator = self._period_form(item, source)
                 break
         if reason:
             state = REFUSED
@@ -2327,6 +2449,9 @@ class _Reader:
                 period_from=source,
                 period_expr=expr,
                 period_reason=reason,
+                callback=callback,
+                period_form=period_form,
+                period_numerator=numerator,
                 condition=self.condition,
                 guard=self.guard,
             )
@@ -2342,8 +2467,10 @@ class _Reader:
                 return float(found.group(1)) * _SUFFIX_SCALE[found.group(2)], text, "", ""
             return None, text, "", ""
         if node.type == "call_expression":
-            name, _receiver, _template = _call_parts(node, self.src)
+            name, _receiver, template = _call_parts(node, self.src)
             arguments = _args(node)
+            if name == "duration" and len(_template_types(template, self.src)) > 1:
+                return None, text, "", ""
             if name in _CHRONO:
                 value, source = self._number(arguments[0]) if arguments else (None, "")
                 if value is not None:
@@ -3662,6 +3789,16 @@ def analyse(
     _header_constructions(units, include_dirs or {}, definitions)
     _map_defaults(units, include_dirs or {})
     _member_defaults(units)
+    publishing: dict[tuple[str, str, str], set[str]] = {}
+    for unit in units:
+        for (owner, member), symbols in unit.publishing.items():
+            publishing.setdefault((unit.pkg, owner, member), set()).update(symbols)
+    for unit in units:
+        for item in unit.endpoints:
+            if item.attribute:
+                unit.publishing[(item.owner_class, item.attribute)] = publishing.get(
+                    (unit.pkg, item.owner_class, item.attribute), set()
+                )
     return index
 
 
@@ -4931,6 +5068,13 @@ def _endpoint_view(item: Endpoint) -> dict[str, Any]:
             "period_state": item.period_state,
             **({"unresolved_ref": f"rate:{item.period_expr}"} if item.period_reason else {}),
             **({"from_parameter": item.period_from} if item.period_from else {}),
+            **({"callback": item.callback} if item.callback else {}),
+            **({"period_form": item.period_form} if item.period_form else {}),
+            **(
+                {"period_numerator": item.period_numerator}
+                if item.period_numerator is not None
+                else {}
+            ),
             **({"condition": item.condition} if item.condition else {}),
             **_guard_view(item.guard),
             "owner_symbol": item.sym,
@@ -4978,6 +5122,8 @@ def _endpoint_view(item: Endpoint) -> dict[str, Any]:
     out.update(_guard_view(item.guard))
     if item.publisher_kind:
         out["publisher_kind"] = item.publisher_kind
+    if item.attribute:
+        out["attribute"] = item.attribute
     if item.api in PUBLISH_CALLS and item.lifecycle:
         out["publisher_kind"] = "lifecycle"
     if item.construction:
@@ -5184,6 +5330,11 @@ def file_report(
         nodes.append(row)
 
     endpoints = [_endpoint_view(item) for item in unit.endpoints]
+    for item, row in zip(unit.endpoints, endpoints, strict=True):
+        if item.attribute:
+            row["published_from"] = sorted(
+                unit.publishing.get((item.owner_class, item.attribute), ())
+            )
     endpoints.sort(
         key=lambda row: (
             row["kind"],

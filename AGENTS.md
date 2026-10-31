@@ -127,13 +127,17 @@ record and is not read.
 
 * `kind` on an endpoint is one of `publisher`, `subscriber`, `service_server`,
   `service_client`, `action_server`, `action_client`, `timer`.
-* A python `timer` row may carry `callback`, the qualified method `self.<method>` names, and,
+* A python or C++ `timer` row may carry `callback`, the qualified callback symbol, and,
   when its period is read from a parameter, `period_form`: `inverse` with `period_numerator`
-  for `1.0 / rate`, or `direct`. A python `publisher` row may carry `attribute`, the member it
+  for `1.0 / rate`, or `direct`. A python or C++ `publisher` row may carry `attribute`, the member it
   is assigned to, and `published_from`, the methods that call `publish` on that member. The
   join states `period_s` on a coded `publishes` edge when every publish is in the callback of
   one timer of the same source, from the parameter's winning value in that profile, and
   states nothing when that value is unknown.
+  A C++ bound method names that method, and a timer lambda names the enclosing symbol plus
+  `lambda_<digest>` over its own text. Literal chrono durations fold to seconds. A parameter
+  read already tied to a numeric member keeps that dependency for a seconds duration or an
+  inverse rate. A lambda calling another method does not make that method its callback.
 * `name` is the raw name the source states, absolute or relative, absent when the source
   could not be read statically. A record that already states the name its wrapper creates is
   taken as it stands.
@@ -1057,7 +1061,8 @@ What was added, in the order it arrived:
   `publishes` edge value `period_s` and the python endpoint row keys `callback`,
   `period_form`, `period_numerator`, `attribute` and `published_from` (section 2.2), so
   `rate.below_declared` holds a measured rate against the timer that drives a publisher; the
-  C++ reader states no timer callback yet. No release had shipped, so no stored id existed.
+  C++ reader states the same keys for bound methods and timer lambdas, and for publisher
+  members whose publish calls it reads. No release had shipped, so no stored id existed.
 
 One package key was replaced in `1.25` without a major bump. `share_read_from`, added in
 `1.21`, named the tree the walk read a package from, and since the walk reads the workspace
@@ -1514,6 +1519,22 @@ a subscription whose QoS it can never match, and says so when that leaves no dat
 entry point. A python action name the reader could not follow is a blind spot under the want
 `action_name`, as the C++ reader files it, where it was `other`, which moved the ids of those
 entries and lets a missing action server say it was not found rather than absent.
+
+Later inside `1.31`, with no new key, `rate.below_declared` takes a recorded bagtopic rate
+through its `samples` edge when the publisher has no observed rate in that profile. Each
+recording keeps its own finding, discriminated by bagtopic, and the text names the measuring
+layer. An observed rate still wins, including zero. The C++ reader states timer callbacks
+for `std::bind(&Class::method, this)` and inline lambdas, literal millisecond durations and
+seconds durations read from a known numeric parameter member, and the publisher member with
+the symbols that call its `publish`. These reuse the python row keys in section 2.2, so the
+join uses the same period inference. A lambda symbol uses a content digest and no line.
+New period values move the keys of the coded publisher edges that gain them, and finding
+text changes move fingerprints. No release had shipped, so no stored id or waiver existed.
+The report no longer says this rate rule needs the observed layer when the recorded layer
+is present. Publish calls in another source of the same package and class also count, so a
+header and its source keep one publisher history. Parameter expressions outside a direct
+seconds value or a literal numerator over a member keep no period form, and chrono durations
+with an explicit ratio remain unresolved.
 
 A reader pinned to `1.0` still loads a `1.31` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
