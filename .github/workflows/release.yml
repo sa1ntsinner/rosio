@@ -157,6 +157,8 @@ jobs:
             echo "OVSX_PAT is not set, skipping Open VSX"
             exit 0
           fi
+          # the first publish needs the namespace, later runs find it already there
+          npx --yes ovsx@1.2.0 create-namespace sa1ntsinner --pat "$OVSX_PAT" || true
           for package in packages/*.vsix; do
             npx --yes ovsx@1.2.0 publish "$package" --pat "$OVSX_PAT"
           done
