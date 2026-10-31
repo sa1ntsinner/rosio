@@ -140,7 +140,8 @@ function start(indexText, detailText) {
   var hit = new Uint8Array(N);
 
   IX.layer_names.forEach(function (name) { state.layers[name] = true; });
-  IX.kinds.forEach(function (name) { state.kinds[name] = true; });
+  // a run is bookkeeping of the extraction, shown only when asked for
+  IX.kinds.forEach(function (name) { state.kinds[name] = name !== "run"; });
 
   var findingOf = new Int8Array(N);
   for (var i = 0; i < N; i++) findingOf[i] = E.finding[i];
@@ -700,7 +701,8 @@ function start(indexText, detailText) {
       counts[kind] = (counts[kind] || 0) + 1;
     }
     el("f-kinds").innerHTML = IX.kinds.map(function (kind) {
-      return '<label class="check"><input type="checkbox" checked data-kind="' + kind + '">' +
+      return '<label class="check"><input type="checkbox"' + (state.kinds[kind] ? " checked" : "") +
+        ' data-kind="' + kind + '">' +
         '<span>' + esc(kind) + '</span><span class="n">' + counts[kind] + "</span></label>";
     }).join("");
     el("f-layers").innerHTML = IX.layer_names.map(function (layer) {
