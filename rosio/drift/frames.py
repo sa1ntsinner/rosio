@@ -514,11 +514,15 @@ def frame_orphan_root(atlas: Atlas) -> list[Finding]:
         for frame in (row.child, row.parent):
             sources.setdefault(frame, set()).add(source)
         children.add(row.child)
+    trees = _tf_trees(atlas)
     for pair in _static_pairs(atlas):
         child, parent = ids.build_frame(pair.child), ids.build_frame(pair.parent)
         links.append((child, parent))
+        # A publisher whose remaps send /tf elsewhere feeds a tree of its own, another robot.
+        tree = trees.get((pair.node, pair.profile), _TF_TOPICS)
+        source = SYSTEM_SOURCE if tree == _TF_TOPICS else f"tf {' '.join(tree)}"
         for frame in (child, parent):
-            sources.setdefault(frame, set()).add(SYSTEM_SOURCE)
+            sources.setdefault(frame, set()).add(source)
         children.add(child)
     if not links:
         return []
@@ -660,6 +664,22 @@ SYSTEM_SOURCE = ""
 model: a code broadcast, a launch argument, a static publisher. Its empty model says so."""
 
 
+def _prefixed_shape(group: Sequence[str]) -> tuple[str, frozenset[str]] | None:
+    """(prefix, frames without it) when every frame of a group sits under one first segment,
+    `robot2/odom` and `robot2/base_link`, else None."""
+    names = [ids.parse_frame(frame) for frame in group]
+    heads = {name.split("/", 1)[0] for name in names if "/" in name}
+    if len(heads) != 1 or not all("/" in name for name in names):
+        return None
+    return heads.pop(), frozenset(name.split("/", 1)[1] for name in names)
+
+
+def _twins(
+    one: tuple[str, frozenset[str]] | None, other: tuple[str, frozenset[str]] | None
+) -> bool:
+    return one is not None and other is not None and one[0] != other[0] and one[1] == other[1]
+
+
 def _families(
     groups: Sequence[Sequence[str]], sources: dict[str, set[str]]
 ) -> list[list[Sequence[str]]]:
@@ -681,10 +701,13 @@ def _families(
             index = family_of[index]
         return index
 
+    shapes = [_prefixed_shape(group) for group in ordered]
     for first in range(len(ordered)):
         for second in range(first + 1, len(ordered)):
             shared = models[first] & models[second]
-            joins_system = first == 0 and SYSTEM_SOURCE in models[second]
+            # One tree repeated under another frame prefix is a second robot.
+            twin = _twins(shapes[first], shapes[second])
+            joins_system = first == 0 and SYSTEM_SOURCE in models[second] and not twin
             if shared - {SYSTEM_SOURCE} or joins_system:
                 family_of[find(second)] = find(first)
     families: dict[int, list[Sequence[str]]] = {}
