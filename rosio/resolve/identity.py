@@ -19,9 +19,11 @@ Three rules the digest obeys, all of them from AGENTS.md section 3:
 
 from __future__ import annotations
 
+import re
 import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 from rosio import ids, model
 from rosio.errors import ContractError
@@ -139,8 +141,27 @@ def file_token(path: str, roots: Sequence[str] = ()) -> str:
         return EXTERNAL_TOKEN
     for root in sorted((str(root) for root in roots), key=len, reverse=True):
         if under(value, root) and value != root:
-            return value[len(root.rstrip("/")) + 1 :]
+            return _package_relative(value, root) or value[len(root.rstrip("/")) + 1 :]
     return value.rsplit("/", 1)[-1]
+
+
+def _package_relative(path: str, root: str) -> str:
+    """`<package>/<path inside it>`, from the nearest directory holding a package.xml, which
+    a source package and its install share both do. The source copy and the built copy of
+    one file are then one token, so a build moves no id."""
+    folder = PurePosixPath(path).parent
+    top = PurePosixPath(root)
+    while folder != top and top in folder.parents:
+        manifest = Path(folder, "package.xml")
+        if manifest.is_file():
+            try:
+                found = re.search(r"<name>\s*([^<\s]+)\s*</name>", manifest.read_text("utf-8"))
+            except (OSError, UnicodeDecodeError):
+                found = None
+            name = found.group(1) if found else folder.name
+            return f"{name}/{PurePosixPath(path).relative_to(folder)}"
+        folder = folder.parent
+    return ""
 
 
 def relative_path(path: str, roots: Sequence[str] = ()) -> str:
@@ -154,7 +175,12 @@ def relative_path(path: str, roots: Sequence[str] = ()) -> str:
         return f"{TEMP_TOKEN}/{value.rsplit('/', 1)[-1]}"
     for root in sorted((str(root) for root in roots), key=len, reverse=True):
         if under(value, root):
-            return value[len(root.rstrip("/")) + 1 :] or value.rsplit("/", 1)[-1]
+            inside = value[len(root.rstrip("/")) + 1 :]
+            return (
+                (_package_relative(value, root) if inside else "")
+                or inside
+                or value.rsplit("/", 1)[-1]
+            )
     return f"{OUTSIDE_TOKEN}/{value.rsplit('/', 1)[-1]}"
 
 

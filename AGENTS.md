@@ -1447,7 +1447,11 @@ init` comments a profile out only when a file of the same package includes it wi
 condition and no argument, read by package and path rather than by file name. `rosio
 probe` without `--profile` over several profiles files the observation against the one
 profile whose `ros2 launch` commands run, with their arguments, and asks for `--profile` when
-the running launch commands match none or several. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
+the running launch commands match none or several. A path inside a package enters an id or
+compared data as `<package>/<path inside it>`, read from the nearest `package.xml`, so the
+source copy and the install copy of one file are one value and a `colcon build` moves no
+launch entity, synthetic node or finding id; the ids that held a root relative path moved
+once. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
 key a later `/**` block of the same file overrides says to move or trim that block, and a bare
 yaml key that is the last segment of a namespaced node's name is `param.owner_name_mismatch`
 rather than `param.orphan_block`. `param.sim_time_mixed` cites the line that writes a value an
