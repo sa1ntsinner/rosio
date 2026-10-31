@@ -417,6 +417,86 @@ def test_an_include_argument_the_included_file_declares_is_not_reported(tmp_path
     assert findings(_include(tmp_path, "frame_prefix"), "launch.argument_undeclared") == []
 
 
+def test_include_arguments_read_by_parameter_substitutions_or_later_actions(tmp_path: Path):
+    from rosio.collect.launch_declared import _unread_arguments
+    from rosio.resolve import records
+
+    child = tmp_path / "child.launch.xml"
+    child.write_text(
+        '<launch><node pkg="p" exec="n"><param from="$(var config_file)" '
+        'allow_substs="true"/></node></launch>'
+    )
+    parent = tmp_path / "run.launch.xml"
+    parent.write_text(
+        '<launch><include file="child.launch.xml"><arg name="later" '
+        'value="robot1"/></include><let name="name" value="$(var later)"/></launch>'
+    )
+    params = tmp_path / "params.yaml"
+    params.write_text("enable: $(var initial_pose/enable)\npose: $(arg initial_pose/pose)\n")
+    include = records.LaunchInclude(
+        str(child),
+        args=(("initial_pose/enable", "true"), ("initial_pose/pose", "[]"), ("later", "robot1")),
+        site=records.Site(str(parent)),
+        entity_path=("Include(child.launch.xml)",),
+    )
+    walk = records.LaunchWalk(
+        str(parent),
+        includes=[include],
+        nodes=[
+            records.ResolvedNode(
+                "p",
+                "n",
+                "/",
+                entity_path=(*include.entity_path, "Node(n)"),
+                file_reads=(records.FileRead(str(params), "parameters_file"),),
+            )
+        ],
+    )
+    assert _unread_arguments(walk, include) == []
+    params.unlink()
+    assert _unread_arguments(walk, include) == []
+
+
+def test_include_arguments_read_by_python_helpers_are_not_reported(tmp_path: Path):
+    from rosio.collect.launch_declared import _unread_arguments
+    from rosio.resolve import records
+
+    child = tmp_path / "child.launch.py"
+    child.write_text("from helper import nodes\n")
+    helper = tmp_path / "helper.py"
+    helper.write_text(
+        "from launch.substitutions import LaunchConfiguration\n"
+        "nodes = LaunchConfiguration('robot_name')\n"
+    )
+    include = records.LaunchInclude(
+        str(child),
+        args=(("robot_name", "robot1"),),
+        entity_path=("Include(child)",),
+    )
+    walk = records.LaunchWalk(str(child), includes=[include])
+    assert _unread_arguments(walk, include) == []
+    helper.write_text("nodes = []\n")
+    assert _unread_arguments(walk, include) == [["robot_name", ""]]
+    helper.unlink()
+    assert _unread_arguments(walk, include) == []
+
+
+def test_an_xml_include_argument_finding_is_about_the_launch_file():
+    builder = model.AtlasBuilder()
+    builder.node("launchfile:p|run.launch.xml")
+    builder.fact(
+        "launchent:p|entry.launch.xml|Include(sensors)",
+        "declared",
+        values={
+            "included_file": "launchfile:p|sensors.launch.xml",
+            "args_unread": [{"name": "frame_prefx", "closest": "frame_prefix"}],
+        },
+        evidence=[model.Source(file="file:p|run.launch.xml")],
+    )
+    (found,) = findings(builder.atlas, "launch.argument_undeclared")
+    assert found.subject == "launchfile:p|run.launch.xml"
+
+
 def test_two_nodes_broadcasting_one_child_frame_is_a_finding(tmp_path: Path):
     package(
         tmp_path,

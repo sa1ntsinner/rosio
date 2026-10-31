@@ -1759,6 +1759,16 @@ def registered_components(atlas: model.Atlas) -> dict[str, set[str]]:
                 package = ids.parse_exe(entity.id).package
                 out.setdefault(package, set()).add(str(fact.values["component_class"]).lstrip(":"))
     for entity in atlas.by_kind("file"):
+        for fact in entity.facts:
+            if fact.layer != DECLARED:
+                continue
+            for row in fact.values.get("library_targets") or []:
+                if isinstance(row, dict) and isinstance(row.get("components"), list):
+                    package = ids.parse_file(entity.id).package
+                    out.setdefault(package, set()).update(
+                        str(name).lstrip(":") for name in row["components"]
+                    )
+    for entity in atlas.by_kind("file"):
         if entity.attrs.get("loadable") is False and entity.attrs.get("language") == "cpp":
             out.pop(ids.parse_file(entity.id).package, None)
     for entry in atlas.unresolved:

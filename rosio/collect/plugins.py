@@ -1567,13 +1567,21 @@ class PluginsCollector:
                     continue
                 ctx.builder.node(file_id)
                 sources.append(file_id)
-            rows.append(
+            row = {
+                "target": name,
+                "sources": sorted(sources),
+                "linked_targets": sorted(target.linked_targets),
+            }
+            registered = sorted(
                 {
-                    "target": name,
-                    "sources": sorted(sources),
-                    "linked_targets": sorted(target.linked_targets),
+                    item.class_name
+                    for item in build.scan.components
+                    if item.target == name and item.mechanism == MECHANISM_COMPONENT_NODES
                 }
             )
+            if registered:
+                row["components"] = registered
+            rows.append(row)
         for name, path in build.scan.parameter_libraries:
             definition = Path(build.base) / path
             try:

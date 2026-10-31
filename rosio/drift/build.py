@@ -1543,6 +1543,7 @@ def launch_argument_undeclared(atlas: Atlas) -> list[Finding]:
                 row["into"].add(str(fact.values.get("included_file") or ""))
     findings = []
     for (file_id, name), row in sorted(groups.items()):
+        launchfile = ids.build_launchfile(*ids.parse_file(file_id))
         where = sorted(row["where"], key=Source.sort_key)
         at = rules.where(where[0])
         into = ", ".join(
@@ -1556,9 +1557,11 @@ def launch_argument_undeclared(atlas: Atlas) -> list[Finding]:
             Finding(
                 rule="launch.argument_undeclared",
                 severity=rules.severity_of("launch.argument_undeclared"),
-                # A file a root holds is the subject; an include read through an outside
-                # file is cited at that site.
-                subject=file_id if file_id in atlas.entities else row["site"],
+                subject=launchfile
+                if launchfile in atlas.entities
+                else file_id
+                if file_id in atlas.entities
+                else row["site"],
                 title=f"{at} passes {name} to {into}, which never reads it",
                 detail=(
                     f"{at} includes {into} with the argument {name}, and no file of the "

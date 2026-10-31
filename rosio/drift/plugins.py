@@ -551,6 +551,7 @@ def _unregistered_components(atlas: model.Atlas) -> list[model.Finding]:
             row["where"].update(fact.evidence)
     out = []
     for (file_id, package, name), row in sorted(groups.items()):
+        launchfile = ids.build_launchfile(*ids.parse_file(file_id))
         known = sorted(components[package])
         close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
         nodes = ", ".join(sorted(row["nodes"]))
@@ -563,7 +564,11 @@ def _unregistered_components(atlas: model.Atlas) -> list[model.Finding]:
             model.Finding(
                 rule="plugin.unresolved",
                 severity=rules.severity_of("plugin.unresolved"),
-                subject=file_id if file_id in atlas.entities else row["owner"],
+                subject=launchfile
+                if launchfile in atlas.entities
+                else file_id
+                if file_id in atlas.entities
+                else row["owner"],
                 discriminator=ids.digest("component", package, name),
                 title=f"{name} is loaded as a component and {package} registers no such class",
                 detail=(

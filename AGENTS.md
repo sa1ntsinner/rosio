@@ -1023,7 +1023,8 @@ What was added, in the order it arrived:
   that writes the name, and `arg_lines`, the line of the including file that
   writes an argument's literal value when that is not the include line; the blind spot reason
   `component_class_unregistered`, a composable node whose `plugin=` no component registration
-  of the workspace names; and a declared `publishes` edge from a launch
+  of the workspace names; on a `library_targets` row `components`, the classes an
+  `rclcpp_components_register_nodes` line of the build registers for that target; and a declared `publishes` edge from a launch
   `static_transform_publisher` to `/tf_static`, marked `via_known_wrapper` like the one a
   `ros2 run` publisher has.
 
@@ -1436,7 +1437,8 @@ reader reads `rclcpp_action`, where it was five endpoints under `_action/`, so t
 and the topics and services they named went. A C++ endpoint type spelled through a `using`
 alias of the file or of the class is stated as the type it names, which moved the values of
 those edges. A `message_filters::Subscriber` built in a constructor's member initializer is an
-endpoint. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
+endpoint. `launch.argument_undeclared` and the component case of `plugin.unresolved` are
+about the `launchfile` entity when one exists, which moved those finding ids. `lifecycle.unmanaged` names the profile in its title, `param.shadowed` over a node
 key a later `/**` block of the same file overrides says to move or trim that block, and a bare
 yaml key that is the last segment of a namespaced node's name is `param.owner_name_mismatch`
 rather than `param.orphan_block`. `param.sim_time_mixed` cites the line that writes a value an
@@ -1578,7 +1580,15 @@ when an include passes an argument that no file of the included tree declares or
 names the closest argument the tree declares that the include does not already pass. The walk
 decides it only when every file below the include resolved, raised nothing and reads its
 configurations by literal names, because a configuration read by a built name could be the
-argument. ROS 2 accepts such an argument without a word and the included file runs on its own
+argument. Parameter files read with substitutions enabled join the read texts, and the rule
+is undecided when their paths do not resolve or their files cannot be opened.
+An import outside the standard library and `launch`, `launch_ros`, `launch_xml`, `launch_yaml`
+and `ament_index_python` makes the rule undecided unless its module text can be read beside
+the launch file or on the walk's python path.
+Jazzy `IncludeLaunchDescription.execute` returns unscoped `SetLaunchConfiguration` actions,
+so a passed argument is also visible to later actions of the including description, and the
+rule also requires that no later action of the including file reads the name.
+ROS 2 accepts such an argument without a word and the included file runs on its own
 default, so the value goes nowhere. It is not `launch.raised`: nothing raises.
 
 `frame.broadcast_twice` is `warn`. It fires once per child frame and profile that two nodes

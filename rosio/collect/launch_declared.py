@@ -28,9 +28,11 @@ with the note `launch.raised`, and the drift rule of that name builds the findin
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import os
 import re
+import sys
 from collections.abc import Collection, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
@@ -41,7 +43,7 @@ from rosio import ids, model
 from rosio.collect import BUILT_ONLY, CollectContext, register, same_name_in_package, urdf
 from rosio.config import Entrypoint, ProfileSpec
 from rosio.errors import CollectorError, ContractError
-from rosio.resolve import identity, records, ros_args, substitutions
+from rosio.resolve import identity, parse_python, records, ros_args, substitutions
 from rosio.workspace import OUTSIDE, Workspace
 
 NAME = "launch_declared"
@@ -802,7 +804,7 @@ class LaunchDeclaredCollector:
                 steps = tuple(_step(text) for text in include.entity_path)
                 args = _include_args(ctx.ws, include)
                 values = {"included_file": child_id, "args": args}
-                unread = _unread_arguments(walk, include)
+                unread = _unread_arguments(walk, include, ctx.ws.python_sites())
                 if unread:
                     values["args_unread"] = _name_lines(include, cited, unread)
                 written = _argument_lines(include, cited)
@@ -2160,7 +2162,9 @@ _DECLARED_ARG = re.compile(
 )
 
 
-def _unread_arguments(walk: records.LaunchWalk, include: records.LaunchInclude) -> list[list[str]]:
+def _unread_arguments(
+    walk: records.LaunchWalk, include: records.LaunchInclude, python_sites: Sequence[str] = ()
+) -> list[list[str]]:
     """[name, closest declared name] for every argument an include passes that no file of the
     included tree spells anywhere, so nothing below the include can read it. Undecided, and
     empty, when a file of that tree raised, did not resolve, reads a configuration by a name
@@ -2177,12 +2181,76 @@ def _unread_arguments(walk: records.LaunchWalk, include: records.LaunchInclude) 
         item.path in paths for item in walk.exceptions
     ):
         return []
-    texts = []
-    for path in sorted(paths):
+    paths.update(
+        read.path
+        for node in walk.nodes
+        if node.entity_path[: len(include.entity_path)] == include.entity_path
+        for read in node.file_reads
+        if read.role == "parameters_file"
+    )
+    parent_reads = set()
+    if include.site is not None:
         try:
-            texts.append(Path(path).read_text(encoding="utf-8", errors="replace"))
+            parent = Path(include.site.path).read_text(encoding="utf-8", errors="replace")
         except OSError:
             return []
+        if _DYNAMIC_CONFIG.search(parent):
+            return []
+        parent_reads = {
+            name
+            for pair in re.findall(
+                r"LaunchConfiguration\(\s*(?:variable_name\s*=\s*)?['\"]([^'\"]+)['\"]"
+                r"|\$\((?:var|arg)\s+([^\s)]+)\s*\)",
+                parent,
+            )
+            for name in pair
+            if name
+        }
+    texts = []
+    pending = set(paths)
+    while pending:
+        path = min(pending)
+        pending.remove(path)
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return []
+        texts.append(text)
+        if not path.endswith(".py"):
+            continue
+        try:
+            tree = parse_python(text, path)
+        except SyntaxError:
+            return []
+        for item in ast.walk(tree):
+            if isinstance(item, ast.Import):
+                modules = [alias.name for alias in item.names]
+            elif isinstance(item, ast.ImportFrom):
+                if item.level or item.module is None:
+                    return []
+                modules = [item.module]
+            else:
+                continue
+            for module in modules:
+                root = module.split(".")[0]
+                if root in sys.stdlib_module_names or root in {
+                    "launch",
+                    "launch_ros",
+                    "launch_xml",
+                    "launch_yaml",
+                    "ament_index_python",
+                }:
+                    continue
+                candidates = [
+                    Path(base, *module.split(".")).with_suffix(".py")
+                    for base in (str(Path(path).parent), *python_sites)
+                ]
+                found = next((str(item) for item in candidates if item.is_file()), None)
+                if found is None:
+                    return []
+                if found not in paths:
+                    paths.add(found)
+                    pending.add(found)
     if not texts or any(_DYNAMIC_CONFIG.search(text) for text in texts):
         return []
     declared = sorted(
@@ -2193,6 +2261,8 @@ def _unread_arguments(walk: records.LaunchWalk, include: records.LaunchInclude) 
     declared = [name for name in declared if name not in passed]
     out = []
     for name, _value in include.args:
+        if name in parent_reads:
+            continue
         spelled = re.compile(rf"(?<![\w]){re.escape(name)}(?![\w])")
         if not any(spelled.search(text) for text in texts):
             close = difflib.get_close_matches(name, declared, n=1, cutoff=0.6)
