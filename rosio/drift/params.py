@@ -725,7 +725,7 @@ def declared_unread(atlas: model.Atlas) -> list[model.Finding]:
     return out
 
 
-_THROWING_READS = frozenset({"get_parameter", "get_parameter_value"})
+_THROWING_READS = frozenset({"get_parameter", "get_parameter_accessor", "get_parameter_value"})
 """The read forms that raise on a name the node never declared: rclcpp `get_parameter(name)`
 and rclpy `get_parameter(name)`. `get_parameter_or` and the out parameter form answer a
 default instead."""

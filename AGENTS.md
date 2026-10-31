@@ -1041,7 +1041,10 @@ What was added, in the order it arrived:
   `rosio/drift/controllers.py`. An rclpy read spelled `get_parameter_or(...).value`, or
   through a one hop accessor, states that call as its `api` where it stated
   `get_parameter_value`, so a reader can tell a read that raises from one that answers a
-  default, which moved the keys of those `reads_param` edges once. A python `get_parameter`
+  default, which moved the keys of those `reads_param` edges once. A C++ read through an
+  accessor (`get_parameter("x").as_double()`) states `get_parameter_or_accessor` when the call
+  is `get_parameter_or`, and keeps `get_parameter_accessor` for `get_parameter`, which raises.
+  A python or C++ `get_parameter`
   under a guard asking `has_parameter` for the name states the api `get_parameter_checked`,
   and `has_parameter(name)` is no longer read as the value of that parameter, so a guard on it
   is no `guard_parameters` term. The coded file value `stamped_frames`, a `{frame, line_hint}`

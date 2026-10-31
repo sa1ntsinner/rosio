@@ -2104,12 +2104,16 @@ class _Reader:
         arguments = [item for item in _args(receiver) if not _is_node_argument(item, self.src)]
         if not arguments:
             return
+        ref = self.resolve(arguments[0])
+        api = "get_parameter_accessor" if inner == "get_parameter" else "get_parameter_or_accessor"
+        if inner == "get_parameter" and ref.resolved and _checked(self.condition, str(ref.value)):
+            api = "get_parameter_checked"
         self.unit.reads.append(
             ParamRead(
-                name=self.resolve(arguments[0]),
+                name=ref,
                 sym=self.sym,
                 line=_line(node),
-                api="get_parameter_accessor",
+                api=api,
                 accessor=name,
                 spelling=_flat(arguments[0], self.src),
             )
@@ -2181,12 +2185,16 @@ class _Reader:
             number = self.numbers.get(ref.value) if ref.resolved else None
             if number is not None:
                 self.numbers[target.strip("&* ")] = number
+        api = "get_parameter_out" if target else "get_parameter"
+        if api == "get_parameter" and ref.resolved and _checked(self.condition, str(ref.value)):
+            # a read under `if (has_parameter(name))` never meets an undeclared name
+            api = "get_parameter_checked"
         self.unit.reads.append(
             ParamRead(
                 name=ref,
                 sym=self.sym,
                 line=_line(node),
-                api="get_parameter_out" if target else "get_parameter",
+                api=api,
                 target=target,
                 spelling=_flat(values[0], self.src),
             )
@@ -2563,6 +2571,11 @@ def name_literals(source: bytes) -> list[str]:
     return sorted(
         {value for value in _STRING_LITERAL.findall(text) if py_code.is_name_literal(value)}
     )
+
+
+def _checked(condition: str, name: str) -> bool:
+    """Whether a guard asks `has_parameter` for this name first."""
+    return "has_parameter(" in condition and f'"{name}"' in condition
 
 
 def stamped_frames(source: bytes) -> list[dict[str, Any]]:
@@ -5012,7 +5025,7 @@ def _param_view(item: ParamSite, reads: Sequence[ParamRead]) -> dict[str, Any]:
 
 
 def _read_view(read: ParamRead) -> dict[str, Any]:
-    if read.api == "get_parameter_accessor":
+    if read.accessor:
         return {"api": read.api, "accessor": read.accessor, "line_hint": read.line}
     return {"api": read.api, "target": read.target, "line_hint": read.line}
 

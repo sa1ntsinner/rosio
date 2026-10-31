@@ -1116,3 +1116,16 @@ def test_cast_and_empty_string_defaults_fold_and_a_local_is_named_as_one():
     assert rows["frame"]["default"] == ""
     (blind,) = [row for row in report["unresolved"] if row["want"] == "param_value"]
     assert blind["reason"] == "local_variable"
+
+
+def test_a_read_behind_has_parameter_is_a_checked_read():
+    source = """
+    void Node::configure() {
+      if (this->has_parameter("gain")) { auto g = this->get_parameter("gain").as_double(); }
+      auto w = this->get_parameter("watchdog").as_double();
+    }
+    """
+    unit = cpp.parse_text(source, path="guard.cpp")
+    cpp.analyse([unit])
+    apis = {item.name.value: item.api for item in unit.reads}
+    assert apis == {"gain": "get_parameter_checked", "watchdog": "get_parameter_accessor"}
