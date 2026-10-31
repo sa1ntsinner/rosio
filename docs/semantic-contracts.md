@@ -26,6 +26,16 @@ Unresolved custom types do not enter a wire compatibility comparison. This does 
 resolve a TypeAdapter mapping: such a mapping needs its own extracted evidence before a
 comparison can become definitive.
 
+## Parameter reads
+
+`param.read_undeclared` requires a read that raises on an undeclared name, rclcpp
+`get_parameter(name)` or rclpy `get_parameter(name)`, on a node whose code the join read in
+that profile. The read itself is not counted as a declaration, everything else that declares
+a name is: the node's bound code, the code it reaches, a generated parameter library and a
+known wrapper. A node built to take undeclared parameters, or one whose setting is not a
+literal, abstains, and so does a name a declaration built at run time could spell. A read
+guarded by `has_parameter` is not recognised and is still reported.
+
 ## Served snapshots
 
 Each MCP tool obtains one validated atlas object before answering. Every subsequent call
