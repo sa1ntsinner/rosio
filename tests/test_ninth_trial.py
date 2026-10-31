@@ -115,3 +115,28 @@ def test_a_frame_written_into_a_header_that_no_model_has_is_reported(tmp_path: P
     ]
     assert [item.subject for item in found] == ["file:p|p/cam.py"]
     assert "camera_link" in found[0].say
+
+
+# ---------------------------------------------------------------------------
+# a path does not run through a subscription the publisher's QoS never matches
+
+
+def test_a_path_does_not_cross_a_qos_refused_subscription(tmp_path: Path):
+    from rosio import query
+
+    head = "from rclpy.qos import QoSProfile, qos_profile_sensor_data\n"
+    atlas = python_workspace(
+        tmp_path,
+        {
+            "cam": head
+            + node("cam", "        self.create_publisher(Image, 'pts', qos_profile_sensor_data)\n"),
+            "mon": head
+            + node(
+                "mon",
+                "        self.create_subscription(Image, 'pts', self.cb, QoSProfile(depth=5))\n",
+            ),
+        },
+    )
+    answer = query.path(atlas, "/cam", "/mon")
+    assert answer.data["qos_cut"] is True
+    assert "publishes" not in {hop["kind"] for hop in answer.data["hops"]}
