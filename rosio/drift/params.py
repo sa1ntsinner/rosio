@@ -1,4 +1,4 @@
-"""The parameter rule family: seven rules over the candidate chain the declared layer built
+"""The parameter rule family: the rules over the candidate chain the declared layer built
 and the declarations the coded layer read.
 
 Every rule here is scoped to one profile, skips facts rosio was not sure about, and skips
