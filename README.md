@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>What your ROS 2 system really is, where its parts disagree, and which line to edit.</b><br>
-  <a href="https://sa1ntsinner.github.io/rosio">Site</a> ·
+  <a href="https://sa1ntsinner.github.io/rosio-site/">Site</a> ·
   <a href="https://github.com/sa1ntsinner/rosio/blob/main/docs/commands.md">Commands</a> ·
   <a href="https://github.com/sa1ntsinner/rosio/blob/main/docs/configuration.md">Configuration</a> ·
   <a href="https://github.com/sa1ntsinner/rosio/blob/main/docs/examples.md">Examples</a> ·
