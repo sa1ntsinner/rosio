@@ -897,8 +897,9 @@ def expand_xacro(
     """Run the xacro tool. A missing tool and a missing argument both raise, with the reason
     in the message, because a silently skipped model loses the whole frame tree.
 
-    `shares` names the packages a source root holds and no install root does, so a model in
-    an unbuilt workspace finds the description package beside it."""
+    `shares` names the share of every package the roots hold, the install share of a built
+    one and the source directory of an unbuilt one, so `$(find)` answers from the roots
+    whether or not the environment sources the install tree."""
     if not xacro_available():
         raise CollectorError(f"{path} needs the xacro tool, which is not on PATH", LAYER, NAME)
     command = _xacro_command(path, args, shares or {})
@@ -1009,7 +1010,7 @@ class UrdfCollector:
                 # want out of the atlas with nothing but a run exception row to show it.
                 exceptions.append(_exception_row(ctx, path, exc))
                 refusals.append((path, "urdf_unreadable", str(exc)))
-        shares = launch_exec.source_shares(ws)
+        shares = {**launch_exec.installed_shares(ws), **launch_exec.source_shares(ws)}
         for path in xacros:
             try:
                 scan = scan_xacro(path, resolve_package=ws.share)
@@ -1324,7 +1325,7 @@ def emit_loaded(
 
     A frame both expansions declare keeps the geometry the default expansion wrote, so the
     attribute does not depend on which pass ran first."""
-    shares = launch_exec.source_shares(ctx.ws)
+    shares = {**launch_exec.installed_shares(ctx.ws), **launch_exec.source_shares(ctx.ws)}
     found = parse_xacro_file(path, args, resolve_package=ctx.ws.share, shares=shares)
     try:
         default: UrdfModel | None = parse_xacro_file(
