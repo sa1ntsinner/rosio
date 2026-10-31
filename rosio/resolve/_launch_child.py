@@ -416,9 +416,109 @@ class _Frame:
         return _Frame(file, self.gates, self.path)
 
 
-class _ConstructionSites:
+class _MarkupLines:
+    """The line of every element an XML or YAML launch file holds.
+
+    The frontends parse with `xml.etree` and `yaml.safe_load`, which keep no line, so an
+    action built from such a file had none. The same parse is repeated here with expat and a
+    yaml loader that mark each element, and the frontend entity then names its own line.
+    """
+
     def __init__(self) -> None:
+        self.lines: dict[int, tuple[str, int]] = {}
+        self.held: list[Any] = []
+        self.originals: list[tuple[Any, Any]] = []
+
+    def install(self) -> None:
+        for module, reader in (
+            ("launch_xml.parser", self._xml),
+            ("launch_yaml.parser", self._yaml),
+        ):
+            try:
+                parser = __import__(module, fromlist=["Parser"]).Parser
+            except ImportError:
+                continue
+            self.originals.append((parser, parser.__dict__["load"]))
+            parser.load = classmethod(reader)
+
+    def restore(self) -> None:
+        for parser, original in self.originals:
+            parser.load = original
+
+    def mark(self, entity: Any) -> tuple[str, int] | None:
+        element = getattr(entity, "_Entity__xml_element", None)
+        if element is None:
+            element = getattr(entity, "_Entity__element", None)
+        return self.lines.get(id(element)) if element is not None else None
+
+    def _note(self, element: Any, path: str, line: int) -> None:
+        self.held.append(element)
+        self.lines[id(element)] = (path, line)
+
+    @staticmethod
+    def _text(file: Any) -> tuple[str, str]:
+        if isinstance(file, (str, bytes, os.PathLike)):
+            with Path(os.fsdecode(file)).open(encoding="utf-8") as handle:
+                return os.fsdecode(file), handle.read()
+        return str(getattr(file, "name", "")), file.read()
+
+    def _xml(self, parser_cls, file):
+        import xml.etree.ElementTree as ET
+        from xml.parsers import expat
+
+        from launch_xml.entity import Entity
+
+        path, text = self._text(file)
+        builder = ET.TreeBuilder()
+        reader = expat.ParserCreate()
+
+        def start(tag, attrs):
+            self._note(builder.start(tag, attrs), path, reader.CurrentLineNumber)
+
+        reader.StartElementHandler = start
+        reader.EndElementHandler = builder.end
+        reader.CharacterDataHandler = builder.data
+        try:
+            reader.Parse(text, True)
+        except expat.ExpatError as exc:
+            error = ET.ParseError(str(exc))
+            error.code, error.position = exc.code, (exc.lineno, exc.offset)
+            raise error from None
+        return Entity(builder.close()), parser_cls()
+
+    def _yaml(self, parser_cls, file):
+        import yaml
+        from launch_yaml.entity import Entity
+
+        path, text = self._text(file)
+        note = self._note
+
+        class Loader(yaml.SafeLoader):
+            pass
+
+        def mapping(loader, node):
+            data: dict[Any, Any] = {}
+            note(data, path, node.start_mark.line + 1)
+            yield data
+            data.update(loader.construct_mapping(node))
+            # `- node:` is the line of the action, and its mapping starts one line below
+            for key_node, value_node in node.value:
+                child = data.get(loader.construct_object(key_node))
+                if isinstance(value_node, yaml.MappingNode) and isinstance(child, dict):
+                    note(child, path, key_node.start_mark.line + 1)
+
+        Loader.add_constructor("tag:yaml.org,2002:map", mapping)
+        tree = yaml.load(text, Loader=Loader)
+        if len(tree) != 1:
+            raise RuntimeError("Expected only one root")
+        type_name = next(iter(tree))
+        return Entity(tree[type_name], type_name), parser_cls()
+
+
+class _ConstructionSites:
+    def __init__(self, markup: _MarkupLines) -> None:
         self.originals = []
+        self.markup = markup
 
     def install(self) -> None:
         from launch.action import Action
@@ -429,13 +529,18 @@ class _ConstructionSites:
             self.originals.append((cls, original))
             cls.__init__ = self._capture(original)
 
-    @staticmethod
-    def _capture(original):
+    def _capture(self, original):
+        markup = self.markup
+
         def construct(action, *args, **kwargs):
             lines = {}
             frame = sys._getframe(1)
             while frame is not None:
                 lines.setdefault(frame.f_code.co_filename, frame.f_lineno)
+                # an action a frontend builds names its line through the entity it parses
+                mark = markup.mark(frame.f_locals.get("entity"))
+                if mark is not None:
+                    lines.setdefault(*mark)
                 frame = frame.f_back
             original(action, *args, **kwargs)
             action._rosio_construction_lines = lines
@@ -750,7 +855,8 @@ class Walker:
             request.get("python_packages") or {}, request.get("python_sites") or ()
         )
         self.guard = _NoProcesses(sandbox=bool(request.get("sandbox")))
-        self.sites = _ConstructionSites()
+        self.markup = _MarkupLines()
+        self.sites = _ConstructionSites(self.markup)
         self.commands = _Commands()
         self.models = _ModelTexts()
         self._described_cache: dict[int, Any] = {}
@@ -795,6 +901,7 @@ class Walker:
         self.modules.install()
         self.guard.install()
         self.sites.install()
+        self.markup.install()
         self.commands.install()
         self.models.install()
         try:
@@ -809,6 +916,7 @@ class Walker:
         finally:
             self.models.restore()
             self.commands.restore()
+            self.markup.restore()
             self.sites.restore()
             self.guard.restore()
             self.modules.restore()

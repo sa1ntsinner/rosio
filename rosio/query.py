@@ -88,7 +88,14 @@ def label(entity_id: str) -> str:
         return parsed.segments[0]
     if parsed.kind == "launchent":
         entity = ids.parse_launchent(entity_id)
-        return f"{_short_path(entity.package, entity.relpath)} {parsed.segments[-1]}"
+        # an action of an included file is named by that file, the one it is written in
+        included = [
+            step[len("Include(") : -1]
+            for step in parsed.segments[2:-1]
+            if step.startswith("Include(") and step.endswith(")")
+        ]
+        where = included[-1] if included else _short_path(entity.package, entity.relpath)
+        return f"{where} {parsed.segments[-1]}"
     if parsed.kind == "launchfile":
         return file_label(ids.build_file(*ids.parse_launchfile(entity_id)))
     if parsed.kind == "pparam":

@@ -3009,3 +3009,30 @@ def test_a_missing_package_names_the_trees_it_searched_by_label(ws: Workspace) -
     assert "searched: the sourced setup files," in launch_declared.relabel_searched(ws, stated)
     assert launch_declared.missing_package("Node: \"package 'absent' not found\"") == ("absent", "")
     assert launch_declared.missing_package("'ROBOT_MODEL'") is None
+
+
+def test_a_node_of_an_xml_launch_file_cites_its_line(tmp_path: Path) -> None:
+    package = tmp_path / "src" / "xml_demo"
+    (package / "launch").mkdir(parents=True)
+    (package / "package.xml").write_text(
+        '<?xml version="1.0"?>\n<package format="3"><name>xml_demo</name><version>0.0.0'
+        "</version><description>d</description><maintainer email='a@b.c'>a</maintainer>"
+        "<license>Apache-2.0</license></package>\n",
+        encoding="utf-8",
+    )
+    (package / "launch" / "run.launch.xml").write_text(
+        '<launch>\n  <arg name="rate" default="1"/>\n\n'
+        '  <node pkg="demo_nodes_cpp" exec="talker" name="talker"/>\n</launch>\n',
+        encoding="utf-8",
+    )
+    workspace = Workspace.discover((RootSpec(kind="src", path=str(tmp_path / "src")),))
+    entry = Entrypoint(verb="launch", pkg="xml_demo", target="run.launch.xml")
+    atlas, _ctx = _run_profile(workspace, "xml", entry)
+    lines = {
+        row.line_hint
+        for entity in atlas.by_kind("launchent")
+        if entity.id.endswith("Node(talker)")
+        for fact in entity.facts
+        for row in fact.evidence
+    }
+    assert lines == {4}

@@ -1482,6 +1482,15 @@ at `info` and takes no part in other stamp checks or their reference medians. Ty
 zero stamp means start now produce no finding, mixed zero stamps keep their error, and each
 `time.*` fix names only its own check.
 
+Inside `1.31`, with no new key, an action of an XML or YAML launch file cites the line of its
+element (`<node` or `- node:`), which the frontends' own parsers do not keep, so the walk
+parses such a file a second time with expat or a marking yaml loader; a line hint is advisory
+and outside compared data. An action of an included file is named in prose by the file it is
+written in (`sensors.launch.yaml Node(camera)`) and no longer by the entry point, which moved
+the fingerprints of findings that name one. `rosio param` says when the code declares
+another type than the winning value, and `rosio path` takes no hop from a publisher's topic to
+a subscription whose QoS it can never match, and says so when that leaves no data route.
+
 A reader pinned to `1.0` still loads a `1.31` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
