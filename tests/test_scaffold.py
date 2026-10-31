@@ -79,8 +79,8 @@ def test_an_included_launch_file_that_needs_arguments_is_not_offered(workspace: 
     assert "  #     description_file: ''" in text
 
 
-def _including(name: str, through_variable: bool = False) -> str:
-    source = f'os.path.join(get_package_share_directory("bot_bringup"), "launch", "{name}")'
+def _including(name: str, through_variable: bool = False, package: str = "lx_bringup") -> str:
+    source = f'os.path.join(get_package_share_directory("{package}"), "launch", "{name}")'
     return (
         "import os\n"
         "from ament_index_python.packages import get_package_share_directory\n"
@@ -562,6 +562,112 @@ def test_init_comments_out_the_files_a_file_needing_no_argument_starts(
     assert text.count("# bot_bringup/robot.launch.xml includes and starts this one") == 3
     slugs = [item["slug"] for item in yaml.safe_load(text)["profiles"]]
     assert not any("part" in slug for slug in slugs)
+
+
+@pytest.mark.parametrize(
+    "suffix, source, hidden",
+    [
+        ("py", _including("part.launch.py", through_variable=True, package="bot_bringup"), True),
+        ("py", "IncludeLaunchDescription(PythonLaunchDescriptionSource('part.launch.py'))", True),
+        (
+            "py",
+            "IncludeLaunchDescription(PythonLaunchDescriptionSource('part.launch.py'), "
+            "launch_arguments={}.items())",
+            True,
+        ),
+        (
+            "py",
+            "IncludeLaunchDescription(PythonLaunchDescriptionSource('part.launch.py'), "
+            "condition=IfCondition('false'))",
+            False,
+        ),
+        (
+            "py",
+            "part = IncludeLaunchDescription(PythonLaunchDescriptionSource('part.launch.py'))\n"
+            "GroupAction([GroupAction([part])], condition=IfCondition('false'))",
+            False,
+        ),
+        (
+            "py",
+            "IncludeLaunchDescription(PythonLaunchDescriptionSource('part.launch.py'), "
+            "launch_arguments={'use_localization': 'False'}.items())",
+            False,
+        ),
+        (
+            "py",
+            "IncludeLaunchDescription(PythonLaunchDescriptionSource("
+            "PathJoinSubstitution([FindPackageShare('other'), 'launch', 'part.launch.py'])))",
+            False,
+        ),
+        (
+            "py",
+            "IncludeLaunchDescription(PythonLaunchDescriptionSource("
+            "PathJoinSubstitution([FindPackageShare('bot_bringup'), 'launch', 'part.launch.py'])))",
+            True,
+        ),
+        (
+            "py",
+            "IncludeLaunchDescription(PythonLaunchDescriptionSource("
+            "os.path.join(unknown, 'part.launch.py')))",
+            False,
+        ),
+        ("py", "PythonLaunchDescriptionSource('part.launch.py')", False),
+        (
+            "py",
+            "def elsewhere():\n    path = 'part.launch.py'\n"
+            "def generate_launch_description():\n"
+            "    return IncludeLaunchDescription(PythonLaunchDescriptionSource(path))\n",
+            False,
+        ),
+        ("xml", '<launch><include file="part.launch.py"/></launch>', True),
+        ("xml", '<launch><include file="part.launch.py" if="false"/></launch>', False),
+        (
+            "xml",
+            '<launch><group unless="true"><group><include file="part.launch.py"/>'
+            "</group></group></launch>",
+            False,
+        ),
+        (
+            "xml",
+            '<launch><include file="part.launch.py"><arg name="slam" value="false"/>'
+            "</include></launch>",
+            False,
+        ),
+        (
+            "xml",
+            '<launch><include file="$(find-pkg-share other)/launch/part.launch.py"/></launch>',
+            False,
+        ),
+        ("yaml", "launch:\n- include:\n    file: part.launch.py\n", True),
+        ("yaml", "launch:\n- include:\n    file: part.launch.py\n    unless: true\n", False),
+        (
+            "yaml",
+            "launch:\n- group:\n    if: false\n    children:\n    - include:\n"
+            "        file: part.launch.py\n",
+            False,
+        ),
+        (
+            "yaml",
+            "launch:\n- include:\n    file: part.launch.py\n"
+            "    arg:\n    - name: slam\n      value: 'false'\n",
+            False,
+        ),
+        (
+            "yaml",
+            "launch:\n- include:\n    file: $(find-pkg-share other)/launch/part.launch.py\n",
+            False,
+        ),
+    ],
+)
+def test_started_inside_requires_an_unconditional_include_without_arguments(
+    tmp_path: Path, suffix: str, source: str, hidden: bool
+) -> None:
+    workspace = _markup_workspace(tmp_path)
+    launch = workspace / "src" / "bot_bringup" / "launch"
+    (launch / f"top.launch.{suffix}").write_text(source, encoding="utf-8")
+    (launch / "part.launch.py").write_text("", encoding="utf-8")
+    inside = scaffold.started_inside(default_config(str(workspace)).profiles)
+    assert ("part" in inside) is hidden
 
 
 def test_a_top_level_file_its_simulators_include_stays_offered(

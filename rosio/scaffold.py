@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import re
+import xml.etree.ElementTree as ET
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from fnmatch import fnmatch
@@ -95,17 +96,24 @@ def top_level(cfg: Config) -> list[str]:
         f"{item.pkg}/{Path(item.target).name}"
         for profile in cfg.profiles
         for item in profile.entrypoints
-        if item.verb == "launch" and Path(item.target).name not in included
+        if item.verb == "launch" and _launch_key(item) not in included
     )
 
 
-def _included(profiles: Sequence[ProfileSpec]) -> dict[str, list[Entrypoint]]:
-    """The file names one launch file of the tree includes from another, read from the
-    include itself: `PythonLaunchDescriptionSource([..., "rrbot_base.launch.py"])`, the
-    variable such a source is handed, or the `file` of an xml or yaml include. A name a
-    comment mentions, or one that ends another name, includes nothing. Each name maps to the
-    entry points that include it."""
-    out: dict[str, list[Entrypoint]] = {}
+def _launch_key(entry: Entrypoint) -> tuple[str, Path]:
+    return entry.pkg, Path(entry.origin.path if entry.origin else entry.target).resolve()
+
+
+def _included(
+    profiles: Sequence[ProfileSpec], *, started_only: bool = False
+) -> dict[tuple[str, Path], list[Entrypoint]]:
+    """The files one launch file of the tree includes from another, by package and path,
+    read from the include itself: `PythonLaunchDescriptionSource([..., "rrbot_base.launch.py"])`,
+    the variable such a source is handed, or the `file` of an xml or yaml include. A path the
+    reader cannot follow includes nothing. With `started_only`, an include under a condition
+    or one that passes arguments is left out, because it does not start the file as it is.
+    Each key maps to the entry points that include it."""
+    out: dict[tuple[str, Path], list[Entrypoint]] = {}
     for profile in profiles:
         for item in profile.entrypoints:
             if item.verb != "launch" or item.origin is None:
@@ -115,10 +123,26 @@ def _included(profiles: Sequence[ProfileSpec]) -> dict[str, list[Entrypoint]]:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            spelled = _python_includes(text) if path.suffix == ".py" else _frontend_includes(text)
-            names = {re.split(r"[/\\]", value.strip())[-1] for value in spelled} - {path.name}
-            for name in sorted(names):
-                out.setdefault(name, []).append(item)
+            spelled = (
+                _python_includes(text, started_only)
+                if path.suffix == ".py"
+                else _frontend_includes(text, path.suffix, started_only)
+            )
+            for value in sorted(set(spelled)):
+                share = re.fullmatch(r"\$\(find-pkg-share ([\w]+)\)/(.*)", value)
+                if share:
+                    package, relative = share.groups()
+                    root = next((p for p in path.parents if (p / "package.xml").is_file()), None)
+                    if package != item.pkg or root is None:
+                        continue
+                    target = root / relative
+                else:
+                    if "$" in value or Path(value).is_absolute():
+                        continue
+                    target = path.parent / value
+                key = item.pkg, target.resolve()
+                if key != _launch_key(item):
+                    out.setdefault(key, []).append(item)
     return out
 
 
@@ -134,48 +158,181 @@ INCLUDE_CALLS = frozenset(
 )
 
 
-def _python_includes(text: str) -> list[str]:
+def _python_includes(text: str, started_only: bool = False) -> list[str]:
     try:
         tree = parse_python(text)
     except (SyntaxError, ValueError):
         return []
-    assigned: dict[str, list[ast.AST]] = {}
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+    def scope(node: ast.AST) -> ast.AST:
+        while not isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            node = parents[node]
+        return node
+
+    assigned: dict[tuple[ast.AST, str], list[ast.AST]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    assigned.setdefault(target.id, []).append(node.value)
+                    assigned.setdefault((scope(node), target.id), []).append(node.value)
+
+    def values(node: ast.Name) -> list[ast.AST]:
+        owner = scope(node)
+        while True:
+            if (owner, node.id) in assigned:
+                return assigned[owner, node.id]
+            if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) and any(
+                isinstance(arg, ast.arg) and arg.arg == node.id for arg in ast.walk(owner.args)
+            ):
+                return []
+            if owner not in parents:
+                return []
+            owner = scope(parents[owner])
+
+    def called(node: ast.AST) -> str:
+        if not isinstance(node, ast.Call):
+            return ""
+        return ast.unparse(node.func)
+
+    def resolve(node: ast.AST, seen: frozenset[str] = frozenset()) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name) and node.id not in seen:
+            found = values(node)
+            return resolve(found[0], seen | {node.id}) if len(found) == 1 else None
+        if isinstance(node, (ast.List, ast.Tuple)):
+            parts = [resolve(part, seen) for part in node.elts]
+            return "".join(parts) if all(part is not None for part in parts) else None
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = resolve(node.left, seen), resolve(node.right, seen)
+            return left + right if left is not None and right is not None else None
+        if isinstance(node, ast.JoinedStr):
+            parts = [
+                resolve(part.value if isinstance(part, ast.FormattedValue) else part, seen)
+                for part in node.values
+            ]
+            return "".join(parts) if all(part is not None for part in parts) else None
+        name = called(node)
+        if name == "ThisLaunchFileDir" and not node.args:
+            return "."
+        if not isinstance(node, ast.Call) or node.keywords:
+            return None
+        if (
+            name == "os.path.dirname"
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == "__file__"
+        ):
+            return "."
+        if name in {"get_package_share_directory", "FindPackageShare"} and len(node.args) == 1:
+            package = node.args[0]
+            if isinstance(package, ast.Constant) and isinstance(package.value, str):
+                return f"$(find-pkg-share {package.value})"
+        if name in INCLUDE_CALLS - {"IncludeLaunchDescription"} and len(node.args) == 1:
+            return resolve(node.args[0], seen)
+        if name == "os.path.join" or name == "PathJoinSubstitution":
+            args = node.args
+            if name == "PathJoinSubstitution":
+                if len(args) != 1 or not isinstance(args[0], (ast.List, ast.Tuple)):
+                    return None
+                args = args[0].elts
+            parts = [resolve(part, seen) for part in args]
+            if parts and all(part is not None for part in parts):
+                return Path(parts[0]).joinpath(*parts[1:]).as_posix()
+        return None
+
+    def empty_arguments(node: ast.AST, seen: frozenset[str] = frozenset()) -> bool:
+        if isinstance(node, ast.Name) and node.id not in seen:
+            found = values(node)
+            return len(found) == 1 and empty_arguments(found[0], seen | {node.id})
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return not node.elts
+        if isinstance(node, ast.Dict):
+            return not node.keys
+        if isinstance(node, ast.Call) and called(node).endswith(".items"):
+            return not node.args and not node.keywords and empty_arguments(node.func.value, seen)
+        return isinstance(node, ast.Constant) and node.value is None
+
+    blocked: set[ast.AST] = set()
+    if started_only:
+        pending = [
+            node
+            for node in ast.walk(tree)
+            if called(node).split(".")[-1] == "GroupAction"
+            and any(key.arg in {"condition", None} for key in node.keywords)
+        ]
+        while pending:
+            node = pending.pop()
+            if node in blocked:
+                continue
+            blocked.add(node)
+            pending.extend(ast.iter_child_nodes(node))
+            if isinstance(node, ast.Name):
+                pending.extend(values(node))
     out: list[str] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+        if called(node).split(".")[-1] != "IncludeLaunchDescription" or node in blocked:
             continue
-        called = node.func.attr if isinstance(node.func, ast.Attribute) else ""
-        called = node.func.id if isinstance(node.func, ast.Name) else called
-        if called not in INCLUDE_CALLS:
+        keywords = {key.arg: key.value for key in node.keywords}
+        if None in keywords or (started_only and "condition" in keywords):
             continue
-        pending: list[ast.AST] = [*node.args, *(item.value for item in node.keywords)]
-        seen: set[str] = set()
-        while pending:
-            part = pending.pop()
-            if isinstance(part, ast.Name) and part.id not in seen:
-                seen.add(part.id)
-                pending.extend(assigned.get(part.id, []))
-                continue
-            for inner in ast.walk(part):
-                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
-                    out.append(inner.value)
-                elif isinstance(inner, ast.Name) and inner.id not in seen:
-                    pending.append(inner)
+        if (
+            started_only
+            and "launch_arguments" in keywords
+            and not empty_arguments(keywords["launch_arguments"])
+        ):
+            continue
+        if len(node.args) > 1:
+            continue
+        source = node.args[0] if node.args else keywords.get("launch_description_source")
+        value = resolve(source) if source is not None else None
+        if value:
+            out.append(value)
     return out
 
 
-def _frontend_includes(text: str) -> list[str]:
-    return re.findall(r"<include\b[^>]*?\bfile\s*=\s*[\"']([^\"']+)", text) + re.findall(
-        r"\binclude:\s*\n\s*file:\s*[\"']?([^\"'\n]+)", text
-    )
+def _frontend_includes(text: str, suffix: str, started_only: bool = False) -> list[str]:
+    out: list[str] = []
+
+    def xml(node: ET.Element, blocked: bool = False) -> None:
+        blocked |= node.tag in {"include", "group"} and bool({"if", "unless"} & node.attrib.keys())
+        if node.tag == "include" and not (started_only and (blocked or len(node))):
+            out.append(node.get("file", ""))
+        for child in node:
+            xml(child, blocked)
+
+    def markup(node: object, blocked: bool = False) -> None:
+        if isinstance(node, list):
+            for child in node:
+                markup(child, blocked)
+        elif isinstance(node, dict):
+            for kind, body in node.items():
+                if kind in {"include", "group"} and isinstance(body, dict):
+                    gated = blocked or bool({"if", "unless"} & body.keys())
+                    if kind == "include" and not (
+                        started_only and (gated or body.get("arg") or body.get("args"))
+                    ):
+                        value = body.get("file")
+                        if isinstance(value, str):
+                            out.append(value)
+                    markup(body, gated)
+                else:
+                    markup(body, blocked)
+
+    try:
+        if suffix in {".yaml", ".yml"}:
+            markup(yaml.safe_load(text))
+        else:
+            xml(ET.fromstring(text))
+    except (ET.ParseError, yaml.YAMLError):
+        return []
+    return [value for value in out if value]
 
 
-def _include_only(entry: Entrypoint, included: Mapping[str, Sequence[Entrypoint]]) -> bool:
+def _include_only(
+    entry: Entrypoint, included: Mapping[tuple[str, Path], Sequence[Entrypoint]]
+) -> bool:
     """A launch file that cannot start without arguments, included by a file that does not
     ask for them itself: that includer is how it runs, so as a profile it only raises.
 
@@ -190,9 +347,8 @@ def _include_only(entry: Entrypoint, included: Mapping[str, Sequence[Entrypoint]
     if not required:
         return False
     return any(
-        Path(includer.origin.path).name in included
-        or not required & set(_required_arguments(includer))
-        for includer in included.get(Path(entry.origin.path).name, ())
+        _launch_key(includer) in included or not required & set(_required_arguments(includer))
+        for includer in included.get(_launch_key(entry), ())
         if includer.origin is not None
     )
 
@@ -274,10 +430,10 @@ def render(cfg: Config, base: Path) -> str:
 
 def started_inside(profiles: Sequence[ProfileSpec]) -> dict[str, str]:
     """Slug to the offered file of the same package that includes this profile's launch file
-    and starts with no argument, through an OpaqueFunction or plainly. Read as a profile of its
-    own, such a file restates every finding of the file that starts it, so it is written
-    commented out."""
-    included = _included(profiles)
+    with no condition and no argument, and starts with no argument itself. Read as a profile of
+    its own, such a file restates every finding of the file that starts it, so it is written
+    commented out. An include under a condition or with arguments starts something else."""
+    included = _included(profiles, started_only=True)
     runs = {
         id(item): f"{item.pkg}/{Path(item.target).name}"
         for profile in profiles
@@ -293,7 +449,7 @@ def started_inside(profiles: Sequence[ProfileSpec]) -> dict[str, str]:
             continue
         starters = sorted(
             runs[id(includer)]
-            for includer in included.get(Path(entry.origin.path).name, ())
+            for includer in included.get(_launch_key(entry), ())
             if id(includer) in runs and includer.pkg == entry.pkg
         )
         if starters:
