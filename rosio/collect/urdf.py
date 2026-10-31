@@ -748,6 +748,41 @@ def _xacro_namespace(tag: object) -> str | None:
     return next((namespace for namespace in XACRO_NAMESPACES if tag.startswith(namespace)), None)
 
 
+def unread_xacro_args(
+    path: str, args: Sequence[tuple[str, str]], resolve_package: PackageResolver | None = None
+) -> list[list[str]]:
+    """[name, closest declared name] for every argument a launch line hands xacro that no
+    file of the model declares or reads. Empty, which is undecided, when a file of the model
+    cannot be read or an include does not resolve, since that file could declare it."""
+    import difflib
+
+    declared: set[str] = set()
+    used: set[str] = set()
+    pending, seen = [path], set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        try:
+            scanned = scan_xacro(current, resolve_package=resolve_package)
+            text = Path(current).read_text(encoding="utf-8", errors="replace")
+        except (CollectorError, OSError):
+            return []
+        if any(not item.resolved for item in scanned.includes):
+            return []
+        declared.update(name for name, _default in scanned.args)
+        used.update(_ARG_USE.findall(text))
+        pending.extend(item.resolved for item in scanned.includes if item.resolved)
+    passed = {name for name, _value in args}
+    candidates = sorted(declared - passed)
+    out = []
+    for name in sorted(passed - declared - used):
+        close = difflib.get_close_matches(name, candidates, n=1, cutoff=0.6)
+        out.append([name, close[0] if close else ""])
+    return out
+
+
 def scan_xacro(path: str, *, resolve_package: PackageResolver | None = None) -> XacroFile:
     """Static read of one xacro file. Expansion is the tool's job, not this function's."""
     try:

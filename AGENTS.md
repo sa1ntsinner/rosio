@@ -1023,7 +1023,8 @@ What was added, in the order it arrived:
   that writes the name, and `arg_lines`, the line of the including file that
   writes an argument's literal value when that is not the include line; the blind spot reason
   `component_class_unregistered`, a composable node whose `plugin=` no component registration
-  of the workspace names; on a `library_targets` row `components`, the classes an
+  of the workspace names; on a `file_reads` row of role `robot_model` `args_unread`, the xacro arguments
+  the launch line passes that no file of the model declares or reads; on a `library_targets` row `components`, the classes an
   `rclcpp_components_register_nodes` line of the build registers for that target; and a declared `publishes` edge from a launch
   `static_transform_publisher` to `/tf_static`, marked `via_known_wrapper` like the one a
   `ros2 run` publisher has.
@@ -1590,6 +1591,10 @@ so a passed argument is also visible to later actions of the including descripti
 rule also requires that no later action of the including file reads the name.
 ROS 2 accepts such an argument without a word and the included file runs on its own
 default, so the value goes nowhere. It is not `launch.raised`: nothing raises.
+An argument a launch line hands `xacro` for a robot model is the same question: the
+`file_reads` row of the model carries `args_unread` when no file of the model or its
+includes declares or reads the name, and nothing is decided when an include does not
+resolve.
 
 `frame.broadcast_twice` is `warn`. It fires once per child frame and profile that two nodes
 broadcast, from declared or coded facts that state both frames as literals and sit under no

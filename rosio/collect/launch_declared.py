@@ -2354,6 +2354,10 @@ def _read_values(ctx: CollectContext, node: records.ResolvedNode) -> list[dict[s
         row: dict[str, Any] = {"file": file_id, "role": read.role}
         if read.xacro_args:
             row["xacro_args"] = ctx.ws.stated_value([list(pair) for pair in read.xacro_args])
+            if read.role == "robot_model":
+                unread = urdf.unread_xacro_args(read.path, read.xacro_args, ctx.ws.share)
+                if unread:
+                    row["args_unread"] = [{"name": a, "closest": b} for a, b in unread]
         # A model read both as text and through its command is one read, with its arguments.
         if len(row) >= len(out.get((file_id, read.role), {})):
             out[(file_id, read.role)] = row

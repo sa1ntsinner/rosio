@@ -1523,7 +1523,14 @@ def launch_argument_undeclared(atlas: Atlas) -> list[Finding]:
         for fact in entity.facts:
             if not rules.usable(fact) or not fact.evidence:
                 continue
-            for item in fact.values.get("args_unread") or []:
+            # A model the launch line expands with xacro arguments is the same question.
+            rows = [
+                {**item, "into": read.get("file")}
+                for read in fact.values.get("file_reads") or []
+                if isinstance(read, dict)
+                for item in read.get("args_unread") or []
+            ]
+            for item in [*(fact.values.get("args_unread") or []), *rows]:
                 name = str(item.get("name") or "")
                 written = fact.evidence[0]
                 if item.get("line_hint"):
@@ -1540,14 +1547,16 @@ def launch_argument_undeclared(atlas: Atlas) -> list[Finding]:
                 )
                 row["profiles"].add(fact.profile)
                 row["where"].add(written)
-                row["into"].add(str(fact.values.get("included_file") or ""))
+                row["into"].add(str(item.get("into") or fact.values.get("included_file") or ""))
     findings = []
     for (file_id, name), row in sorted(groups.items()):
         launchfile = ids.build_launchfile(*ids.parse_file(file_id))
         where = sorted(row["where"], key=Source.sort_key)
         at = rules.where(where[0])
         into = ", ".join(
-            rules.path_of(ids.build_file(*ids.parse_launchfile(item)))
+            rules.path_of(
+                item if ids.kind_of(item) == "file" else ids.build_file(*ids.parse_launchfile(item))
+            )
             for item in sorted(row["into"])
             if item
         )
@@ -1564,9 +1573,9 @@ def launch_argument_undeclared(atlas: Atlas) -> list[Finding]:
                 else row["site"],
                 title=f"{at} passes {name} to {into}, which never reads it",
                 detail=(
-                    f"{at} includes {into} with the argument {name}, and no file of the "
-                    f"included tree declares or reads {name}{meant}. The value goes nowhere "
-                    "and the included files run on their own defaults."
+                    f"{at} hands {into} the argument {name}, and no file it includes or "
+                    f"expands declares or reads {name}{meant}. The value goes nowhere "
+                    "and those files run on their own defaults."
                 ),
                 fix=(
                     f"Rename {name} to {closest} at {at}."
