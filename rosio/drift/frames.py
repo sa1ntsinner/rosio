@@ -1142,6 +1142,24 @@ def _published_frames(atlas: Atlas, broadcast: dict[str, set[str]]) -> dict[str,
     return out
 
 
+_TF_TOPICS = ("/tf", "/tf_static")
+
+
+def _tf_trees(atlas: Atlas) -> dict[tuple[str, str], tuple[str, ...]]:
+    """The tf topics each node writes in each profile, after its remaps: two robots that remap
+    /tf into their own namespace hold two trees, and one child frame in each is no clash."""
+    from rosio import join
+
+    out: dict[tuple[str, str], tuple[str, ...]] = {}
+    for item in join.instances(atlas):
+        names = []
+        for topic in _TF_TOPICS:
+            found = join.apply_remaps(topic, item.namespace, item.name, item.remaps)
+            names.append(found.name if found else topic)
+        out[(item.node_id, item.profile)] = tuple(names)
+    return out
+
+
 @rules.register("frame.broadcast_twice")
 def frame_broadcast_twice(atlas: Atlas) -> list[Finding]:
     """One child frame two nodes broadcast in one profile.
@@ -1152,7 +1170,8 @@ def frame_broadcast_twice(atlas: Atlas) -> list[Finding]:
     two sites of one node are one broadcaster (section 5 cites one node broadcasting a pair
     from two methods).
     """
-    sites: dict[tuple[str, str], dict[str, list[tuple[str, LayerFact]]]] = {}
+    sites: dict[tuple[str, str, tuple[str, ...]], dict[str, list[tuple[str, LayerFact]]]] = {}
+    trees = _tf_trees(atlas)
     for handle in sorted(atlas.edges):
         edge = atlas.edges[handle]
         if edge.kind != model.EdgeKind.BROADCASTS_TF.value:
@@ -1165,10 +1184,11 @@ def frame_broadcast_twice(atlas: Atlas) -> list[Finding]:
             parent = _frame_name(fact.values.get("parent"))
             if not parent or any(key.endswith("_from_parameter") for key in fact.values):
                 continue
-            by_node = sites.setdefault((fact.profile, edge.dst), {})
+            tree = trees.get((edge.src, fact.profile), _TF_TOPICS)
+            by_node = sites.setdefault((fact.profile, edge.dst, tree), {})
             by_node.setdefault(edge.src, []).append((parent, fact))
     findings = []
-    for (profile, frame), by_node in sorted(sites.items()):
+    for (profile, frame, tree), by_node in sorted(sites.items()):
         if len(by_node) < 2:
             continue
         child = _frame_text(frame)
@@ -1201,7 +1221,7 @@ def frame_broadcast_twice(atlas: Atlas) -> list[Finding]:
                     f"{child} is broadcast by {', '.join(told)} in {rules.slug_of(profile)}, so "
                     f"its transform flips between them; keep one, see {lines}."
                 ),
-                discriminator=_disc(profile),
+                discriminator=_disc(profile) if tree == _TF_TOPICS else _disc(profile, *tree),
                 profiles=[profile],
                 layers=sorted({fact.layer for *_head, fact in rows}),
                 where=where,

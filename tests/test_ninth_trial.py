@@ -32,3 +32,20 @@ def test_a_frame_nothing_could_broadcast_still_has_no_publisher(tmp_path: Path):
     )
     found = findings(atlas, "frame.no_publisher")
     assert [item.subject for item in found] == [ids.build_frame("base_footprint")]
+
+
+# ---------------------------------------------------------------------------
+# two robots that remap /tf into their own namespace hold two trees
+
+ROBOT_STATIC = (
+    'Node(package="tf2_ros", executable="static_transform_publisher", name="laser_tf", '
+    'namespace="{0}", remappings=[("/tf", "tf"), ("/tf_static", "tf_static")], '
+    'arguments=["--frame-id", "base_link", "--child-frame-id", "laser"])'
+)
+
+
+def test_one_frame_in_two_namespaced_tf_trees_is_not_broadcast_twice(tmp_path: Path):
+    atlas = python_workspace(
+        tmp_path, {}, ROBOT_STATIC.format("robot1"), ROBOT_STATIC.format("robot2")
+    )
+    assert findings(atlas, "frame.broadcast_twice") == []

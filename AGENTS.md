@@ -1586,7 +1586,9 @@ broadcast, from declared or coded facts that state both frames as literals and s
 condition. tf2 holds one transform per child, so the frame takes whichever arrived last, which
 is what two robots without a frame prefix, or one frame published with two parents, look like.
 Two sites of one node are one broadcaster (section 5 cites one node broadcasting a pair from
-two methods). It is not `frame.parent_differs`, which compares the robot models of the
+two methods). Two nodes whose remaps send `/tf` and `/tf_static` to different topics write
+two trees, the way two robots in their own namespaces do, so one child frame in each is no
+clash. It is not `frame.parent_differs`, which compares the robot models of the
 profiles with each other.
 
 A composable node whose `plugin=` names a class that no `rclcpp_components` registration or
