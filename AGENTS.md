@@ -1490,7 +1490,12 @@ and outside compared data. An action of an included file is named in prose by th
 written in (`sensors.launch.yaml Node(camera)`) and no longer by the entry point, which moved
 the fingerprints of findings that name one. `rosio param` says when the code declares
 another type than the winning value, and `rosio path` takes no hop from a publisher's topic to
-a subscription whose QoS it can never match, and says so when that leaves no data route.
+a subscription whose QoS it can never match, and says so when that leaves no data route. A
+`static_transform_publisher` a profile starts with `ros2 run` states its frames, its
+`broadcasts_tf` edge and its `/tf_static` publisher the way a launched one does, keyed by the
+entry point. A python action name the reader could not follow is a blind spot under the want
+`action_name`, as the C++ reader files it, where it was `other`, which moved the ids of those
+entries and lets a missing action server say it was not found rather than absent.
 
 A reader pinned to `1.0` still loads a `1.31` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re

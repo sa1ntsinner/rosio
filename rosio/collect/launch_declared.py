@@ -1033,71 +1033,15 @@ class LaunchDeclaredCollector:
     def _emit_static_transform(
         self, ctx: CollectContext, spec: ProfileSpec, run: str, row: _Placed
     ) -> None:
-        """The frame pair a static_transform_publisher is started with, as a broadcast.
-
-        Its arguments are the parameters its node reads, so a pair both arguments spell as
-        literals is what the node broadcasts on /tf_static. Only the broadcast is stated: the
-        geometry stays with the parameters.
-        """
-        found = ros_args.program_assignments(row.node.pkg, row.node.executable, row.node.argv)
-        try:
-            parent = ids.normalise_frame(found.get("frame_id", ("", ""))[0])
-            child = ids.normalise_frame(found.get("child_frame_id", ("", ""))[0])
-        except ContractError:
-            return
-        if "$(" in parent + child or parent == child:
-            return
-        profile_id = ids.build_profile(spec.slug)
-        builder = ctx.builder
-        for frame in (parent, child):
-            frame_id = ids.build_frame(frame)
-            builder.node(frame_id)
-            builder.fact(
-                frame_id,
-                LAYER,
-                profile=profile_id,
-                run=run,
-                values={"name": frame},
-                confidence=row.confidence,
-                evidence=[row.source],
-            )
-        builder.edge(
-            model.EdgeKind.BROADCASTS_TF.value,
+        _static_pair(
+            ctx,
+            spec,
+            run,
+            row.node,
             row.identity.node_id,
-            ids.build_frame(child),
-            key=ids.edge_key(
-                launchent=row.launchent_id, profile=spec.slug, pair=f"{parent}>{child}"
-            ),
-            layer=LAYER,
-            profile=profile_id,
-            run=run,
-            values={
-                "parent": parent,
-                "child": child,
-                "static": True,
-                "source": "static_transform_publisher",
-            },
-            confidence=row.confidence,
-            evidence=[row.source],
-        )
-        # The broadcast goes out on /tf_static, so the graph has its publisher.
-        topic = ids.build_topic("/tf_static")
-        builder.node(topic)
-        builder.edge(
-            model.EdgeKind.PUBLISHES.value,
-            row.identity.node_id,
-            topic,
-            key=ids.edge_key(launchent=row.launchent_id, profile=spec.slug, topic="/tf_static"),
-            layer=LAYER,
-            profile=profile_id,
-            run=run,
-            values={
-                "raw_name": "/tf_static",
-                "type": "tf2_msgs/msg/TFMessage",
-                "via_known_wrapper": True,
-            },
-            confidence=row.confidence,
-            evidence=[row.source],
+            {"launchent": row.launchent_id},
+            [row.source],
+            row.confidence,
         )
 
     def _emit_site(
@@ -1202,6 +1146,16 @@ class LaunchDeclaredCollector:
                 }
             )
             return
+        _static_pair(
+            ctx,
+            spec,
+            run,
+            node,
+            identity.node_id,
+            {"entry": row.entry},
+            evidence[:1],
+            model.Confidence.RESOLVED.value,
+        )
         if identity.fqn:
             builder.count_resolved(model.Want.NODE_NAME.value)
             return
@@ -1477,6 +1431,83 @@ def _name_node(builder: model.AtlasBuilder, node_id: str, offered: str | None) -
 
 # ---------------------------------------------------------------------------
 # run entry points
+
+
+def _static_pair(
+    ctx: CollectContext,
+    spec: ProfileSpec,
+    run: str,
+    node: Any,
+    node_id: str,
+    site: dict[str, str],
+    evidence: list[model.Source],
+    confidence: str,
+) -> None:
+    """The frame pair a static_transform_publisher is started with, as a broadcast.
+
+    Its arguments are the parameters its node reads, so a pair both arguments spell as
+    literals is what the node broadcasts on /tf_static. Only the broadcast is stated: the
+    geometry stays with the parameters. `site` keys the edges on the launch site or the
+    `ros2 run` entry point that starts the node.
+    """
+    found = ros_args.program_assignments(node.pkg, node.executable, node.argv)
+    try:
+        parent = ids.normalise_frame(found.get("frame_id", ("", ""))[0])
+        child = ids.normalise_frame(found.get("child_frame_id", ("", ""))[0])
+    except ContractError:
+        return
+    if "$(" in parent + child or parent == child:
+        return
+    profile_id = ids.build_profile(spec.slug)
+    builder = ctx.builder
+    for frame in (parent, child):
+        frame_id = ids.build_frame(frame)
+        builder.node(frame_id)
+        builder.fact(
+            frame_id,
+            LAYER,
+            profile=profile_id,
+            run=run,
+            values={"name": frame},
+            confidence=confidence,
+            evidence=evidence,
+        )
+    builder.edge(
+        model.EdgeKind.BROADCASTS_TF.value,
+        node_id,
+        ids.build_frame(child),
+        key=ids.edge_key(**site, profile=spec.slug, pair=f"{parent}>{child}"),
+        layer=LAYER,
+        profile=profile_id,
+        run=run,
+        values={
+            "parent": parent,
+            "child": child,
+            "static": True,
+            "source": "static_transform_publisher",
+        },
+        confidence=confidence,
+        evidence=evidence,
+    )
+    # The broadcast goes out on /tf_static, so the graph has its publisher.
+    topic = ids.build_topic("/tf_static")
+    builder.node(topic)
+    builder.edge(
+        model.EdgeKind.PUBLISHES.value,
+        node_id,
+        topic,
+        key=ids.edge_key(**site, profile=spec.slug, topic="/tf_static"),
+        layer=LAYER,
+        profile=profile_id,
+        run=run,
+        values={
+            "raw_name": "/tf_static",
+            "type": "tf2_msgs/msg/TFMessage",
+            "via_known_wrapper": True,
+        },
+        confidence=confidence,
+        evidence=evidence,
+    )
 
 
 def _run_entry(ctx: CollectContext, spec: ProfileSpec, entry: Entrypoint) -> _RunNode:

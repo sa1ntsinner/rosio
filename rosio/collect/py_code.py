@@ -43,6 +43,7 @@ SUFFIXES = (".py",)
 WANTS = (
     "topic_name",
     "service_name",
+    "action_name",
     "node_name",
     "param_name",
     "param_value",
@@ -2039,7 +2040,7 @@ class PyFile:
         if name is None:
             return
         kind_of = args[type_index] if len(args) > type_index else self._keyword(node, "action_type")
-        record = self._named_endpoint(kind, "other", name, kind_of, ctx, node)
+        record = self._named_endpoint(kind, "action_name", name, kind_of, ctx, node)
         record["qos"] = None
         self.endpoints.append(record)
 
