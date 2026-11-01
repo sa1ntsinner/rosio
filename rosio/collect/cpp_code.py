@@ -2332,7 +2332,11 @@ class _Reader:
             self._declare(name, declare, node)
             return
         if name in WRITE_CALLS and arguments:
-            self._write(arguments[0], node)
+            # a parameters client sets the parameters of the node it was made for, which
+            # need not be this one
+            receiver = _call_parts(node, self.src)[1]
+            if receiver is None or _is_node_handle(receiver, self.src):
+                self._write(arguments[0], node)
             return
         if name == PREFIX_READ and arguments:
             # every parameter under the prefix is read back; a prefix the reader cannot
