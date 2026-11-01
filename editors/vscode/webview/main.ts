@@ -417,6 +417,8 @@ function lead(entity: Entity): string {
     const shadowed = losers ? ` It wins over ${plural(losers, "other value")}.` : "";
     return `${render(chosen.value)}, from ${how(chosen)} in ${sourceText(chosen)}.${shadowed}`;
   }
+  const ignored = entity.kind === "param" && !chosen && entity.candidates?.find((candidate) => candidate.note)?.note;
+  if (ignored) return `No value wins: ${ignored}.`;
   if (entity.kind === "node") {
     const described = describeNode(entity);
     if (described) return described;
@@ -478,7 +480,7 @@ function parameterChain(entity: Entity): HTMLElement | null {
               h("td", { class: "value" }, render(candidate.value)),
               h("td", {}, how(candidate)),
               h("td", { class: "value" }, openLink(sourceText(candidate), candidate.at)),
-              h("td", {}, candidate.wins ? "wins" : LOST[candidate.shadow_kind ?? ""] ?? "loses"),
+              h("td", {}, candidate.wins ? "wins" : LOST[candidate.shadow_kind ?? ""] ?? candidate.note ?? "loses"),
             ),
           ),
       ),

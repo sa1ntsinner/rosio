@@ -182,10 +182,38 @@ impl Atlas {
                     .insert(id.clone());
             }
         }
+        // A parameter finding about a whole file is also about each parameter a cited line sets.
+        let mut set_at: BTreeMap<(&str, u64), Vec<&str>> = BTreeMap::new();
+        for (id, entity) in &atlas.entities {
+            for candidate in entity["candidates"].as_array().into_iter().flatten() {
+                let source = &candidate["source"];
+                if let (Some(file), Some(line)) =
+                    (source["file"].as_str(), source["line_hint"].as_u64())
+                {
+                    let ids = set_at.entry((file, line)).or_default();
+                    if !ids.contains(&id.as_str()) {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
         let mut subjects: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         for (position, finding) in atlas.findings.iter().enumerate() {
             let about = &finding["about"];
             let mut about_ids = vec![string(about, "entity")];
+            if finding.fields.rule.starts_with("param.") && about_ids[0].starts_with("file:") {
+                for row in finding.fields.locations.iter() {
+                    if let Some(line) = row.line_hint {
+                        about_ids.extend(
+                            set_at
+                                .get(&(row.file.as_str(), u64::from(line)))
+                                .into_iter()
+                                .flatten()
+                                .copied(),
+                        );
+                    }
+                }
+            }
             let edge = &about["edge"];
             if edge.is_object() {
                 about_ids.extend(
@@ -300,6 +328,21 @@ mod tests {
         assert_eq!(touching("topic:/t"), ["e1", "e2"]);
         assert_eq!(touching("node:/a"), ["e2", "e3"]);
         assert!(touching("node:/c").is_empty());
+    }
+    #[test]
+    fn a_parameter_finding_about_a_file_is_also_about_the_parameters_its_lines_set() {
+        let atlas = Atlas::parse(
+            r#"{"schema_version":"1.34","entities":{
+            "param:/n|a":{"kind":"param","candidates":[{"source":{"file":"file:p|c.yaml","line_hint":9}}]},
+            "param:/n|b":{"kind":"param","candidates":[{"source":{"file":"file:p|c.yaml","line_hint":4}}]}},
+            "findings":[
+            {"id":"f1","rule":"param.set_undeclared","about":{"entity":"file:p|c.yaml"},"where":[{"file":"file:p|c.yaml","line_hint":9}]},
+            {"id":"f2","rule":"remap.unresolved","about":{"entity":"file:p|c.yaml"},"where":[{"file":"file:p|c.yaml","line_hint":4}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(atlas.findings_for("param:/n|a").len(), 1);
+        assert!(atlas.findings_for("param:/n|b").is_empty());
+        assert_eq!(atlas.findings_for("file:p|c.yaml").len(), 2);
     }
     #[test]
     fn fixture() {
