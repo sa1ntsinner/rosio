@@ -676,6 +676,25 @@ def test_a_refused_region_costs_the_file_nothing_but_a_blind_spot(tmp_path: Path
     assert [item.name.value for item in unit.endpoints] == ["/fx/out"]
 
 
+@needs_cpp
+def test_generic_services_and_clients_take_the_type_string(tmp_path: Path) -> None:
+    source = tmp_path / "generic.cpp"
+    source.write_text(
+        "class G : public rclcpp::Node {\n"
+        '  G() : rclcpp::Node("g") {\n'
+        '    s_ = create_generic_service("reset", "std_srvs/srv/Trigger", cb);\n'
+        '    c_ = create_generic_client("other", "std_srvs/srv/Empty");\n'
+        "  }\n"
+        "};\n",
+        encoding="utf-8",
+    )
+    unit = cpp.parse_file(str(source), pkg="g", relpath="src/generic.cpp")
+    assert [(e.kind, e.name.value, e.type_text) for e in unit.endpoints] == [
+        ("service_server", "reset", "std_srvs::srv::Trigger"),
+        ("service_client", "other", "std_srvs::srv::Empty"),
+    ]
+
+
 def test_a_refused_region_is_a_blind_spot_only_when_it_holds_a_ros_call() -> None:
     """`"%" PRId64` in a format string and a visibility macro before a function are refused
     by the grammar and hide nothing; a refused region around a publisher hides the

@@ -1648,7 +1648,8 @@ parameter under the prefix in both readers, so `param.declared_unread` no longer
 them. C++ `waitForTransform` and python `lookup_transform_full`, `can_transform_full` and
 the `_async` forms are transform reads, the `_full` forms taking the source from the third
 argument. C++ `create_generic_client` is a service client whose type is the string second
-argument. No release had shipped, so no stored id or waiver existed.
+argument. `create_generic_service`, which kilted added, is the server of the same
+shape. No release had shipped, so no stored id or waiver existed.
 
 Inside `1.33`, with no new key, two python reads moved after a generated workspace ran on
 jazzy and its live graph disagreed with the atlas. An f-string that starts with a parameter

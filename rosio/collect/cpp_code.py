@@ -73,10 +73,16 @@ PUBLISH_CALLS = frozenset(
 )
 SUBSCRIBE_CALLS = frozenset({"create_subscription", "create_generic_subscription"})
 GENERIC_CALLS = frozenset(
-    {"create_generic_publisher", "create_generic_subscription", "create_generic_client"}
+    {
+        "create_generic_publisher",
+        "create_generic_subscription",
+        "create_generic_client",
+        "create_generic_service",
+    }
 )
-"""Generic endpoints take the type as a string after the name and the qos after the type."""
-SERVICE_CALLS = frozenset({"create_service"})
+"""Generic endpoints take the type as a string after the name and the qos after the type.
+`create_generic_service` is kilted and later."""
+SERVICE_CALLS = frozenset({"create_service", "create_generic_service"})
 CLIENT_CALLS = frozenset({"create_client", "create_generic_client"})
 PLUGIN_SETUP_METHODS = frozenset({"configure", "initialize"})
 PLUGIN_NAME = "plugin_name"
