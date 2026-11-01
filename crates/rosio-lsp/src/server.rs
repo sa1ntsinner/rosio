@@ -433,6 +433,14 @@ fn event_loop(connection: &Connection, state: &mut State, progress: bool) -> Res
                     let mut actions =
                         crate::actions::code_actions(&state.workspace, &request.params);
                     if let Some(rows) = actions.as_array_mut() {
+                        if let Some(loaded) = state.loaded.as_ref() {
+                            let fixes = crate::actions::fix_actions(
+                                &loaded.atlas,
+                                &loaded.paths,
+                                &request.params,
+                            );
+                            rows.splice(0..0, fixes);
+                        }
                         rows.extend(state.migration.actions(&request.params));
                     }
                     respond(&connection.sender, request, Ok(actions), -32602);

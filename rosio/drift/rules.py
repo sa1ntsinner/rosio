@@ -412,6 +412,15 @@ def where(source: model.Source | None) -> str:
     return f"{text}:{source.line_hint}" if source.line_hint else text
 
 
+def edit(source: model.Source, find: str, replace: str) -> dict[str, Any]:
+    """One exact replacement a fix makes on the line a source cites. A reader applies it only
+    where the line holds `find` exactly once, so a moved line is left alone."""
+    row: dict[str, Any] = {"file": source.file, "root": source.root, "find": find, "replace": replace}
+    if source.line_hint:
+        row["line_hint"] = source.line_hint
+    return row
+
+
 def node_text(node_id: str) -> str:
     """A node in prose. A synthetic identity is named by what launched it, never by its id."""
     parsed = ids.parse_node(node_id)

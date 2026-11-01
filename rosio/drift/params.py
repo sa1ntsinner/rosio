@@ -593,6 +593,15 @@ def _undeclared_line(disc: str, rows: list[_Ignored]) -> model.Finding:
         )
     else:
         fix = f"Declare {name_text} in the node source, or {drop}."
+    # A key one slip away from a declared name is renamed in place: the file writes its last
+    # segment, so that is the text replaced.
+    edits: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        head_name, _, key = row.name.rpartition(".")
+        head_near, _, near_key = (row.near or "").rpartition(".")
+        if row.near and head_name == head_near:
+            item = rules.edit(row.winner.source, key, near_key)
+            edits[model.dumps(item)] = item
     value = f" to {rules.value_text(head.winner.value)}" if single and len(rows) == 1 else ""
     subject_text = (
         f"{owner_text} {name_text}{value}" if len(owners) == 1 else f"{name_text} on {owner_text}"
@@ -619,6 +628,7 @@ def _undeclared_line(disc: str, rows: list[_Ignored]) -> model.Finding:
         profiles=profiles,
         layers=[CODED, DECLARED],
         where=sorted({row.winner.source for row in rows}, key=model.Source.sort_key),
+        extra={"edits": [edits[key] for key in sorted(edits)]} if edits else {},
     )
 
 

@@ -798,6 +798,7 @@ def _looked_up_not_in_urdf(
         site = rules.where(lead.evidence[0])
         near = _nearest(frame, declared)
         hint = f", the model has {near}" if near else ""
+        where = rules.sources([row for _node, fact in rows for row in fact.evidence])
         findings.append(
             Finding(
                 rule="frame.not_in_urdf",
@@ -818,10 +819,18 @@ def _looked_up_not_in_urdf(
                 discriminator=_disc(frame, LOOKED_UP),
                 profiles=sorted({fact.profile for _node, fact in rows} - {model.ANY_PROFILE}),
                 layers=sorted({fact.layer for _node, fact in rows}),
-                where=rules.sources([row for _node, fact in rows for row in fact.evidence]),
+                where=where,
+                extra=_renames(where, frame, near),
             )
         )
     return findings
+
+
+def _renames(where: list[model.Source], frame: str, near: str) -> dict[str, Any]:
+    """The frame name replaced by the link the model has, on each line that spells it."""
+    if not near:
+        return {}
+    return {"edits": [rules.edit(source, frame, near) for source in where if source.line_hint]}
 
 
 STAMPED = "stamped"
@@ -902,6 +911,7 @@ def _stamped_not_in_urdf(
                 profiles=sorted({profile for _node, profile in by_node} - {model.ANY_PROFILE}),
                 layers=[model.Layer.CODED.value],
                 where=where,
+                extra=_renames(where, frame, near),
             )
         )
     return findings

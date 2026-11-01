@@ -853,7 +853,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.33`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.34`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -1698,7 +1698,14 @@ or became a `plugin_instance_prefix` blind spot. A suffix a selected instance's 
 with a known default and no file sets is `<instance>.<suffix>` on the node, won by that
 default, which is what the node runs with.
 
-A reader pinned to `1.0` still loads a `1.33` file: `Atlas.from_json` compares the major
+* in `1.34`, the finding key `edits`, the exact replacements a fix makes: rows of `file`,
+  `root`, `line_hint`, `find` and `replace`. A reader applies a row only where the cited line
+  holds `find` once as a whole word, so an edited or moved line is left alone; the language
+  server offers the rows as one quick fix. `param.set_undeclared` states the rename of a key one
+  slip from a declared name, and `frame.not_in_urdf` the frame name the model has. `rosio drift`
+  prints the line to edit first, as `path:line`, and no longer lists a severity with no finding.
+
+A reader pinned to `1.0` still loads a `1.34` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

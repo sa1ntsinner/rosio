@@ -241,6 +241,21 @@ _FINDING_SCHEMA: dict[str, Any] = {
         "layers": {"type": "array", "items": {"enum": _LAYERS}},
         "where": {"type": "array", "items": _SOURCE_SCHEMA},
         "volatile": {"type": "object"},
+        "edits": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["file", "find", "replace"],
+                "properties": {
+                    "file": {"type": "string", "pattern": "^file:"},
+                    "root": {"type": "string"},
+                    "line_hint": {"type": "integer"},
+                    "find": {"type": "string"},
+                    "replace": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        },
     },
 }
 

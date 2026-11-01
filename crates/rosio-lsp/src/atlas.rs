@@ -114,6 +114,18 @@ pub struct Finding {
     pub about: Value,
     #[serde(rename = "where")]
     pub locations: Vec<Evidence>,
+    pub edits: Vec<Edit>,
+}
+
+/// One exact replacement a finding's fix makes on the line it cites.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Edit {
+    pub file: String,
+    pub root: String,
+    pub line_hint: Option<u32>,
+    pub find: String,
+    pub replace: String,
 }
 
 /// Whether a layer was collected.

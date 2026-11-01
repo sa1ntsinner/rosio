@@ -1,7 +1,10 @@
 //! Code actions on rosio diagnostics.
 //!
-//! The one action today writes a waiver: a finding a team has decided about, with the reason it
-//! was accepted, so a CI gate stops grading it while every report still shows it.
+//! A finding whose fix is an exact replacement applies it, and any finding can be waived: a
+//! finding a team has decided about, with the reason it was accepted, so a CI gate stops
+//! grading it while every report still shows it.
+use crate::atlas::{Atlas, Evidence};
+use crate::paths::Paths;
 use lsp_types::Url;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -45,6 +48,71 @@ pub fn code_actions(workspace: &Path, params: &Value) -> Value {
         })
         .collect();
     Value::Array(actions)
+}
+
+/// The fix a finding states as exact replacements, offered only when every line it cites still
+/// holds the text once as a whole word, so an edited or moved line is never rewritten.
+pub fn fix_actions(atlas: &Atlas, paths: &Paths, params: &Value) -> Vec<Value> {
+    let diagnostics = params["context"]["diagnostics"].as_array();
+    let mut offered = std::collections::BTreeSet::new();
+    diagnostics
+        .into_iter()
+        .flatten()
+        .filter(|diagnostic| diagnostic["source"] == "rosio")
+        .filter_map(|diagnostic| {
+            let id = diagnostic["data"]["finding"].as_str()?;
+            let finding = atlas.findings.iter().find(|f| f.fields.id == id)?;
+            let edits = &finding.fields.edits;
+            if edits.is_empty() || !offered.insert(id.to_string()) {
+                return None;
+            }
+            let mut changes = serde_json::Map::new();
+            for edit in edits {
+                let row = Evidence {
+                    file: edit.file.clone(),
+                    root: edit.root.clone(),
+                    line_hint: edit.line_hint,
+                    locator: None,
+                };
+                let path = paths.resolve(&row)?;
+                let line = edit.line_hint?.checked_sub(1)?;
+                let text = std::fs::read_to_string(&path).ok()?;
+                let start = whole_word(text.lines().nth(line as usize)?, &edit.find)?;
+                let uri = crate::paths::uri(&path)?;
+                let at = |offset: usize| json!({"line": line, "character": offset});
+                let change = json!({"range": {"start": at(start), "end": at(start + edit.find.encode_utf16().count())}, "newText": edit.replace});
+                changes
+                    .entry(uri.to_string())
+                    .or_insert_with(|| json!([]))
+                    .as_array_mut()?
+                    .push(change);
+            }
+            let first = &edits[0];
+            Some(json!({
+                "title": format!("Replace {} with {}", first.find, first.replace),
+                "kind": "quickfix",
+                "isPreferred": true,
+                "diagnostics": [diagnostic],
+                "edit": {"changes": changes},
+            }))
+        })
+        .collect()
+}
+
+/// The UTF-16 column of the one whole-word occurrence of `word` in `line`, if there is exactly one.
+fn whole_word(line: &str, word: &str) -> Option<usize> {
+    let part = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    let hits: Vec<usize> = line
+        .match_indices(word)
+        .filter(|(at, _)| {
+            !part(line[..*at].chars().next_back()) && !part(line[at + word.len()..].chars().next())
+        })
+        .map(|(at, _)| at)
+        .collect();
+    match hits.as_slice() {
+        [at] => Some(line[..*at].encode_utf16().count()),
+        _ => None,
+    }
 }
 
 /// The edit that appends one waiver, creating the file when there is none.
@@ -172,6 +240,27 @@ fn end_of(text: &str) -> (u32, u32) {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn a_fix_replaces_one_whole_word_or_nothing() {
+        assert_eq!(
+            whole_word("    stop_distnce: 0.35", "stop_distnce"),
+            Some(4)
+        );
+        assert_eq!(
+            whole_word(r#"canTransform("base_link", "laser_frame")"#, "laser_frame"),
+            Some(27)
+        );
+        assert_eq!(
+            whole_word("laser_frame_2: laser_frame", "laser_frame"),
+            Some(15)
+        );
+        assert_eq!(
+            whole_word("a: laser_frame, b: laser_frame", "laser_frame"),
+            None
+        );
+        assert_eq!(whole_word("max_range: 8.0", "laser_frame"), None);
+    }
 
     fn request(finding: &str) -> Value {
         json!({"context": {"diagnostics": [
