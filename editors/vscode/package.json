@@ -68,10 +68,6 @@
           "name": "Findings"
         },
         {
-          "id": "rosio.migration",
-          "name": "Migration"
-        },
-        {
           "id": "rosio.launch",
           "name": "Launch"
         },
@@ -91,6 +87,11 @@
         {
           "id": "rosio.unresolved",
           "name": "Unresolved",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "rosio.migration",
+          "name": "Migration",
           "visibility": "collapsed"
         }
       ]

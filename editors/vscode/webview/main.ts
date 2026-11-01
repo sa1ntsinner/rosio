@@ -123,9 +123,13 @@ function findingRow(finding: Finding): HTMLElement {
       h("span", { class: "rule" }, finding.rule),
       h("p", { class: "say" }, finding.say, " ", h("span", {}, `Fix: ${finding.fix}`)),
     ),
-    first ? h("span", { class: "where" }, fileAndLine(first.uri, first.line)) : h("span", {}),
+    first ? h("a", { class: "where", title: "Open the line" }, fileAndLine(first.uri, first.line)) : h("span", {}),
   );
   const open = () => first && vscode.postMessage({ type: "open", uri: first.uri, line: first.line });
+  row.querySelector(".where")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    open();
+  });
   row.addEventListener("click", (event) => {
     if ((event as MouseEvent).detail > 1) return;
     row.setAttribute("aria-expanded", row.getAttribute("aria-expanded") === "true" ? "false" : "true");
@@ -195,7 +199,10 @@ function ledger(summary: Summary): HTMLElement {
   const counters = summary.counters;
   const counts = counters.entities_by_kind ?? {};
   const kinds = LEDGER_KINDS.filter(([kind]) => counts[kind]).map(([kind, name]) => [name, counts[kind]] as const);
-  const rates = Object.entries(counters.resolution_rate ?? {}).sort();
+  // A kind every name of which resolved says nothing; the share line under the title covers it.
+  const rates = Object.entries(counters.resolution_rate ?? {})
+    .filter(([, rate]) => rate < 1)
+    .sort();
   const unresolved = counters.unresolved ?? {};
   return h(
     "div",
@@ -214,11 +221,11 @@ function ledger(summary: Summary): HTMLElement {
       ? h(
           "div",
           { class: "ledger" },
-          h("h2", {}, "How much was resolved"),
+          h("h2", {}, "Not resolved"),
           h(
             "table",
             {},
-            h("thead", {}, h("tr", {}, h("th", {}, "name kind"), h("th", { class: "num" }, "rate"), h("th", { class: "num" }, "open"))),
+            h("thead", {}, h("tr", {}, h("th", {}, "name kind"), h("th", { class: "num" }, "resolved"), h("th", { class: "num" }, "open"))),
             h(
               "tbody",
               {},
@@ -227,7 +234,7 @@ function ledger(summary: Summary): HTMLElement {
                   "tr",
                   {},
                   h("td", {}, want.replace("_", " ")),
-                  h("td", { class: "num" }, rate.toFixed(3)),
+                  h("td", { class: "num" }, `${(100 * rate).toFixed(1)}%`),
                   h("td", { class: "num" }, String(unresolved[want] ?? 0)),
                 ),
               ),
@@ -272,7 +279,7 @@ function renderAtlas(summary: Summary, findings: Finding[], workspace: string): 
         h("p", { class: "finding" }, oneFinding(summary, findings)),
         h("p", { class: "muted" }, [profiles, readFrom(summary), resolvedShare(summary)].filter(Boolean).join(" · ")),
       ),
-      h("div", { class: "actions" }, button("System graph", { type: "graph" }), button("Find", { type: "find" }), button("Extract again", { type: "extract" }, true)),
+      h("div", { class: "actions" }, button("System graph", { type: "graph" }), button("Find", { type: "find" }), button("Extract again", { type: "extract" })),
     ),
     layersStrip(summary.layers),
     h("div", { class: "split" }, findings.length ? findingGroups(findings) : h("p", {}, "No finding."), ledger(summary)),

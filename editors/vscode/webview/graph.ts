@@ -180,7 +180,7 @@ function render(): void {
   if (selected && rows.has(selected) && visible.ids.has(selected)) root.append(inspector(rows, rows.get(selected)!, visible.links));
 
   requestAnimationFrame(() => {
-    fit(stage, placed.width, placed.height);
+    fit(stage, placed.width, placed.height, true);
     apply(world);
   });
   wire(stage, svg, world, placed.width, placed.height);
@@ -215,14 +215,18 @@ function route(a: Placed, b: Placed): string {
   return `M ${ax} ${ay} C ${ax + 60} ${ay}, ${ax + 60} ${low}, ${(ax + b.x) / 2} ${low} S ${b.x - 60} ${by}, ${b.x - 2} ${by}`;
 }
 
-/** The inspector covers the right of the stage, so an open one shrinks the room to fit into. */
-function fit(stage: HTMLElement, width: number, height: number): void {
+/**
+ * The inspector covers the right of the stage, so an open one shrinks the room to fit into. A
+ * graph opens at a scale its labels can be read at, from its left end, and Fit shows all of it.
+ */
+function fit(stage: HTMLElement, width: number, height: number, readable = false): void {
   const box = stage.getBoundingClientRect();
   const covered = document.querySelector(".inspector")?.getBoundingClientRect().width ?? 0;
   const room = box.width - (covered ? covered + 32 : 0);
   const margin = 40;
-  const k = Math.min(1.25, (room - margin * 2) / Math.max(1, width), (box.height - margin * 2) / Math.max(1, height));
-  view = { k, x: (room - width * k) / 2, y: (box.height - height * k) / 2 };
+  const whole = Math.min(1.25, (room - margin * 2) / Math.max(1, width), (box.height - margin * 2) / Math.max(1, height));
+  const k = readable ? Math.max(whole, 0.85) : whole;
+  view = { k, x: k > whole ? margin : (room - width * k) / 2, y: Math.max(margin, (box.height - height * k) / 2) };
 }
 
 function apply(world: SVGGElement): void {

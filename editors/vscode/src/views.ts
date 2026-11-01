@@ -74,10 +74,10 @@ export class FindingsView implements vscode.TreeDataProvider<FindingNode> {
       return item;
     }
     const item = new vscode.TreeItem(node.title, vscode.TreeItemCollapsibleState.None);
-    item.description = node.rule;
-    item.tooltip = new vscode.MarkdownString(`${node.say}\n\n**Fix:** ${node.fix}`);
-    item.contextValue = "finding";
     const first = node.locations[0];
+    item.description = first ? `${decodeURIComponent(first.uri.slice(first.uri.lastIndexOf("/") + 1))}:${first.line + 1}` : node.rule;
+    item.tooltip = new vscode.MarkdownString(`${node.say}\n\n**Fix:** ${node.fix}\n\n\`${node.rule}\``);
+    item.contextValue = "finding";
     if (first) item.command = openAt(first);
     return item;
   }
