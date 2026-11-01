@@ -33,7 +33,7 @@ export class AtlasPanel implements vscode.Disposable {
     let message: ToPanel | undefined;
     if (this.showing.type === "entity") {
       const entity = await this.server.entity(this.showing.id);
-      if (entity) message = { type: "entity", entity, findings };
+      if (entity) message = { type: "entity", entity, findings, layers: (await this.server.summary())?.layers ?? [] };
       else this.showing = { type: "atlas" };
     }
     if (!message) {

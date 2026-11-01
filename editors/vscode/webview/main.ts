@@ -94,7 +94,11 @@ function resolvedShare(summary: Summary): string {
   return `${((100 * resolved) / (resolved + open)).toFixed(1)}% of names resolved`;
 }
 
-function layersStrip(present: Layer[]): HTMLElement {
+/** The layers the whole atlas holds, which an entity card tells apart from its own. */
+let atlasLayers: Layer[] = [];
+
+/** On one entity an absent layer read the workspace and said nothing about this thing. */
+function layersStrip(present: Layer[], entity = false): HTMLElement {
   return h(
     "div",
     { class: "layers", role: "list", "aria-label": "Layers in this atlas" },
@@ -104,7 +108,7 @@ function layersStrip(present: Layer[]): HTMLElement {
         "div",
         { class: `layer ${has ? "present" : "absent"}`, "data-layer": layer, role: "listitem" },
         h("div", { class: "name" }, layer),
-        h("div", { class: "note" }, has ? LAYER_WHAT[layer].present : LAYER_WHAT[layer].absent),
+        h("div", { class: "note" }, has ? LAYER_WHAT[layer].present : entity && atlasLayers.includes(layer) ? "says nothing about it" : LAYER_WHAT[layer].absent),
       );
     }),
   );
@@ -455,13 +459,22 @@ function parameterChain(entity: Entity): HTMLElement | null {
               h("td", { class: "value" }, render(candidate.value)),
               h("td", {}, how(candidate)),
               h("td", { class: "value" }, openLink(sourceText(candidate), candidate.at)),
-              h("td", {}, candidate.wins ? "wins" : words(candidate.shadow_kind ?? "loses")),
+              h("td", {}, candidate.wins ? "wins" : LOST[candidate.shadow_kind ?? ""] ?? "loses"),
             ),
           ),
       ),
     ),
   );
 }
+
+/** Why a value lost, in the words of the person who wrote it. */
+const LOST: Record<string, string> = {
+  value_changed: "overridden",
+  restated_identical: "same value, set again",
+  type_changed: "overridden with another type",
+  not_read_in_profile: "not read in this profile",
+  inert_plugin_block: "plugin not selected",
+};
 
 /** Fields down the side, layers across, the cells two layers disagree on tinted. */
 function layerLedger(entity: Entity): HTMLElement | null {
@@ -725,7 +738,7 @@ function renderEntity(entity: Entity, findings: Finding[]): HTMLElement {
         button("Find", { type: "find" }),
       ),
     ),
-    layersStrip(entity.layers),
+    layersStrip(entity.layers, true),
     effectiveFigures(entity),
     about.length ? h("section", {}, h("h2", {}, "Findings"), h("div", { class: "rows" }, ...about.map(findingRow))) : null,
     parameterChain(entity),
@@ -756,7 +769,10 @@ window.addEventListener("message", (event: MessageEvent<ToPanel>) => {
   const message = event.data;
   const root = document.body;
   if (message.type === "atlas") root.replaceChildren(renderAtlas(message.summary, message.findings, message.workspace));
-  if (message.type === "entity") root.replaceChildren(renderEntity(message.entity, message.findings));
+  if (message.type === "entity") {
+    atlasLayers = message.layers;
+    root.replaceChildren(renderEntity(message.entity, message.findings));
+  }
   root.querySelector<HTMLElement>(".row, button.primary")?.focus({ preventScroll: true });
 });
 

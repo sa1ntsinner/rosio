@@ -355,6 +355,15 @@ tr.loses td {
   color: var(--muted);
 }
 
+/* a value that lost is struck through, so the chain reads as the winner over what it replaced */
+tr.loses td:nth-child(2) {
+  text-decoration: line-through;
+}
+
+tr.wins td:nth-child(2) {
+  font-weight: 600;
+}
+
 .ledger + .ledger {
   margin-top: 26px;
 }

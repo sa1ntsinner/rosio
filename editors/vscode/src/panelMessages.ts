@@ -1,9 +1,9 @@
 // Messages between the extension and the atlas panel.
-import type { Entity, Finding, Summary } from "./protocol";
+import type { Entity, Finding, Layer, Summary } from "./protocol";
 
 export type ToPanel =
   | { type: "atlas"; summary: Summary; findings: Finding[]; workspace: string }
-  | { type: "entity"; entity: Entity; findings: Finding[] };
+  | { type: "entity"; entity: Entity; findings: Finding[]; layers: Layer[] };
 
 export type ToHost =
   | { type: "ready" }
