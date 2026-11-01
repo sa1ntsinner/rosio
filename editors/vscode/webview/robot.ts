@@ -205,9 +205,14 @@ function draw(svg: SVGSVGElement, robot: RobotModel, poses: Map<string, Pose>): 
     }
     group.append(s("circle", { cx: x, cy: y, r: link.id === selected ? 6 : 4.5, class: "dot" }));
     group.append(s("circle", { cx: x, cy: y, r: 12, class: "hit" }));
-    if (labels || link.id === selected || link.worst) {
+    if (labels || link.id === selected || link.worst || link.misnamed) {
       const text = s("text", { x: x - 10, y: y + 4, class: "name" });
       text.textContent = link.label;
+      group.append(text);
+    }
+    if (link.misnamed) {
+      const text = s("text", { x: x - 10, y: y + 20, class: "name misnamed" });
+      text.textContent = `code says ${link.misnamed.join(", ")}`;
       group.append(text);
     }
     const choose = (event: Event) => {
@@ -419,6 +424,10 @@ function inspector(robot: RobotModel, poses: Map<string, Pose>): HTMLElement {
   });
   panel.append(close, h("h2", {}, link.label));
   panel.append(h("p", { class: "muted" }, ["link", ...link.layers].join(" · ")));
+  if (link.misnamed) {
+    const names = link.misnamed.join(" and ");
+    panel.append(h("div", { class: "finding warn" }, h("p", {}, `Code looks this link up as ${names}, which no robot model declares. The quick fix on that line renames it to ${link.label}.`)));
+  }
   if (link.findings) panel.append(h("div", { class: `finding ${link.worst ?? "warn"}` }, h("p", {}, `${link.findings} finding${link.findings === 1 ? "" : "s"} about this frame. The card lists them.`)));
 
   const actions = h("div", { class: "actions" });

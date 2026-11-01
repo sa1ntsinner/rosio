@@ -322,6 +322,8 @@ export interface RobotModel {
     layers: string[];
     findings: number;
     worst?: "error" | "warn" | "info";
+    /** Frame names code spells for this link, which no model declares. */
+    misnamed?: string[];
     at?: GraphSite;
     /** Absent when the atlas states no geometry for this model, empty when the link has none. */
     visuals?: UrdfShape[];

@@ -40,6 +40,22 @@ fn worst(atlas: &Atlas, id: &str, p: Option<&str>) -> Option<&'static str> {
         .map(|(_, severity)| severity)
 }
 
+/// Link name to the frame names code spells for it, read off the renames findings about a
+/// frame state, so a frame the model lacks shows on the link it was meant to be.
+fn misnamed<'a>(atlas: &'a Atlas, p: Option<&str>) -> BTreeMap<&'a str, BTreeSet<&'a str>> {
+    let mut names: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for finding in &atlas.findings {
+        let about = finding.fields.about["entity"].as_str().unwrap_or("");
+        if !about.starts_with("frame:") || !finding_in_profile(&finding.raw, p) {
+            continue;
+        }
+        for edit in &finding.fields.edits {
+            names.entry(&edit.replace).or_default().insert(&edit.find);
+        }
+    }
+    names
+}
+
 /// Model file id to the profiles that load it: a launch entity reading it as a robot model,
 /// or a urdf fact stated for one profile.
 fn loaded(atlas: &Atlas) -> BTreeMap<&str, BTreeSet<&str>> {
@@ -153,6 +169,7 @@ pub(super) fn robot_model(atlas: &Atlas, index: &Index, params: &Value) -> Value
     let Some(model) = chosen else {
         return answer;
     };
+    let misnamed = misnamed(atlas, p);
     let mut links = BTreeMap::new();
     for (id, frame) in &atlas.entities {
         let listed = frame["attrs"]["urdf_models"]
@@ -172,6 +189,9 @@ pub(super) fn robot_model(atlas: &Atlas, index: &Index, params: &Value) -> Value
         }
         if let Some(at) = at_in(index, frame, p, &model) {
             row["at"] = at;
+        }
+        if let Some(names) = misnamed.get(frame.fields.label.as_str()) {
+            row["misnamed"] = json!(names);
         }
         // Old atlases hold no geometry, which is not the same as a link with no shape.
         if let Some(geometry) = frame["attrs"]["urdf_geometry"].get(model.as_str()) {
@@ -386,7 +406,8 @@ mod tests {
           "values":{"parent":"map","child":"odom"}}]}
       },
       "findings":[{"id":"f1","severity":"warn","about":{"entity":"frame:base"}},
-        {"id":"f2","severity":"error","profiles":["profile:sim"],"about":{"entity":"frame:base"}}]}"#;
+        {"id":"f2","severity":"error","profiles":["profile:sim"],"about":{"entity":"frame:base"}},
+        {"id":"f3","severity":"warn","about":{"entity":"frame:arm_frame"},"edits":[{"find":"arm_frame","replace":"arm"}]}]}"#;
 
     fn run(params: Value) -> Value {
         robot_model(&Atlas::parse(ATLAS).unwrap(), &Index::default(), &params)
@@ -408,6 +429,11 @@ mod tests {
         assert_eq!(base["findings"], 1);
         assert!(base.get("visuals").is_none() && base.get("collisions").is_none());
         assert_eq!(base["worst"], "warn");
+        assert_eq!(
+            row(&result["links"], "id", "frame:arm")["misnamed"],
+            json!(["arm_frame"])
+        );
+        assert!(base.get("misnamed").is_none());
         assert_eq!(run(json!({}))["links"][1]["worst"], "error");
         let broadcasts = result["broadcasts"].as_array().unwrap();
         assert_eq!(broadcasts.len(), 1);

@@ -96,6 +96,10 @@ svg.robot.dragging {
   stroke-linejoin: round;
 }
 
+.link .name.misnamed {
+  fill: var(--warn);
+}
+
 .link:focus-visible {
   outline: none;
 }

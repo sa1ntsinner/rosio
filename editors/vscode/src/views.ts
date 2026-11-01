@@ -73,7 +73,7 @@ export class FindingsView implements vscode.TreeDataProvider<FindingNode> {
       const item = new vscode.TreeItem(node.uri ? fileName(node.uri) : "Not tied to a file", vscode.TreeItemCollapsibleState.Expanded);
       item.description = String(node.findings.length);
       item.iconPath = SEVERITY_ICON[node.findings[0].severity];
-      if (node.uri) item.resourceUri = vscode.Uri.parse(node.uri);
+      if (node.uri) item.tooltip = vscode.workspace.asRelativePath(vscode.Uri.parse(node.uri));
       return item;
     }
     const item = new vscode.TreeItem(node.title, vscode.TreeItemCollapsibleState.None);
