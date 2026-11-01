@@ -529,7 +529,7 @@ def test_a_waived_finding_stops_failing_the_gate_and_stays_visible(
     assert "1 of 1 waivers matched" in printed
     assert f"waived {error.id}" in printed
     assert "the base file is generated, ticket 412" in printed
-    (line,) = [row for row in printed.splitlines() if " param.type_changed " in row]
+    (line,) = [row for row in printed.splitlines() if "(param.type_changed)" in row]
     assert line.endswith("   waived"), "the finding is marked where it is listed"
     assert sum(row.endswith("   waived") for row in printed.splitlines()) == 1
 

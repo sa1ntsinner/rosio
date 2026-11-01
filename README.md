@@ -48,12 +48,18 @@ On `examples/rover_ws`, a small rover with five faults planted on purpose:
 
 ```
 $ rosio drift
-5 findings: 1 error, 0 info, 4 warn
-  error qos.incompatible  /safety_stop never receives /scan_filtered
-  warn  frame.not_in_urdf  /scan_filter looks up laser_frame, which no robot model has
-  warn  param.orphan_block  block odometry owns nothing in rover
-  warn  param.set_undeclared  stop_distnce is set for /safety_stop and never declared
-  warn  param.shadowed  max_range at rover_bringup/config/rover.yaml:4 is overridden
+5 findings: 1 error, 4 warn
+
+  error  rover_control/rover_control/safety_stop.py:18
+         /safety_stop never receives /scan_filtered in rover  (qos.incompatible)
+  warn   rover_perception/src/scan_filter.cpp:34
+         /scan_filter looks up laser_frame, which no robot model has  (frame.not_in_urdf)
+  warn   rover_bringup/config/rover.yaml:12
+         block odometry owns nothing in rover  (param.orphan_block)
+  warn   rover_bringup/config/rover.yaml:9
+         stop_distnce is set for /safety_stop and never declared  (param.set_undeclared)
+  warn   rover_bringup/config/rover.yaml:4
+         max_range at rover_bringup/config/rover.yaml:4 is overridden  (param.shadowed)
 ```
 
 Each finding also carries why it is true, the line to edit, a fix and a sentence an assistant

@@ -2199,21 +2199,26 @@ def drift(
             for item in kept
         ],
     }
-    summary = ", ".join(f"{count} {name}" for name, count in counts.items())
-    lines = [f"{plural(len(rows), 'finding')}: {summary}"]
+    summary = ", ".join(f"{count} {name}" for name, count in counts.items() if count)
+    lines = [f"{plural(len(rows), 'finding')}" + (f": {summary}" if summary else "")]
     if not rows:
         lines.append("  no drift reported" + (f" for rule {rule}" if rule else ""))
         return Answer(verb="drift", data=data, lines=lines)
-    for row in data["findings"]:
+    for item, row in zip(kept, data["findings"]):
+        # The line to edit leads, as path:line, so a terminal makes it a link.
+        sites = [site(source) for source in item.where]
         mark = "   waived" if row.get("waived") else ""
-        lines.append(f"  {row['severity']:<5} {row['rule']}  {row['title']}{mark}")
+        lines.append("")
+        lines.append(f"  {row['severity']:<5}  {sites[0] if sites else 'not tied to a file'}")
+        lines.append(f"         {row['title']}  ({row['rule']}){mark}")
         if row["say"]:
-            lines.append(f"        {row['say']}")
-        for where in row["where"][:2]:
-            lines.append(f"        {where}")
+            lines.append(f"         {row['say']}")
+        for other in sites[1:3]:
+            lines.append(f"         also {other}")
         if row["fix"]:
-            lines.append(f"        fix: {here(row['fix'])}")
-        lines.append(f"        explain {row['fingerprint']}")
+            lines.append(f"         fix: {here(row['fix'])}")
+        lines.append(f"         explain {row['fingerprint']}")
+    lines.append("")
     _more(lines, hidden, "findings, --limit shows more")
     lines.append("  explain takes a fingerprint above, a finding id or a rule id")
     return Answer(verb="drift", data=data, lines=lines)

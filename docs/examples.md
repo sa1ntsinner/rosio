@@ -22,26 +22,33 @@ to quote, the line to edit, a fix and the fingerprint `rosio explain` takes.)
 
 ```
 $ rosio drift --min-severity warn
-3 findings: 0 error, 0 info, 3 warn
-  warn  extract.input_refused  nav2_theta_star_planner/global_planner_plugin.xml was refused: plugin_manifest_missing
-  warn  param.orphan_block  block loopback_simulator owns nothing in nav2_bringup_composed
-  warn  param.orphan_block  block map_saver owns nothing in nav2_bringup_composed
+3 findings: 3 warn
+
+  warn   nav2_theta_star_planner/global_planner_plugin.xml was refused: plugin_manifest_missing  (extract.input_refused)
+  warn   block loopback_simulator owns nothing in nav2_bringup_composed  (param.orphan_block)
+  warn   block map_saver owns nothing in nav2_bringup_composed  (param.orphan_block)
 ```
 
 The first is a real packaging defect: `nav2_theta_star_planner` exports a plugin manifest by a
 name it does not install. The other two are configuration for nodes this profile never starts.
 
-On sources, `examples/rover_ws` is a small rover with five faults planted on purpose (the titles
-again):
+On sources, `examples/rover_ws` is a small rover with five faults planted on purpose (the line to
+edit and the title of each):
 
 ```
 $ rosio drift
-5 findings: 1 error, 0 info, 4 warn
-  error qos.incompatible  /safety_stop never receives /scan_filtered
-  warn  frame.not_in_urdf  /scan_filter looks up laser_frame, which no robot model has
-  warn  param.orphan_block  block odometry owns nothing in rover
-  warn  param.set_undeclared  stop_distnce is set for /safety_stop and never declared
-  warn  param.shadowed  max_range at rover_bringup/config/rover.yaml:4 is overridden
+5 findings: 1 error, 4 warn
+
+  error  rover_control/rover_control/safety_stop.py:18
+         /safety_stop never receives /scan_filtered in rover  (qos.incompatible)
+  warn   rover_perception/src/scan_filter.cpp:34
+         /scan_filter looks up laser_frame, which no robot model has  (frame.not_in_urdf)
+  warn   rover_bringup/config/rover.yaml:12
+         block odometry owns nothing in rover  (param.orphan_block)
+  warn   rover_bringup/config/rover.yaml:9
+         stop_distnce is set for /safety_stop and never declared  (param.set_undeclared)
+  warn   rover_bringup/config/rover.yaml:4
+         max_range at rover_bringup/config/rover.yaml:4 is overridden  (param.shadowed)
 ```
 
 A best effort `SensorDataQoS()` publisher and a reliable subscriber in two languages, a frame
