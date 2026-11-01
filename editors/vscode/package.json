@@ -103,7 +103,7 @@
       },
       {
         "view": "rosio.unresolved",
-        "contents": "Every value in the atlas was resolved.\nA value rosio cannot work out statically, a topic name built at run time or a parameter read from a variable, is listed here with the line that asked for it."
+        "contents": "Every name and value in the atlas was resolved."
       },
       {
         "view": "rosio.launch",
