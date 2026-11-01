@@ -19,6 +19,11 @@ rosio graph --focus <node>       who talks to what, with QoS
 rosio migrate plan --to jazzy    what a release upgrade changes, with file:line and source
 ```
 
+A finding that carries `edits` in `rosio drift --json` is a fix rosio can state exactly: in
+the cited file, on line `line_hint`, replace the whole word `find` with `replace`, and only
+when it occurs there once. After editing, run `rosio extract` and `rosio drift` again and
+check that the finding is gone rather than assuming it.
+
 Run `rosio migrate apply --to <release>` and make the by hand changes. Finish with
 `rosio migrate verify --to <release>`.
 

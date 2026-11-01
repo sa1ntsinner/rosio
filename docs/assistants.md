@@ -36,7 +36,7 @@ The server starts without an atlas, and each tool then names the extract command
 Over `--http`, `migrate` reads only the served workspace: the directory `--workspace` names, else
 the one above the `rosio-out` that holds the atlas, else the directory of the atlas itself.
 A worst case answer is under 4 KB. On very small models prefer the command
-line, where the skill file is 3.3 KB and carries six commands, the waiver file and a worked example.
+line, where the skill file is 3.6 KB and carries six commands, the waiver file and a worked example.
 
 ## Privacy
 

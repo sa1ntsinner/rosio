@@ -2235,6 +2235,7 @@ def _finding_row(item: Finding) -> dict[str, Any]:
         "profiles": [profile_name(name) for name in item.profiles],
         "where": [site(source, locator=True) for source in item.where],
         "fingerprint": item.fingerprint,
+        **({"edits": item.extra["edits"]} if item.extra.get("edits") else {}),
     }
 
 
