@@ -37,7 +37,7 @@ import copy
 import math
 import posixpath
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -577,6 +577,9 @@ class Unit:
     registrations: list[Registration] = field(default_factory=list)
     plugin_of_helper: Registration | None = None
     """The plugin that builds this file's helper class and hands it the instance name."""
+    class_plugins: dict[str, Registration] = field(default_factory=dict)
+    """The registration each class of this file declares plugin suffixes for, when a file
+    registers several plugin classes."""
     plugin_name_locals: set[str] = field(default_factory=set)
     """The string parameter of `configure` or `initialize`, the instance name of a plugin."""
     wrappers: dict[str, tuple[int, int]] = field(default_factory=dict)
@@ -5166,17 +5169,32 @@ def _plugin_suffixes(units: Sequence[Unit]) -> None:
         if own is None and helper is None and plugin is not None:
             # the file states the parameters of a plugin another file of the package registers
             unit.plugin_of_helper = plugin
+        if own is not None:
+            # a file registering several classes binds each class's suffixes to its own
+            for owner in set(owners):
+                mine = plugin_of(owner)
+                if mine is not None and mine.base_class:
+                    unit.class_plugins[owner] = mine
+
+        def owned(
+            owner: str,
+            plugin: Registration | None = plugin,
+            plugin_of: Callable[[str], Registration | None] = plugin_of,
+            unit: Unit = unit,
+        ) -> bool:
+            return plugin is not None and (
+                plugin_of(owner) is plugin or owner in unit.class_plugins
+            )
+
         unit.params = [
             replace(item, scope="node")
-            if item.name.status == SUFFIX
-            and (plugin is None or plugin_of(item.owner_class) is not plugin)
+            if item.name.status == SUFFIX and not owned(item.owner_class)
             else item
             for item in unit.params
         ]
         unit.reads = [
             replace(item, name=Ref(UNRESOLVED, "", item.name.expr))
-            if item.name.status == SUFFIX
-            and (plugin is None or plugin_of(item.sym.rpartition("::")[0]) is not plugin)
+            if item.name.status == SUFFIX and not owned(item.sym.rpartition("::")[0])
             else item
             for item in unit.reads
         ]
@@ -5571,8 +5589,6 @@ def file_report(
         (item for item in unit.registrations if item.macro == "PLUGINLIB_EXPORT_CLASS"),
         unit.plugin_of_helper,
     )
-    base_class = plugin.base_class if plugin else ""
-    lookup_name = lookups.get(plugin.type, (base_class, plugin.type))[1] if plugin else ""
     for item in sorted(unit.params, key=lambda row: (row.scope, row.name.value, row.construction)):
         reads = sorted(
             reads_by_name.get((item.construction, item.name.value), [])
@@ -5608,7 +5624,15 @@ def file_report(
                 parameters.append(row)
             continue
         if item.scope == "plugin" and plugin is not None:
-            plugin_parameters.append(_plugin_param_view(item, reads, base_class, lookup_name))
+            mine = unit.class_plugins.get(item.owner_class, plugin)
+            plugin_parameters.append(
+                _plugin_param_view(
+                    item,
+                    reads,
+                    mine.base_class,
+                    lookups.get(mine.type, (mine.base_class, mine.type))[1],
+                )
+            )
         elif item.name.status == SUFFIX:
             # a suffix of an instance name no registration of the package owns
             unresolved.append(
@@ -5770,14 +5794,18 @@ def file_report(
     if plugin is not None and plugin is not unit.plugin_of_helper:
         report["plugins"] = [
             {
-                "macro": plugin.macro,
-                "macro_wrapped_lines": plugin.wrapped,
-                "type": plugin.type,
-                "base_class": base_class,
-                "lookup_name": lookup_name,
-                "plugin_id": ids.build_plugin(base_class, lookup_name),
-                "line_hint": plugin.line,
+                "macro": item.macro,
+                "macro_wrapped_lines": item.wrapped,
+                "type": item.type,
+                "base_class": item.base_class,
+                "lookup_name": lookups.get(item.type, (item.base_class, item.type))[1],
+                "plugin_id": ids.build_plugin(
+                    item.base_class, lookups.get(item.type, (item.base_class, item.type))[1]
+                ),
+                "line_hint": item.line,
             }
+            for item in unit.registrations
+            if item.macro == "PLUGINLIB_EXPORT_CLASS"
         ]
     registered = [
         item for item in unit.registrations if item.macro == "RCLCPP_COMPONENTS_REGISTER_NODE"
@@ -6381,26 +6409,23 @@ class CppCodeCollector:
         self, ctx: CollectContext, run: str, unit: Unit, report: dict[str, Any], file_id: str
     ) -> str:
         rows = report.get("plugins") or []
-        if not rows:
-            return ""
-        row = rows[0]
-        plugin_id = str(row["plugin_id"])
-        ctx.builder.node(plugin_id)
-        ctx.builder.fact(
-            plugin_id,
-            LAYER,
-            run=run,
-            values={
-                "type": row["type"],
-                "base_class": row["base_class"],
-                "macro": row["macro"],
-                "macro_wrapped_lines": row["macro_wrapped_lines"],
-            },
-            confidence=model.Confidence.CERTAIN.value,
-            evidence=[ctx.ws.source(ctx.ws.site(unit.path, row["macro"], row["line_hint"]))],
-        )
-        ctx.builder.edge(model.EdgeKind.DEFINES.value, file_id, plugin_id)
-        return plugin_id
+        for row in rows:
+            ctx.builder.node(str(row["plugin_id"]))
+            ctx.builder.fact(
+                str(row["plugin_id"]),
+                LAYER,
+                run=run,
+                values={
+                    "type": row["type"],
+                    "base_class": row["base_class"],
+                    "macro": row["macro"],
+                    "macro_wrapped_lines": row["macro_wrapped_lines"],
+                },
+                confidence=model.Confidence.CERTAIN.value,
+                evidence=[ctx.ws.source(ctx.ws.site(unit.path, row["macro"], row["line_hint"]))],
+            )
+            ctx.builder.edge(model.EdgeKind.DEFINES.value, file_id, str(row["plugin_id"]))
+        return str(rows[0]["plugin_id"]) if rows else ""
 
     def _symbol(
         self,
@@ -6417,6 +6442,16 @@ class CppCodeCollector:
         sym_id = self._sym_id(unit, qualname)
         builder.node(sym_id, attrs={"language": "cpp"})
         builder.edge(model.EdgeKind.DEFINES.value, file_id, sym_id)
+        mine = unit.class_plugins.get(qualname.rpartition("::")[0])
+        if mine is not None:
+            plugin_id = next(
+                (
+                    str(row["plugin_id"])
+                    for row in report.get("plugins") or []
+                    if row["type"] == mine.type
+                ),
+                plugin_id,
+            )
 
         def slice_of(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
             return [row for row in rows if row.get("owner_symbol") == qualname]

@@ -71,6 +71,7 @@ from rosio.collect import (
     BUILT_ONLY,
     CollectContext,
     entrypoints,
+    plugins,
     register,
     same_name_in_package,
 )
@@ -867,6 +868,18 @@ def _declarations(
     rows = list(executed) if executed else list(read)
     sites = {item.name: item.site for item in read}
     return [_completed(item, text.get(item.name), sites.get(item.name)) for item in rows]
+
+
+_bases: weakref.WeakKeyDictionary[Workspace, dict[str, frozenset[str]]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _exported_bases(ws: Workspace) -> dict[str, frozenset[str]]:
+    found = _bases.get(ws)
+    if found is None:
+        found = _bases[ws] = plugins.exported_bases(ws)
+    return found
 
 
 _declared: weakref.WeakKeyDictionary[Workspace, dict[tuple[str, int, int], tuple]] = (
@@ -3027,7 +3040,14 @@ class ParamsCollector:
             if not isinstance(lookup, str) or not lookup:
                 continue
             selector_key = selected[instance]
-            base_class = SELECTOR_BASE_CLASS.get(selector_key.split(".")[-1], "")
+            exported = _exported_bases(ctx.ws).get(lookup, frozenset())
+            if len(exported) == 1:
+                # the manifest that exports the selected class names its base class
+                base_class = next(iter(exported))
+            elif exported:
+                base_class = ""
+            else:
+                base_class = SELECTOR_BASE_CLASS.get(selector_key.split(".")[-1], "")
             chosen = live.get(f"{instance}.{PLUGIN_KEY}")
             cited = _cite(ctx.ws, chosen.site) if chosen is not None else None
             evidence = [cited] if cited is not None else []

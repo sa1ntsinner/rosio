@@ -888,6 +888,7 @@ def join(builder: model.AtlasBuilder) -> JoinReport:
     report.scripts_bound = len({item.node_id for item, _, via in rows if via == "script_path"})
     for item, found, via in rows:
         _bind_instance(builder, item, found, via, report, count=first)
+    _plugin_instance_defaults(builder)
     _retire_bound_remaps(builder, report)
     _retire_resolved_sites(builder, report)
     _ignore_undeclared(builder)
@@ -1393,14 +1394,20 @@ def declared_names(atlas: model.Atlas, reads: bool = True) -> dict[tuple[str, st
         for fact in node.facts:
             if fact.layer == CODED and fact.values.get("declared_in_code"):
                 out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
-    for edge in atlas.edges.values():
-        if reads and edge.kind == model.EdgeKind.READS_PARAM.value:
-            parsed = ids.parse_param(edge.dst)
-            for fact in edge.facts:
-                out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
     # A plugin instance the yaml selects is loaded from `<instance>.plugin`, and declares
     # `<instance>.<suffix>` on its node for every suffix its class declares.
     suffixes: dict[str, set[str]] = {}
+    for edge in atlas.edges.values():
+        if not reads or edge.kind != model.EdgeKind.READS_PARAM.value:
+            continue
+        if ids.kind_of(edge.dst) == model.NodeKind.PPARAM.value:
+            # a plugin reading a suffix of its own instance
+            plugin_param = ids.parse_pparam(edge.dst)
+            suffixes.setdefault(plugin_param.lookup, set()).add(plugin_param.suffix)
+            continue
+        parsed = ids.parse_param(edge.dst)
+        for fact in edge.facts:
+            out.setdefault((parsed.owner, fact.profile), set()).add(parsed.name)
     for node in atlas.by_kind(model.NodeKind.PPARAM.value):
         if any(
             fact.layer == CODED
@@ -3958,6 +3965,67 @@ def _bind_plugin_parameter(
         values={"suffix": suffix},
         evidence=_source(carrier, row),
     )
+
+
+def _plugin_instance_defaults(builder: model.AtlasBuilder) -> None:
+    """A plugin instance declares every suffix its class declares on its node, so a suffix no
+    file sets runs at the code default as `<instance>.<suffix>`. Written only for a profile
+    whose chain for that name is still empty, so a value a file sets keeps its own chain."""
+    atlas = builder.atlas
+    suffixes: dict[tuple[str, str], list[model.Node]] = {}
+    for node in atlas.by_kind(model.NodeKind.PPARAM.value):
+        parsed = ids.parse_pparam(node.id)
+        suffixes.setdefault((parsed.base_class, parsed.lookup), []).append(node)
+    for pinst in list(atlas.by_kind(model.NodeKind.PINST.value)):
+        instance = ids.parse_pinst(pinst.id)
+        if instance.owner not in atlas.entities:
+            continue
+        for fact in pinst.facts:
+            if fact.layer != DECLARED:
+                continue
+            key = (str(fact.values.get("base_class") or ""), str(fact.values.get("plugin") or ""))
+            for pparam in suffixes.get(key, ()):
+                row = next(
+                    (
+                        candidate
+                        for candidate in pparam.candidates
+                        if candidate.mechanism == model.Mechanism.CODE_DEFAULT.value
+                        and candidate.profile in (fact.profile, model.ANY_PROFILE)
+                        and candidate.value_type != "unknown"
+                    ),
+                    None,
+                )
+                if row is None:
+                    continue
+                suffix = ids.parse_pparam(pparam.id).suffix
+                try:
+                    param_id = ids.build_param(instance.owner, f"{instance.instance}.{suffix}")
+                except ContractError:
+                    continue
+                builder.node(param_id)
+                current = atlas.entities[param_id]
+                if any(candidate.profile == fact.profile for candidate in current.candidates):
+                    continue
+                builder.fact(
+                    param_id,
+                    CODED,
+                    profile=fact.profile,
+                    values={"declared_in_code": True, "default": row.value, "plugin": key[1]},
+                    confidence=model.Confidence.RESOLVED.value,
+                    evidence=[row.source],
+                )
+                builder.set_param(
+                    param_id,
+                    state=model.ParamState.EFFECTIVE.value,
+                    candidates=[replace(row, profile=fact.profile, wins=True, rank=0, note="")],
+                )
+                builder.edge(
+                    model.EdgeKind.HAS_PARAM.value,
+                    instance.owner,
+                    param_id,
+                    layer=CODED,
+                    profile=fact.profile,
+                )
 
 
 def known_name_contradictions(report: JoinReport) -> list[str]:

@@ -745,7 +745,8 @@ def read_undeclared(atlas: model.Atlas) -> list[model.Finding]:
     blind, declared = join.parameter_declarations(atlas, reads=False)
     sites: dict[str, list[model.LayerFact]] = defaultdict(list)
     for edge in atlas.edges.values():
-        if edge.kind != model.EdgeKind.READS_PARAM.value:
+        # a plugin's own suffix read is decided per instance, not as a node parameter
+        if edge.kind != model.EdgeKind.READS_PARAM.value or ids.kind_of(edge.dst) != "param":
             continue
         for fact in edge.facts:
             if rules.usable(fact) and fact.values.get("api") in _THROWING_READS:

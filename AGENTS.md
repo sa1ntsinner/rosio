@@ -1686,6 +1686,18 @@ every other endpoint does. A python node that fills `self.transform.header.frame
 `self.transform.child_frame_id` in one method and sends `self.transform` from another, a timer
 among them, states that pair where it was a `call_result` blind spot.
 
+Inside `1.33`, with no new key, a pluginlib workspace generated and run on jazzy moved five
+readings. A plugin reading a suffix of its own instance (`get_parameter(name + ".topic")`) made
+a `reads_param` edge to a `pparam`, which the join and `param.read_undeclared` took for a node
+parameter and stopped on. A selector list names its base class by the class it selects, from
+the manifest that exports that lookup name, and `SELECTOR_BASE_CLASS` answers only for a name
+no manifest of the roots exports, because a node of another stack keys its plugins on
+`plugins` too and was read as costmap layers. A C++ file that registers several plugin classes
+binds each class's suffixes to its own registration, where every suffix went to the first one
+or became a `plugin_instance_prefix` blind spot. A suffix a selected instance's class declares
+with a known default and no file sets is `<instance>.<suffix>` on the node, won by that
+default, which is what the node runs with.
+
 A reader pinned to `1.0` still loads a `1.33` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

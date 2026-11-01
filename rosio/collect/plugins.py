@@ -1072,6 +1072,29 @@ def _manifests(ws: Any, build: PackageBuild, libraries: set[str]) -> list[Manife
     return out
 
 
+def exported_bases(ws: Any) -> dict[str, frozenset[str]]:
+    """The base classes the pluginlib manifests of the roots export each lookup name under,
+    read from the package.xml exports alone, so a selector list names its base class by the
+    classes it selects rather than by its key."""
+    out: dict[str, set[str]] = {}
+    for pkg, package in sorted(ws.packages.items()):
+        base = package.src_path or package.share_path
+        if not base:
+            continue
+        build = PackageBuild(pkg=pkg, base=base)
+        for export in package_xml_exports(str(Path(base) / "package.xml")):
+            path = _resolve_export(ws, build, export.value)
+            if not Path(path).is_file():
+                continue
+            try:
+                _library, classes = parse_manifest_text(_read(ws, path), path=path)
+            except CollectorError:
+                continue
+            for item in classes:
+                out.setdefault(item.lookup_name, set()).add(item.base_class)
+    return {name: frozenset(bases) for name, bases in out.items()}
+
+
 def _held_manifests(build: PackageBuild, missing: str) -> list[str]:
     """The pluginlib manifests a package does hold beside one an export names and it does
     not, which is where that export was most likely meant to point."""
