@@ -37,7 +37,8 @@ from rosio.errors import ContractError
 
 SCHEMA_MINOR = "34"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the finding key `edits`, the exact text replacements a fix makes; the `publishes` and `subscribes` edge value `qos_overridden`, the record key
+stored id: the finding key `edits`, the exact text replacements a fix makes; the
+`publishes` and `subscribes` edge value `qos_overridden`, the record key
 `parameter_writes` and the `code_set` mechanism; the rules
 `topic.namespace_escape`, `param.read_undeclared`,
 `controller.undefined` and `controller.joint_missing`, the coded file value `stamped_frames`, the

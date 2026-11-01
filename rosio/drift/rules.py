@@ -415,7 +415,12 @@ def where(source: model.Source | None) -> str:
 def edit(source: model.Source, find: str, replace: str) -> dict[str, Any]:
     """One exact replacement a fix makes on the line a source cites. A reader applies it only
     where the line holds `find` exactly once, so a moved line is left alone."""
-    row: dict[str, Any] = {"file": source.file, "root": source.root, "find": find, "replace": replace}
+    row: dict[str, Any] = {
+        "file": source.file,
+        "root": source.root,
+        "find": find,
+        "replace": replace,
+    }
     if source.line_hint:
         row["line_hint"] = source.line_hint
     return row

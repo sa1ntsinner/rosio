@@ -2204,7 +2204,7 @@ def drift(
     if not rows:
         lines.append("  no drift reported" + (f" for rule {rule}" if rule else ""))
         return Answer(verb="drift", data=data, lines=lines)
-    for item, row in zip(kept, data["findings"]):
+    for item, row in zip(kept, data["findings"], strict=True):
         # The line to edit leads, as path:line, so a terminal makes it a link.
         sites = [site(source) for source in item.where]
         mark = "   waived" if row.get("waived") else ""
