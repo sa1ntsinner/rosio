@@ -28,7 +28,7 @@ const entity = { kind: "node", profiles: ["profile:real", "profile:sim"], confli
 
 test("ledger separates profiles and repeats wildcard fallback", () => {
   const ledger = card().layerLedger(entity);
-  const sections = ledger.children.filter(child => child.tag === "section");
+  const sections = ledger.children.filter(child => child.tag === "details");
   assert.equal(sections.length, 2);
   assert.match(sections[0].textContent, /real/);
   assert.match(sections[0].textContent, /fallback/);
@@ -79,7 +79,7 @@ test("healthy atlas notification triggers view refresh", async () => {
 
 test("parameter ledgers retain separate single layer profiles", () => {
   const ledger = card().layerLedger({ ...entity, kind: "param" });
-  assert.equal(ledger.children.filter(child => child.tag === "section").length, 2);
+  assert.equal(ledger.children.filter(child => child.tag === "details").length, 2);
 });
 
 test("migration model groups packages, counts changes and describes empty state", () => {
