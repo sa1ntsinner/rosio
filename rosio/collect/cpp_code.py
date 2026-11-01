@@ -72,10 +72,12 @@ PUBLISH_CALLS = frozenset(
     {"create_publisher", "create_lifecycle_publisher", "create_generic_publisher"}
 )
 SUBSCRIBE_CALLS = frozenset({"create_subscription", "create_generic_subscription"})
-GENERIC_CALLS = frozenset({"create_generic_publisher", "create_generic_subscription"})
+GENERIC_CALLS = frozenset(
+    {"create_generic_publisher", "create_generic_subscription", "create_generic_client"}
+)
 """Generic endpoints take the type as a string after the name and the qos after the type."""
 SERVICE_CALLS = frozenset({"create_service"})
-CLIENT_CALLS = frozenset({"create_client"})
+CLIENT_CALLS = frozenset({"create_client", "create_generic_client"})
 PLUGIN_SETUP_METHODS = frozenset({"configure", "initialize"})
 PLUGIN_NAME = "plugin_name"
 PLUGIN_NAME_ARGUMENT = "<plugin instance name>"
@@ -121,6 +123,7 @@ PLUGIN_DECLARE_CALLS = frozenset({"declareParameter"})
 """`nav2_costmap_2d::Layer::declareParameter` prefixes the layer instance name itself, so
 the source states a suffix and the full name only exists once the yaml names the layer."""
 READ_CALLS = frozenset({"get_parameter", "get_parameter_or"})
+PREFIX_READ = "get_parameters_by_prefix"
 VALUE_CALLS = frozenset(
     {
         "string",
@@ -137,7 +140,7 @@ VALUE_CALLS = frozenset(
 with its own remaps and namespace, which the join applies to the raw name the same way."""
 
 BROADCAST_CALLS = frozenset({"sendTransform"})
-LOOKUP_CALLS = frozenset({"lookupTransform", "canTransform"})
+LOOKUP_CALLS = frozenset({"lookupTransform", "canTransform", "waitForTransform"})
 
 NODE_BASES = {
     "rclcpp::Node": "node",
@@ -594,6 +597,9 @@ class Unit:
     helper_types: dict[tuple[str, str], set[str]] = field(default_factory=dict)
     helper_plugins: dict[tuple[str, str], set[str]] = field(default_factory=dict)
     node_handles: dict[tuple[str, str], set[bool]] = field(default_factory=dict)
+    sub_namespaces: dict[tuple[str, str], Ref] = field(default_factory=dict)
+    """A handle `create_sub_node` returned, keyed like a helper, with the sub namespace it
+    prefixes onto every relative name, or an unresolved ref when the source builds it."""
     handle_uses: list[tuple[str, tuple[tuple[str, str], ...], tuple[str, ...]]] = field(
         default_factory=list
     )
@@ -1865,7 +1871,7 @@ class _Reader:
         if name.startswith("as_") and receiver is not None and receiver.type == "call_expression":
             self._accessor_read(name, receiver, node)
             return
-        if self._endpoint(name, node, template, arguments):
+        if self._endpoint(name, node, template, arguments, receiver):
             return
         if name == "append" and receiver is not None and receiver.type == "identifier":
             self._append(receiver, arguments)
@@ -1889,6 +1895,12 @@ class _Reader:
         return ""
 
     def _track_helper(self, name: str, node: Any) -> None:
+        if name.isidentifier() and node.type == "call_expression":
+            sub = self._sub_namespace(node)
+            if sub is not None:
+                self.unit.sub_namespaces[self._helper_key(name)] = sub
+                if self.klass:
+                    self.unit.sub_namespaces[(self.klass, name)] = sub
         if not self.klass or not name.isidentifier():
             return
         selector = self._selector(node)
@@ -1989,7 +2001,28 @@ class _Reader:
         handles = tuple(self._helper_key(text) for text in texts if text.isidentifier())
         return handles or None
 
-    def _endpoint(self, name: str, node: Any, template: Any, arguments: Sequence[Any]) -> bool:
+    def _sub_namespace(self, receiver: Any) -> Ref | None:
+        """The sub namespace of the node handle a call is made on, None for a plain node."""
+        if receiver is None:
+            return None
+        if receiver.type == "call_expression":
+            name, inner, _template = _call_parts(receiver, self.src)
+            if name != "create_sub_node":
+                return None
+            arguments = _args(receiver)
+            own = self.resolve(arguments[0]) if arguments else Ref(UNRESOLVED)
+            outer = self._sub_namespace(inner)
+            if own.status != LITERAL or (outer is not None and outer.status != LITERAL):
+                return Ref(UNRESOLVED, expr=_flat(receiver, self.src))
+            value = own.value.strip("/")
+            return Ref(LITERAL, f"{outer.value}/{value}" if outer is not None else value)
+        text = _flat(receiver, self.src).removeprefix("this->")
+        found = self.unit.sub_namespaces.get(self._helper_key(text))
+        return found or self.unit.sub_namespaces.get((self.klass, text))
+
+    def _endpoint(
+        self, name: str, node: Any, template: Any, arguments: Sequence[Any], receiver: Any = None
+    ) -> bool:
         function = _child(node, "function")
         head = _text(function, self.src) if function is not None else ""
         if name in CAMERA_CALLS or (name in IMAGE_CALLS and head.startswith("image_transport::")):
@@ -2045,6 +2078,14 @@ class _Reader:
         if name_position >= len(arguments):
             return True
         ref = self.resolve(arguments[name_position])
+        sub = None if action or factory else self._sub_namespace(receiver)
+        if sub is not None and not (ref.status == LITERAL and ref.value[:1] in ("/", "~")):
+            # rclcpp prefixes a sub node's namespace onto every name that is not absolute or
+            # private (`extend_name_with_sub_namespace` in node_impl.hpp)
+            if sub.status == LITERAL and ref.status == LITERAL:
+                ref = replace(ref, value=f"{sub.value}/{ref.value}")
+            else:
+                ref = Ref(UNRESOLVED, expr=f"{sub.expr or sub.value}/{ref.expr or ref.value}")
         self.unit.endpoints.append(
             Endpoint(
                 kind=kind,
@@ -2258,6 +2299,22 @@ class _Reader:
         declare = self._declare_shape(name, arguments, template)
         if declare is not None:
             self._declare(name, declare, node)
+            return
+        if name == PREFIX_READ and arguments:
+            # every parameter under the prefix is read back; a prefix the reader cannot
+            # follow could be any, so it reads every parameter of the node
+            prefix = self.resolve(arguments[0])
+            if prefix.status != LITERAL:
+                prefix = Ref(LITERAL, "", prefix.expr)
+            self.unit.reads.append(
+                ParamRead(
+                    name=prefix,
+                    sym=self.sym,
+                    line=_line(node),
+                    api=PREFIX_READ,
+                    spelling=_flat(arguments[0], self.src),
+                )
+            )
             return
         if name not in READ_CALLS or not arguments:
             return
@@ -5406,8 +5463,9 @@ def file_report(
         )
 
     reads_by_name: dict[tuple[str, str], list[ParamRead]] = {}
+    prefix_reads = [read for read in unit.reads if read.api == PREFIX_READ]
     for read in unit.reads:
-        if read.name.resolved:
+        if read.name.resolved and read.api != PREFIX_READ:
             reads_by_name.setdefault((read.construction, read.name.value), []).append(read)
 
     parameters: list[dict[str, Any]] = []
@@ -5420,7 +5478,14 @@ def file_report(
     lookup_name = lookups.get(plugin.type, (base_class, plugin.type))[1] if plugin else ""
     for item in sorted(unit.params, key=lambda row: (row.scope, row.name.value, row.construction)):
         reads = sorted(
-            reads_by_name.get((item.construction, item.name.value), []), key=lambda row: row.line
+            reads_by_name.get((item.construction, item.name.value), [])
+            + [
+                read
+                for read in prefix_reads
+                if read.construction == item.construction
+                and (not read.name.value or item.name.value.startswith(read.name.value + "."))
+            ],
+            key=lambda row: row.line,
         )
         if not item.name.resolved:
             unresolved.append(
@@ -5645,6 +5710,7 @@ def file_report(
             for read in unit.reads
             if read.name.resolved
             and read.name.status != SUFFIX
+            and read.api != PREFIX_READ
             and (read.construction, read.name.value) not in declared
         ),
         key=lambda row: (row["name"], row["owner_symbol"], row["line_hint"]),

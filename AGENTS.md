@@ -847,7 +847,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.32`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.33`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -1624,7 +1624,25 @@ so the declarations of those classes reach the node. A node handed on through
 `std::dynamic_pointer_cast<Self>(shared_from_this())` is still the node, and `node_ptr` is a
 name a node handle goes by. No release had shipped, so no stored id or waiver existed.
 
-A reader pinned to `1.0` still loads a `1.32` file: `Atlas.from_json` compares the major
+* in `1.33`, the coded `publishes` and `subscribes` edge value `qos_overridden`, the QoS
+  policies a parameters file overrides for that endpoint through
+  `qos_overrides.<topic>.<publisher|subscription>.<policy>`. rclcpp and rclpy take such a key
+  only when the endpoint was built with overriding options, which the reader does not follow,
+  so the source value of each named policy is dropped from `qos` rather than stated as what
+  runs, and `qos.incompatible` no longer fires on a policy the file changes.
+
+Inside `1.33`, with no new key, four calls the readers did not know are read, found by
+comparing the public API of the installed rclcpp and rclpy with what the readers spell. A
+C++ `create_sub_node("ns")` handle prefixes its namespace onto every relative topic and
+service name it creates, as `extend_name_with_sub_namespace` does, and one the reader cannot
+follow leaves the name a blind spot. `get_parameters_by_prefix(prefix)` reads back every
+parameter under the prefix in both readers, so `param.declared_unread` no longer fires on
+them. C++ `waitForTransform` and python `lookup_transform_full`, `can_transform_full` and
+the `_async` forms are transform reads, the `_full` forms taking the source from the third
+argument. C++ `create_generic_client` is a service client whose type is the string second
+argument. No release had shipped, so no stored id or waiver existed.
+
+A reader pinned to `1.0` still loads a `1.33` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned

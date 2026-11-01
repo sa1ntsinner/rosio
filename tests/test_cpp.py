@@ -308,3 +308,26 @@ def test_a_raw_guard_spaces_only_binary_operators_and_commas():
     assert _guard_of(f"if (f(x,y)&&!g( z )) {{ {PUB} }}") == "f(x, y) && !g(z)"
     assert _guard_of(f"if (count_>=limit) {{ {PUB} }}") == "count_ >= limit"
     assert _guard_of(f"if (period_!=0ms) {{ {PUB} }}") == "period_ != 0ms"
+
+
+def test_a_sub_node_prefixes_its_namespace_onto_relative_names_only():
+    unit = cpp.parse_text(
+        """
+class Sensors : public rclcpp::Node {
+ public:
+  Sensors() : Node("sensors") {
+    lidar_ = this->create_sub_node("lidar");
+    auto front = lidar_->create_sub_node("front");
+    scan_ = front->create_publisher<std_msgs::msg::String>("scan", 10);
+    status_ = lidar_->create_publisher<std_msgs::msg::String>("/status", 10);
+    own_ = lidar_->create_publisher<std_msgs::msg::String>("~/own", 10);
+    plain_ = create_publisher<std_msgs::msg::String>("plain", 10);
+  }
+  void later() { info_ = lidar_->create_service<std_srvs::srv::Trigger>("info", cb); }
+};
+""",
+        path="sensors.cpp",
+    )
+    cpp.analyse([unit])
+    names = sorted(row["name"] for row in cpp.file_report(unit)["endpoints"])
+    assert names == ["/status", "lidar/front/scan", "lidar/info", "plain", "~/own"]

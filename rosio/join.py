@@ -221,6 +221,7 @@ class JoinReport:
     blocked_sites: set[tuple[str, str, str, str]] = field(default_factory=set)
     tf_cases: list[tuple[str, str, str, str]] = field(default_factory=list)
     coded_blind: set[tuple[str, str, str, int | None]] = field(default_factory=set)
+    qos_overrides: dict[str, set[tuple[str, str]]] | None = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -963,6 +964,33 @@ def _bind_known_endpoints(builder: model.AtlasBuilder, item: Instance, report: J
 AUTO_DECLARED = frozenset({"use_sim_time"})
 AUTO_DECLARED_PREFIXES = ("qos_overrides.",)
 """Names the client library declares for every node, so no source states them."""
+
+
+def _qos_overridden(
+    atlas: model.Atlas, report: JoinReport, item: Any, kind: str, topic: str
+) -> set[str]:
+    """The QoS policies a parameters file overrides for one endpoint of a node, in its profile."""
+    side = {"publisher": "publisher", "subscriber": "subscription"}.get(kind)
+    if side is None:
+        return set()
+    if report.qos_overrides is None:
+        report.qos_overrides = {}
+        for entity in atlas.by_kind(model.NodeKind.PARAM.value):
+            parsed = ids.parse_param(entity.id)
+            if parsed.name.startswith("qos_overrides."):
+                for candidate in entity.candidates:
+                    report.qos_overrides.setdefault(parsed.owner, set()).add(
+                        (candidate.profile, parsed.name)
+                    )
+    prefix = f"qos_overrides.{topic}."
+    out = set()
+    for profile, name in report.qos_overrides.get(item.node_id, ()):
+        if profile not in (item.profile, model.ANY_PROFILE) or not name.startswith(prefix):
+            continue
+        entity, _, policy = name[len(prefix) :].rpartition(".")
+        if entity.partition("_")[0] == side:
+            out.add(policy)
+    return out
 
 
 def auto_declared(name: str) -> bool:
@@ -2990,8 +3018,16 @@ def _bind_endpoint(
             edge_values["remap"] = list(bound.rule)
         if type_name:
             edge_values["type"] = type_name
-        if row.get("qos") is not None:
-            edge_values["qos"] = row.get("qos")
+        qos = row.get("qos")
+        overridden = _qos_overridden(builder.atlas, report, item, kind, bound.name)
+        if overridden and isinstance(qos, dict):
+            # A file sets `qos_overrides.<topic>.<side>.<policy>` for this node. Whether the
+            # node takes it depends on the overriding options the endpoint was built with,
+            # so the source value of that policy is no longer a claim.
+            qos = {key: value for key, value in qos.items() if key not in overridden}
+            edge_values["qos_overridden"] = sorted(overridden)
+        if qos is not None:
+            edge_values["qos"] = qos
         if row.get("condition"):
             edge_values["condition"] = row.get("condition")
         period = _publish_period(builder.atlas, item, carrier, row)

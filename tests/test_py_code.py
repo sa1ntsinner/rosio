@@ -1272,3 +1272,26 @@ def test_a_declare_wrapper_of_another_module_declares_the_name_it_is_handed() ->
     ).read()
     assert [row["name"] for row in record["parameters"]] == ["limit"]
     assert sorted(row["name"] for row in record["endpoints"]) == ["/a/reset", "/b/reset"]
+
+
+def test_a_prefix_read_reads_back_every_parameter_under_the_prefix() -> None:
+    record = _created(
+        """
+from rclpy.node import Node
+
+
+class Limits(Node):
+    def __init__(self):
+        super().__init__("limits")
+        self.declare_parameter("limits.speed", 1.0)
+        self.declare_parameter("limits.turn", 2.0)
+        self.declare_parameter("other", 3)
+        self.limits = self.get_parameters_by_prefix("limits")
+"""
+    )
+    read = {row["name"]: [r["api"] for r in row["reads"]] for row in record["parameters"]}
+    assert read == {
+        "limits.speed": ["get_parameters_by_prefix"],
+        "limits.turn": ["get_parameters_by_prefix"],
+        "other": [],
+    }

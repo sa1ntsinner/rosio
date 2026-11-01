@@ -141,7 +141,18 @@ _WRAPPER_KEYWORDS = {
 keyword argument is the same argument, and read positionally it states none. Signature on
 humble: `message_filters/__init__.py:61`. An rclpy action is read by `_action`, never here."""
 
-_LOOKUP_CALLS = ("lookup_transform", "can_transform")
+_LOOKUP_CALLS = (
+    "lookup_transform",
+    "can_transform",
+    "lookup_transform_async",
+    "wait_for_transform_async",
+    "lookup_transform_full",
+    "can_transform_full",
+    "lookup_transform_full_async",
+    "wait_for_transform_full_async",
+)
+"""tf2_ros.Buffer reads. The `_full` forms take (target, target_time, source, source_time,
+fixed_frame), so the source is the third argument."""
 
 _NODE_ARGUMENTS = frozenset({"self", "node", "parent", "parent_node"})
 _NODE_USERS = frozenset(
@@ -475,6 +486,7 @@ class PyFile:
         self.endpoints: list[dict[str, Any]] = []
         self.params: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.param_reads: list[dict[str, Any]] = []
+        self.prefix_reads: list[tuple[str, str, dict[str, Any]]] = []
         self.callbacks: list[dict[str, Any]] = []
         self.broadcasts: list[dict[str, Any]] = []
         self.lookups: list[dict[str, Any]] = []
@@ -1838,6 +1850,15 @@ class PyFile:
             return self._declare(node, ctx, tail, text)
         if tail in ("get_parameter", "get_parameter_or", "has_parameter"):
             return self._read_param(node, ctx, tail, target, want_value, text)
+        if tail == "get_parameters_by_prefix":
+            # every parameter under the prefix is read back; a prefix the reader cannot
+            # follow could be any, so it reads every parameter of the node
+            args = self._positional(node)
+            prefix = self._eval(args[0], ctx) if args else Val(expr=text)
+            spelled = prefix.value if prefix.known and isinstance(prefix.value, str) else ""
+            read = {"api": tail, "target": None, "line_hint": _line(node)}
+            self.prefix_reads.append((spelled, self.construction, read))
+            return Val(expr=text, reason="call_result")
         if tail in self.accessors and len(node.args) == 1:
             return self._read_param(node, ctx, tail, target, True, text)
         if tail == "add_on_set_parameters_callback":
@@ -2613,9 +2634,13 @@ class PyFile:
 
     def _lookup(self, node: ast.Call, ctx: Ctx, call: str) -> None:
         args = self._positional(node)
-        if len(args) < 2:
+        source_at = 2 if "_full" in call else 1
+        target_node = args[0] if args else self._keyword(node, "target_frame")
+        source_node = (
+            args[source_at] if len(args) > source_at else self._keyword(node, "source_frame")
+        )
+        if target_node is None or source_node is None:
             return
-        target_node, source_node = args[0], args[1]
         target = _frame_val(self._eval(target_node, ctx))
         source = _frame_val(self._eval(source_node, ctx))
         record: dict[str, Any] = {
@@ -2832,6 +2857,11 @@ class PyFile:
             record["stamped_frames"] = [
                 {"frame": frame, "line_hint": line} for frame, line in sorted(stamped)
             ]
+        for prefix, construction, read in self.prefix_reads:
+            for (_scope, name, held), row in self.params.items():
+                under = not prefix or (isinstance(name, str) and name.startswith(prefix + "."))
+                if held == construction and under:
+                    row["reads"].append(read)
         if self.param_reads:
             record["parameter_reads"] = sorted(
                 self.param_reads, key=lambda item: (item["name"], item["owner_symbol"])
