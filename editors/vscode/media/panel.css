@@ -250,7 +250,7 @@ body.vscode-high-contrast-light {
   margin-top: 22px;
 }
 
-.group h2 .count {
+h2 .count {
   color: var(--muted);
   font-weight: 400;
   margin-left: 6px;
@@ -418,12 +418,6 @@ section + section,
   gap: 22px 32px;
 }
 
-.relation h2 .count {
-  color: var(--muted);
-  font-weight: 400;
-  margin-left: 6px;
-}
-
 .chips {
   display: flex;
   flex-direction: column;
@@ -437,12 +431,6 @@ section + section,
   white-space: nowrap;
 }
 
-.parameters h2 .count {
-  color: var(--muted);
-  font-weight: 400;
-  margin-left: 6px;
-}
-
 .parameters table td:first-child {
   width: 55%;
 }
@@ -452,4 +440,26 @@ section + section,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* a ledger is a disclosure: open where the layers disagree */
+
+details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary h2::before {
+  content: "\25B8";
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+}
+
+details[open] > summary h2::before {
+  content: "\25BE";
 }

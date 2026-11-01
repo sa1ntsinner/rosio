@@ -296,10 +296,8 @@ svg.lit .edge.near {
 
 .inspector h3 {
   margin: 16px 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--muted);
 }
 
@@ -372,13 +370,14 @@ svg.lit .edge.near {
   font-size: 12px;
 }
 
-.links li.warn .qos {
-  color: var(--warn);
+.links .why {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--bad);
 }
 
-.links li.bad,
-.links li.bad .qos {
-  color: var(--bad);
+.links li.warn .why {
+  color: var(--warn);
 }
 
 .empty {

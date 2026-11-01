@@ -374,6 +374,8 @@ function inspector(rows: Map<string, Row>, row: Row, links: Link[]): HTMLElement
       const item = h("li", { class: link.problem === "error" ? "bad" : link.problem || link.conflicts.length ? "warn" : "" }, sentence);
       const qos = qosText(link.qos);
       if (qos) item.append(h("span", { class: "qos" }, qos));
+      const why = link.problem ? current?.findings[other]?.find((finding) => finding.severity === link.problem) : undefined;
+      if (why) item.append(h("span", { class: "why" }, why.title));
       if (link.conflicts.length) item.append(h("span", { class: "qos" }, `layers disagree on ${link.conflicts.join(", ")}`));
       if (link.at) item.append(openButton("Go to line", link.at, "small"));
       list.append(item);

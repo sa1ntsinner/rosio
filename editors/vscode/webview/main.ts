@@ -489,10 +489,14 @@ function profileLedger(entity: Entity, profile: string, showProfile: boolean): H
     const values = layers.map((layer) => byLayer.get(layer)?.[field]).filter((value) => value !== undefined);
     return new Set(values.map((value) => JSON.stringify(value))).size > 1;
   }));
+  // Disagreements first and open; a ledger where the layers agree is reference, closed.
+  fields.sort((a, b) => Number(conflicts.has(b)) - Number(conflicts.has(a)));
+  const title = showProfile ? `Layer by layer in ${profile.replace(/^profile:/, "")}` : layers.length > 1 ? "Layer by layer" : `What the ${layers[0]} layer says`;
+  const props: Record<string, string> = conflicts.size ? { open: "" } : {};
   return h(
-    "section",
-    {},
-    h("h2", {}, showProfile ? `Layer by layer in ${profile.replace(/^profile:/, "")}` : layers.length > 1 ? "Layer by layer" : `What the ${layers[0]} layer says`),
+    "details",
+    props,
+    h("summary", {}, h("h2", {}, title, h("span", { class: "count" }, conflicts.size ? plural(conflicts.size, "disagreement") : plural(fields.length, "field")))),
     h(
       "table",
       {},
@@ -539,6 +543,7 @@ const RELATION_TITLE: Record<string, [string, string]> = {
   gates: ["Gates", "Gated by"],
   declares_param: ["Declares", "Declared by"],
   reads_param: ["Reads", "Read by"],
+  uses_type: ["Type", "Used by"],
 };
 
 const RELATION_ORDER = Object.keys(RELATION_TITLE);
@@ -561,7 +566,8 @@ function relationGroups(entity: Entity): HTMLElement | null {
     { class: "relations" },
     ...ordered.map(([key, rows]) => {
       const [kind, direction] = key.split("|");
-      const titles = RELATION_TITLE[kind] ?? [words(kind), `${words(kind)} (in)`];
+      const named = words(kind).replace(/^./, (first) => first.toUpperCase());
+      const titles = RELATION_TITLE[kind] ?? [named, `${named} (in)`];
       const title = direction === "out" ? titles[0] : titles[1];
       const sorted = rows.slice().sort((a, b) => (a.label || a.id).localeCompare(b.label || b.id));
       const list = h("div", { class: "chips" }, ...sorted.slice(0, RELATIONS_SHOWN).map(relationLink));
