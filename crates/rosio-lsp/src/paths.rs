@@ -130,22 +130,34 @@ fn discover(root: &Path, label: &str, packages: &mut BTreeMap<String, BTreeMap<S
 ///
 /// An atlas states where a root sits only inside a git checkout, and a colcon workspace is
 /// usually not one (its packages are). Where the roots are on this machine is what the
-/// configuration says, relative to the directory that holds it.
+/// configuration says, relative to the directory that holds it, and a configuration that
+/// names none read `src` and `install` beside it, as extraction does.
 fn configured_roots(workspace: &Path) -> BTreeMap<String, String> {
-    let Some((base, text)) = [workspace.to_path_buf(), workspace.join("..")]
+    let found = [workspace.to_path_buf(), workspace.join("..")]
         .into_iter()
         .find_map(|dir| {
             Some((
                 dir.clone(),
                 std::fs::read_to_string(dir.join("rosio.yaml")).ok()?,
             ))
-        })
-    else {
-        return BTreeMap::new();
+        });
+    let (base, config) = match found {
+        Some((base, text)) => match serde_yaml_ng::from_str::<serde_json::Value>(&text) {
+            Ok(config) => (base, config),
+            Err(_) => return BTreeMap::new(),
+        },
+        None => (workspace.to_path_buf(), serde_json::Value::Null),
     };
-    let Ok(config) = serde_yaml_ng::from_str::<serde_json::Value>(&text) else {
-        return BTreeMap::new();
-    };
+    if config.get("roots").is_none() {
+        return ["src", "install"]
+            .into_iter()
+            .filter(|kind| base.join(kind).is_dir())
+            .map(|kind| {
+                let path = normalize(&base.join(kind));
+                (kind.to_string(), path.to_string_lossy().into_owned())
+            })
+            .collect();
+    }
     let mut found: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for root in config["roots"].as_array().into_iter().flatten() {
         if let (Some(kind), Some(path)) = (root["kind"].as_str(), root["path"].as_str()) {
@@ -308,6 +320,17 @@ mod tests {
             "packages": {"p":{"src":"p","install":"p/share/p"}}
         }}))
         .unwrap();
+        let paths = Paths::new(&workspace, &atlas, &BTreeMap::new());
+        assert_eq!(
+            paths.resolve(&Evidence {
+                file: "file:p|config/a.yaml".into(),
+                root: "src".into(),
+                ..Default::default()
+            }),
+            Some(normalize(&workspace.join("src/p/config/a.yaml")))
+        );
+        // No roots stated: extraction read src beside the configuration, and so does this.
+        std::fs::write(workspace.join("rosio.yaml"), "profiles: []\n").unwrap();
         let paths = Paths::new(&workspace, &atlas, &BTreeMap::new());
         assert_eq!(
             paths.resolve(&Evidence {
