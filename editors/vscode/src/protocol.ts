@@ -39,6 +39,8 @@ export interface Finding {
   title: string;
   say: string;
   fix: string;
+  /** The fix is an exact replacement the language server offers as a quick fix. */
+  fixable?: boolean;
   locations: Location[];
 }
 

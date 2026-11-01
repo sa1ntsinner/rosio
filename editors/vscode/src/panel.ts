@@ -79,6 +79,9 @@ export class AtlasPanel implements vscode.Disposable {
           viewColumn: vscode.ViewColumn.Beside,
         });
         break;
+      case "fix":
+        await vscode.commands.executeCommand("rosio.fixFinding", message.finding);
+        break;
       case "extract":
         await vscode.commands.executeCommand("rosio.extract");
         break;

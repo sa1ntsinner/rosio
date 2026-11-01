@@ -8,6 +8,7 @@ export type ToPanel =
 export type ToHost =
   | { type: "ready" }
   | { type: "open"; uri: string; line: number }
+  | { type: "fix"; finding: Finding }
   | { type: "extract" }
   | { type: "find" }
   | { type: "atlas" }

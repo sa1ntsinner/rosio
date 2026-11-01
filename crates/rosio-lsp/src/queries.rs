@@ -27,6 +27,7 @@ struct FindingRow<'a> {
     title: &'a Value,
     say: &'a Value,
     fix: &'a Value,
+    fixable: bool,
     locations: Vec<SourceLocation>,
 }
 
@@ -149,6 +150,9 @@ pub(crate) fn query(
                     title: &finding["title"],
                     say: &finding["say"],
                     fix: &finding["fix"],
+                    fixable: finding["edits"]
+                        .as_array()
+                        .is_some_and(|rows| !rows.is_empty()),
                     locations: locations(index, &finding["where"]),
                 })
                 .collect();

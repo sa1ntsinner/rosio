@@ -125,11 +125,22 @@ function findingRow(finding: Finding): HTMLElement {
       { class: "what" },
       h("span", {}, finding.title),
       h("span", { class: "rule" }, finding.rule),
-      h("p", { class: "say" }, finding.say, " ", h("span", {}, `Fix: ${finding.fix}`)),
+      h(
+        "p",
+        { class: "say" },
+        finding.say,
+        " ",
+        h("span", {}, `Fix: ${finding.fix}`),
+        finding.fixable && h("button", { class: "fix" }, "Apply fix"),
+      ),
     ),
     first ? h("a", { class: "where", title: "Open the line" }, fileAndLine(first.uri, first.line)) : h("span", {}),
   );
   const open = () => first && vscode.postMessage({ type: "open", uri: first.uri, line: first.line });
+  row.querySelector(".fix")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "fix", finding });
+  });
   row.querySelector(".where")?.addEventListener("click", (event) => {
     event.stopPropagation();
     open();

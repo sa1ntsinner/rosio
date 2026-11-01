@@ -81,7 +81,7 @@ export class FindingsView implements vscode.TreeDataProvider<FindingNode> {
     item.description = first ? `line ${first.line + 1}` : "";
     item.iconPath = SEVERITY_ICON[node.severity];
     item.tooltip = new vscode.MarkdownString(`${node.say}\n\n**Fix:** ${node.fix}\n\n\`${node.rule}\``);
-    item.contextValue = "finding";
+    item.contextValue = node.fixable ? "finding.fixable" : "finding";
     if (first) item.command = openAt(first);
     return item;
   }

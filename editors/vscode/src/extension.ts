@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { MigrationView, openMigrationChange, applyMigration, verifyMigration } from "./migration";
 import { RELEASES, targetReleases } from "./migrationModel";
 import { labelOf } from "./ids";
-import type { Summary } from "./protocol";
+import type { Finding, Summary } from "./protocol";
 import { GraphPanel } from "./graph";
 import { RobotPanel } from "./robot";
 import { AtlasPanel } from "./panel";
@@ -107,6 +107,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
     vscode.window.registerTreeDataProvider("rosio.frames", frames),
     vscode.window.registerTreeDataProvider("rosio.params", params),
     vscode.commands.registerCommand("rosio.findParameter", () => findParameter(params)),
+    vscode.commands.registerCommand("rosio.fixFinding", (finding: Finding) => fixFinding(finding)),
     server.onDidChange(() => void refresh()),
     vscode.commands.registerCommand("rosio.openAtlas", () => panel.showAtlas()),
     vscode.commands.registerCommand("rosio.showGraph", (focus?: unknown) => graph.show(graphFocus(focus))),
@@ -121,6 +122,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
   await server.start();
   await refresh();
   return { summary: () => server.summary(), serverError: () => server.startError };
+}
+
+/** Applies the replacement the language server offers for a finding at the line it cites. */
+async function fixFinding(finding: Finding): Promise<void> {
+  const at = finding.locations[0];
+  if (!at) return;
+  const uri = vscode.Uri.parse(at.uri);
+  const line = (await vscode.workspace.openTextDocument(uri)).lineAt(at.line).range;
+  const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>("vscode.executeCodeActionProvider", uri, line);
+  const fix = actions?.find((action) => action.isPreferred && action.edit);
+  if (!fix?.edit) {
+    void vscode.window.showWarningMessage("The cited line changed since the atlas was built, so rosio did not edit it.");
+    return;
+  }
+  await vscode.workspace.applyEdit(fix.edit);
+  await vscode.window.showTextDocument(uri, { selection: line });
 }
 
 /** How old the atlas on disk is, the way a person says it. */

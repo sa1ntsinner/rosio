@@ -205,6 +205,12 @@
         "title": "Find parameter",
         "category": "rosio",
         "icon": "$(search)"
+      },
+      {
+        "command": "rosio.fixFinding",
+        "title": "Apply fix",
+        "category": "rosio",
+        "icon": "$(lightbulb-autofix)"
       }
     ],
     "keybindings": [
@@ -287,6 +293,11 @@
           "command": "rosio.applyMigration",
           "when": "view == rosio.migration && viewItem == migration.automatic",
           "group": "inline"
+        },
+        {
+          "command": "rosio.fixFinding",
+          "when": "view == rosio.findings && viewItem == finding.fixable",
+          "group": "inline"
         }
       ],
       "explorer/context": [
@@ -299,6 +310,10 @@
       "commandPalette": [
         {
           "command": "rosio.showEntity",
+          "when": "false"
+        },
+        {
+          "command": "rosio.fixFinding",
           "when": "false"
         }
       ]
