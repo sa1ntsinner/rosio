@@ -30,14 +30,17 @@ import {
   started,
 } from "./launchModel";
 
-const SEVERITY_TITLE: Record<Severity, string> = { error: "Errors", warn: "Warnings", info: "Notes" };
 const SEVERITY_ICON: Record<Severity, vscode.ThemeIcon> = {
   error: new vscode.ThemeIcon("error", new vscode.ThemeColor("problemsErrorIcon.foreground")),
   warn: new vscode.ThemeIcon("warning", new vscode.ThemeColor("problemsWarningIcon.foreground")),
   info: new vscode.ThemeIcon("info", new vscode.ThemeColor("problemsInfoIcon.foreground")),
 };
 
-type FindingNode = { severity: Severity; findings: Finding[] } | Finding;
+/** Findings by the file that holds the line to edit, the file with the worst finding first. */
+type FindingFile = { uri: string; findings: Finding[] };
+type FindingNode = FindingFile | Finding;
+
+const rank = (finding: Finding) => SEVERITY_ORDER.indexOf(finding.severity);
 
 export class FindingsView implements vscode.TreeDataProvider<FindingNode> {
   private readonly changed = new vscode.EventEmitter<void>();
@@ -52,30 +55,31 @@ export class FindingsView implements vscode.TreeDataProvider<FindingNode> {
   }
 
   getChildren(node?: FindingNode): FindingNode[] {
-    if (!node) {
-      return SEVERITY_ORDER.map((severity) => ({
-        severity,
-        findings: this.findings.filter((finding) => finding.severity === severity),
-      })).filter((group) => group.findings.length > 0);
+    if (node) return "findings" in node ? node.findings : [];
+    const files = new Map<string, Finding[]>();
+    for (const finding of this.findings) {
+      const uri = finding.locations[0]?.uri ?? "";
+      files.set(uri, [...(files.get(uri) ?? []), finding]);
     }
-    return "findings" in node ? node.findings : [];
+    const groups = [...files].map(([uri, findings]) => ({
+      uri,
+      findings: findings.sort((a, b) => rank(a) - rank(b) || (a.locations[0]?.line ?? 0) - (b.locations[0]?.line ?? 0)),
+    }));
+    return groups.sort((a, b) => rank(a.findings[0]) - rank(b.findings[0]) || fileName(a.uri).localeCompare(fileName(b.uri)));
   }
 
   getTreeItem(node: FindingNode): vscode.TreeItem {
     if ("findings" in node) {
-      const item = new vscode.TreeItem(
-        SEVERITY_TITLE[node.severity],
-        node.severity === "info"
-          ? vscode.TreeItemCollapsibleState.Collapsed
-          : vscode.TreeItemCollapsibleState.Expanded,
-      );
+      const item = new vscode.TreeItem(node.uri ? fileName(node.uri) : "Not tied to a file", vscode.TreeItemCollapsibleState.Expanded);
       item.description = String(node.findings.length);
-      item.iconPath = SEVERITY_ICON[node.severity];
+      item.iconPath = SEVERITY_ICON[node.findings[0].severity];
+      if (node.uri) item.resourceUri = vscode.Uri.parse(node.uri);
       return item;
     }
     const item = new vscode.TreeItem(node.title, vscode.TreeItemCollapsibleState.None);
     const first = node.locations[0];
-    item.description = first ? `${decodeURIComponent(first.uri.slice(first.uri.lastIndexOf("/") + 1))}:${first.line + 1}` : node.rule;
+    item.description = first ? `line ${first.line + 1}` : "";
+    item.iconPath = SEVERITY_ICON[node.severity];
     item.tooltip = new vscode.MarkdownString(`${node.say}\n\n**Fix:** ${node.fix}\n\n\`${node.rule}\``);
     item.contextValue = "finding";
     if (first) item.command = openAt(first);
@@ -85,6 +89,10 @@ export class FindingsView implements vscode.TreeDataProvider<FindingNode> {
   dispose(): void {
     this.changed.dispose();
   }
+}
+
+function fileName(uri: string): string {
+  return decodeURIComponent(uri.slice(uri.lastIndexOf("/") + 1));
 }
 
 /** What each kind of blind spot means to someone reading their own workspace. */

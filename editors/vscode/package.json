@@ -73,11 +73,13 @@
         },
         {
           "id": "rosio.frames",
-          "name": "Frames"
+          "name": "Frames",
+          "visibility": "collapsed"
         },
         {
           "id": "rosio.params",
-          "name": "Parameters"
+          "name": "Parameters",
+          "visibility": "collapsed"
         },
         {
           "id": "rosio.system",
