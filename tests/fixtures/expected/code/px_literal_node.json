@@ -1,5 +1,5 @@
 {
-  "note": "The rclpy half of the literal case. A bare integer depth is an int converted by the API into keep_last of that depth, so history is stated there. A QoSProfile spells its own keyword arguments, so anything it does not pass stays null rather than taking the rclpy default. line_hint is advisory and never compared.",
+  "note": "The rclpy half of the literal case. A bare integer depth is converted by rclpy into QoSProfile(depth=n), so it states keep_last of that depth with the reliable and volatile defaults, which is what a running jazzy node reports. line_hint is advisory and never compared.",
   "package": "px_nodes",
   "path": "src/px_nodes/px_nodes/literal_node.py",
   "package_relative_path": "px_nodes/literal_node.py",
@@ -34,8 +34,8 @@
         "form": "depth",
         "history": "keep_last",
         "depth": 5,
-        "reliability": null,
-        "durability": null,
+        "reliability": "reliable",
+        "durability": "volatile",
         "preset": null
       },
       "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",
@@ -80,8 +80,8 @@
         "form": "depth",
         "history": "keep_last",
         "depth": 10,
-        "reliability": null,
-        "durability": null,
+        "reliability": "reliable",
+        "durability": "volatile",
         "preset": null
       },
       "owner_symbol": "px_nodes.literal_node.LiteralNode.__init__",

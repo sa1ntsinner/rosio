@@ -1669,18 +1669,29 @@ class PyFile:
         carried = Val(expr=text)
         for piece in node.values:
             if isinstance(piece, ast.Constant):
-                parts.append(str(piece.value))
-                continue
-            if not isinstance(piece, ast.FormattedValue):
+                inner = Val(expr=text, known=True, value=str(piece.value))
+            elif isinstance(piece, ast.FormattedValue):
+                inner = self._eval(piece.value, ctx)
+                if not inner.known:
+                    return Val(expr=text, reason=inner.reason or "call_result")
+            else:
                 return Val(expr=text, reason="call_result")
-            inner = self._eval(piece.value, ctx)
-            if not inner.known:
-                return Val(expr=text, reason=inner.reason or "call_result")
-            parts.append(str(inner.value))
-            if carried.from_parameter is None and inner.from_parameter:
+            if inner.from_parameter:
+                if parts or carried.from_parameter is not None:
+                    # The join reads a parameter per profile and appends the literal rest,
+                    # so only a name that starts with the one parameter can follow it.
+                    return Val(expr=text, reason="parameter_inside_name")
                 carried = replace(
-                    carried, from_parameter=inner.from_parameter, binding=inner.binding
+                    carried,
+                    from_parameter=inner.from_parameter,
+                    binding=inner.binding,
+                    parameter_suffix=inner.parameter_suffix,
                 )
+            elif carried.from_parameter is not None:
+                carried = replace(
+                    carried, parameter_suffix=carried.parameter_suffix + str(inner.value)
+                )
+            parts.append(str(inner.value))
             if carried.from_constant is None and inner.from_constant:
                 carried = replace(carried, from_constant=inner.from_constant)
         return replace(carried, known=True, value="".join(parts), state="resolved_from_fstring")
@@ -2311,14 +2322,12 @@ class PyFile:
         }
         val = self._eval(node, ctx)
         if isinstance(node, ast.Constant) and isinstance(node.value, int):
+            # rclpy turns a bare depth into QoSProfile(depth=n), which takes the defaults
             return {
-                "raw": text,
+                **blank,
+                **_QOS_PROFILE_DEFAULTS,
                 "form": "depth",
-                "history": "keep_last",
                 "depth": node.value,
-                "reliability": None,
-                "durability": None,
-                "preset": None,
             }
         if isinstance(node, ast.Call) and _dotted(node.func).endswith("QoSProfile"):
             return {**self._qos_profile(node, ctx, text).qos, "raw": text, "form": "profile"}

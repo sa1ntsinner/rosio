@@ -118,12 +118,12 @@ def test_nothing_is_invented_for_an_unresolved_name(fixtures_dir: Path, ws_root:
 
 
 def test_qos_is_never_defaulted(fixtures_dir: Path, ws_root: Path) -> None:
-    """A policy the source did not state stays null, a stated one keeps its own value, and a
-    `QoSProfile` states what rclpy fills in for a policy it is not given."""
+    """A stated policy keeps its own value, and a bare depth or a `QoSProfile` states what
+    rclpy fills in for a policy it is not given, measured against a running jazzy node."""
     record = _actual(ws_root, "src/px_nodes/px_nodes/literal_node.py")
     by_name = {item["name"]: item for item in record["endpoints"] if item["kind"] == "publisher"}
     assert by_name["/px/odom"]["qos"]["depth"] == 5
-    assert by_name["/px/odom"]["qos"]["reliability"] is None
+    assert by_name["/px/odom"]["qos"]["reliability"] == "reliable"
     assert by_name["/px/ready"]["qos"]["history"] == "keep_last"
     assert by_name["/px/ready"]["qos"]["durability"] == "transient_local"
     services = [item for item in record["endpoints"] if item["kind"].startswith("service")]

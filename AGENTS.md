@@ -1642,6 +1642,14 @@ the `_async` forms are transform reads, the `_full` forms taking the source from
 argument. C++ `create_generic_client` is a service client whose type is the string second
 argument. No release had shipped, so no stored id or waiver existed.
 
+Inside `1.33`, with no new key, two python reads moved after a generated workspace ran on
+jazzy and its live graph disagreed with the atlas. An f-string that starts with a parameter
+(`f"{prefix}/scan"`) states the literal rest as `parameter_suffix`, so the join appends it to
+the value each profile gives the parameter, where it named the endpoint by the parameter
+value alone; a parameter anywhere else in the string is the blind spot
+`parameter_inside_name`. A bare integer depth states the reliable and volatile defaults rclpy
+gives `QoSProfile(depth=n)`, as `rclcpp::QoS(n)` already did, which the running node reports.
+
 A reader pinned to `1.0` still loads a `1.33` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

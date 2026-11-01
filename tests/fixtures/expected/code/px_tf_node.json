@@ -66,8 +66,8 @@
         "form": "depth",
         "history": "keep_last",
         "depth": 10,
-        "reliability": null,
-        "durability": null,
+        "reliability": "reliable",
+        "durability": "volatile",
         "preset": null
       },
       "owner_symbol": "px_nodes.tf_node.TfNode.__init__",
