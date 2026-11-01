@@ -12,6 +12,7 @@ const MECHANISM: Record<string, string> = {
   ros_args_params_file: "--params-file",
   python_override: "launcher script",
   param_set_runtime: "ros2 param set",
+  code_set: "set by the node itself",
   code_default: "default in the source",
   observed_runtime: "running node",
   commented_out: "commented out",

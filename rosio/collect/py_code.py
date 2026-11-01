@@ -487,6 +487,7 @@ class PyFile:
         self.params: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.param_reads: list[dict[str, Any]] = []
         self.prefix_reads: list[tuple[str, str, dict[str, Any]]] = []
+        self.param_writes: list[dict[str, Any]] = []
         self.callbacks: list[dict[str, Any]] = []
         self.broadcasts: list[dict[str, Any]] = []
         self.lookups: list[dict[str, Any]] = []
@@ -1861,6 +1862,9 @@ class PyFile:
             return self._declare(node, ctx, tail, text)
         if tail in ("get_parameter", "get_parameter_or", "has_parameter"):
             return self._read_param(node, ctx, tail, target, want_value, text)
+        if tail in ("set_parameters", "set_parameters_atomically") and _on_node(node):
+            self._write_params(node, ctx)
+            return Val(expr=text, reason="call_result")
         if tail == "get_parameters_by_prefix":
             # every parameter under the prefix is read back; a prefix the reader cannot
             # follow could be any, so it reads every parameter of the node
@@ -2111,6 +2115,34 @@ class PyFile:
             record["default_expr"] = self._src(default)
         self.resolved_counts["param_value"] += 1
         return record, replace(value, known=True, value=resolved.value)
+
+    def _write_params(self, node: ast.Call, ctx: Ctx) -> None:
+        """`self.set_parameters([Parameter("x", value=5)])`: the node sets its own value."""
+        args = self._positional(node)
+        if not args or not isinstance(args[0], (ast.List, ast.Tuple)):
+            return
+        for item in args[0].elts:
+            if not (isinstance(item, ast.Call) and _dotted(item.func).endswith("Parameter")):
+                continue
+            parts = self._positional(item)
+            name = self._eval(parts[0], ctx) if parts else Val()
+            if not (name.known and isinstance(name.value, str)):
+                continue
+            value_node = self._keyword(item, "value") or (parts[2] if len(parts) > 2 else None)
+            value = self._eval(value_node, ctx) if value_node is not None else Val()
+            literal = value.known and value.state == "literal"
+            self.param_writes.append(
+                {
+                    "name": name.value,
+                    "value": value.value if literal else None,
+                    "value_state": "literal" if literal else "unresolved",
+                    "expr": self._src(item),
+                    **({"condition": ctx.condition} if ctx.condition else {}),
+                    **({"construction": self.construction} if self.construction else {}),
+                    "owner_symbol": ctx.symbol,
+                    "line_hint": _line(item),
+                }
+            )
 
     def _read_param(
         self,
@@ -2871,11 +2903,21 @@ class PyFile:
                 under = not prefix or (isinstance(name, str) and name.startswith(prefix + "."))
                 if held == construction and under:
                     row["reads"].append(read)
+        if self.param_writes:
+            record["parameter_writes"] = sorted(
+                self.param_writes, key=lambda item: (item["name"], item["owner_symbol"])
+            )
         if self.param_reads:
             record["parameter_reads"] = sorted(
                 self.param_reads, key=lambda item: (item["name"], item["owner_symbol"])
             )
         return record
+
+
+def _on_node(call: ast.Call) -> bool:
+    """A method called on the node itself, never on a parameter client of another node."""
+    owner = call.func.value if isinstance(call.func, ast.Attribute) else None
+    return isinstance(owner, ast.Name) and owner.id in _NODE_ARGUMENTS
 
 
 def _named_reason(record: dict[str, Any]) -> str:
@@ -3197,6 +3239,7 @@ _SYMBOL_KEYS = (
     ("parameters", "parameters"),
     ("parameter_callbacks", "parameter_callbacks"),
     ("parameter_reads", "parameter_reads"),
+    ("parameter_writes", "parameter_writes"),
 )
 
 
@@ -3480,6 +3523,11 @@ class PyCodeCollector:
                 "endpoints": endpoints,
                 "parameters": slice_of(record["parameters"]),
                 "parameter_reads": slice_of(record.get("parameter_reads")),
+                **(
+                    {"parameter_writes": slice_of(record.get("parameter_writes"))}
+                    if slice_of(record.get("parameter_writes"))
+                    else {}
+                ),
                 "tf_broadcasts": broadcasts,
                 "tf_lookups": slice_of(record["tf"]["lookups"]),
             },

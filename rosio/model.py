@@ -37,7 +37,8 @@ from rosio.errors import ContractError
 
 SCHEMA_MINOR = "33"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the `publishes` and `subscribes` edge value `qos_overridden`; the rules
+stored id: the `publishes` and `subscribes` edge value `qos_overridden`, the record key
+`parameter_writes` and the `code_set` mechanism; the rules
 `topic.namespace_escape`, `param.read_undeclared`,
 `controller.undefined` and `controller.joint_missing`, the coded file value `stamped_frames`, the
 model file attribute `mesh_lines` and the `publishes` edge value `period_s`, inferred from
@@ -244,6 +245,7 @@ class Mechanism(str, Enum):
     ROS_ARGS_PARAMS_FILE = "ros_args_params_file"
     PYTHON_OVERRIDE = "python_override"
     PARAM_SET_RUNTIME = "param_set_runtime"
+    CODE_SET = "code_set"
     CODE_DEFAULT = "code_default"
     OBSERVED_RUNTIME = "observed_runtime"
     COMMENTED_OUT = "commented_out"

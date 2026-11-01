@@ -1295,3 +1295,22 @@ class Limits(Node):
         "limits.turn": ["get_parameters_by_prefix"],
         "other": [],
     }
+
+
+def test_a_node_setting_its_own_parameter_states_the_written_value() -> None:
+    record = _created(
+        """
+from rclpy.node import Node
+from rclpy.parameter import Parameter
+
+
+class Gain(Node):
+    def __init__(self):
+        super().__init__("gain")
+        self.declare_parameter("gain", 1.0)
+        self.set_parameters([Parameter("gain", Parameter.Type.DOUBLE, 2.5)])
+        self.client.set_parameters([Parameter("other", value=1)])
+"""
+    )
+    rows = [(row["name"], row["value"], row["value_state"]) for row in record["parameter_writes"]]
+    assert rows == [("gain", 2.5, "literal")]

@@ -124,6 +124,7 @@ PLUGIN_DECLARE_CALLS = frozenset({"declareParameter"})
 the source states a suffix and the full name only exists once the yaml names the layer."""
 READ_CALLS = frozenset({"get_parameter", "get_parameter_or"})
 PREFIX_READ = "get_parameters_by_prefix"
+WRITE_CALLS = frozenset({"set_parameter", "set_parameters", "set_parameters_atomically"})
 VALUE_CALLS = frozenset(
     {
         "string",
@@ -559,6 +560,8 @@ class Unit:
     publishing: dict[tuple[str, str], set[str]] = field(default_factory=dict)
     params: list[ParamSite] = field(default_factory=list)
     reads: list[ParamRead] = field(default_factory=list)
+    writes: list[dict[str, Any]] = field(default_factory=list)
+    """`set_parameter(rclcpp::Parameter("x", 5))`: a value the node gives itself."""
     callbacks: list[ParamCallback] = field(default_factory=list)
     broadcasts: list[TfBroadcast] = field(default_factory=list)
     lookups: list[TfLookup] = field(default_factory=list)
@@ -2300,6 +2303,9 @@ class _Reader:
         if declare is not None:
             self._declare(name, declare, node)
             return
+        if name in WRITE_CALLS and arguments:
+            self._write(arguments[0], node)
+            return
         if name == PREFIX_READ and arguments:
             # every parameter under the prefix is read back; a prefix the reader cannot
             # follow could be any, so it reads every parameter of the node
@@ -2348,6 +2354,31 @@ class _Reader:
                 spelling=_flat(values[0], self.src),
             )
         )
+
+    def _write(self, argument: Any, node: Any) -> None:
+        values = argument.named_children if argument.type == "initializer_list" else [argument]
+        for item in values:
+            if item.type != "call_expression":
+                continue
+            called, _receiver, _template = _call_parts(item, self.src)
+            parts = _args(item)
+            if called != "Parameter" or len(parts) < 2:
+                continue
+            name = self.resolve(parts[0])
+            if name.status != LITERAL:
+                continue
+            value = _literal_value(parts[1], self.src)
+            self.unit.writes.append(
+                {
+                    "name": name.value,
+                    "value": value,
+                    "value_state": "unresolved" if value is None else "literal",
+                    "expr": _flat(item, self.src),
+                    **({"condition": self.condition} if self.condition else {}),
+                    "owner_symbol": self.sym,
+                    "line_hint": _line(node),
+                }
+            )
 
     def _declare(self, name: str, declare: tuple[Any, Any, list[str], str], node: Any) -> None:
         name_node, default_node, types, wrapper = declare
@@ -5715,6 +5746,10 @@ def file_report(
         ),
         key=lambda row: (row["name"], row["owner_symbol"], row["line_hint"]),
     )
+    if unit.writes:
+        report["parameter_writes"] = sorted(
+            unit.writes, key=lambda row: (row["name"], row["owner_symbol"], row["line_hint"])
+        )
     report["parameter_callbacks"] = [
         {
             "api": item.api,
@@ -6337,6 +6372,11 @@ class CppCodeCollector:
                 "parameters": slice_of(report["parameters"]),
                 "plugin_parameters": slice_of(report["plugin_parameters"]),
                 "parameter_reads": slice_of(report["parameter_reads"]),
+                **(
+                    {"parameter_writes": slice_of(report["parameter_writes"])}
+                    if slice_of(report.get("parameter_writes", []))
+                    else {}
+                ),
                 "tf_broadcasts": slice_of(report["tf"]["broadcasts"]),
                 "tf_lookups": slice_of(report["tf"]["lookups"]),
             },

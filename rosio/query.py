@@ -2128,6 +2128,7 @@ REASONS = {
     "plugin_manifest_unreadable": "a plugin manifest that is not valid xml",
     "py_parse_error": "a python file that does not parse",
     "runtime_attribute_default": "an attribute of an object built at run time",
+    "set_in_code": "a value the node sets itself that rosio could not follow",
     "unbound_name": "a name bound nowhere rosio can see",
     "urdf_unreadable": "a robot model that is not valid xml",
     "xacro_argument_unresolved": "a xacro argument the launch walk could not evaluate",

@@ -102,6 +102,7 @@ RECORD_KEYS = (
     "nodes",
     "parameters",
     "parameter_reads",
+    "parameter_writes",
     "plugin_parameters",
     "tf_broadcasts",
     "tf_lookups",
@@ -145,6 +146,7 @@ class Carrier:
     endpoints: tuple[dict[str, Any], ...] = ()
     parameters: tuple[dict[str, Any], ...] = ()
     parameter_reads: tuple[dict[str, Any], ...] = ()
+    parameter_writes: tuple[dict[str, Any], ...] = ()
     plugin_parameters: tuple[dict[str, Any], ...] = ()
     tf_broadcasts: tuple[dict[str, Any], ...] = ()
     tf_lookups: tuple[dict[str, Any], ...] = ()
@@ -299,6 +301,7 @@ def carriers(atlas: model.Atlas) -> list[Carrier]:
                 endpoints=tuple(merged["endpoints"]),
                 parameters=tuple(merged["parameters"]),
                 parameter_reads=tuple(merged["parameter_reads"]),
+                parameter_writes=tuple(merged["parameter_writes"]),
                 plugin_parameters=tuple(merged["plugin_parameters"]),
                 tf_broadcasts=tuple(merged["tf_broadcasts"]),
                 tf_lookups=tuple(merged["tf_lookups"]),
@@ -2051,6 +2054,7 @@ def _supersede(
         if _taken(atlas, new_id, item):
             _ambiguous(builder, item, [names[0], item.name or item.executable], report)
             continue
+        _own_process_rows(builder, _process_actions(atlas, item.node_id), [new_id])
         _yield_to_named(builder, item.node_id, new_id)
         builder.supersede(item.node_id, new_id)
         node = builder.node(new_id)
@@ -2156,6 +2160,7 @@ def _split(
         _ambiguous(builder, item, names, report, one_process=True)
         _starts_several(builder, item, names)
         return
+    _own_process_rows(builder, _process_actions(atlas, item.node_id), list(targets.values()))
     builder.split(item.node_id, sorted(targets.values()))
     for name in names:
         node = builder.node(targets[name])
@@ -2298,6 +2303,66 @@ def _yield_to_named(builder: model.AtlasBuilder, old_id: str, new_id: str) -> No
         ]
         if not entity.candidates and not entity.facts:
             _drop(builder, entity.id)
+
+
+_ACTION_ROW = re.compile(r"(?:^|\|)([A-Za-z]\w*\([^()|]*\))\.(?:parameters|arguments)$")
+_SITE_DIGEST = re.compile(r"@[0-9a-z]+(?=\))")
+
+
+def _action_key(step: str) -> str:
+    """`Node(batch/group/talker@1a2b)` and `Node(talker)` name one launch action."""
+    kind, _, inside = _SITE_DIGEST.sub("", step).partition("(")
+    return f"{kind}({inside.rstrip(')').rpartition('/')[2]})"
+
+
+def _process_actions(atlas: model.Atlas, node_id: str) -> set[str]:
+    """The launch actions that start a process, spelled the way a candidate locator ends."""
+    entity = atlas.entities.get(node_id)
+    out: set[str] = set()
+    for fact in entity.facts if entity is not None else ():
+        if fact.layer != DECLARED:
+            continue
+        for source in fact.evidence:
+            out.add(_action_key(source.locator.rpartition("|")[2]))
+    return out
+
+
+def _own_process_rows(
+    builder: model.AtlasBuilder, actions: set[str], new_ids: Sequence[str]
+) -> None:
+    """Keep, in a chain followed under a name the source states, only this process's rows.
+
+    Every process a launch site starts unnamed in one namespace followed a block keyed on that
+    name as a chain of its own, so the chain holds the inline values of every such process,
+    and the same file rows once per process. Only the process that runs the node hands it its
+    own launch values, and a file row is one line read once.
+    """
+    if not actions:
+        return
+    for entity in list(builder.atlas.by_kind(model.NodeKind.PARAM.value)):
+        if ids.parse_param(entity.id).owner not in new_ids:
+            continue
+        rows: list[model.Candidate] = []
+        for profile in sorted({row.profile for row in entity.candidates}):
+            chain = sorted(
+                (row for row in entity.candidates if row.profile == profile),
+                key=lambda row: row.rank,
+            )
+            kept: list[model.Candidate] = []
+            seen: set[tuple[Any, ...]] = set()
+            for row in chain:
+                action = _ACTION_ROW.search(row.source.locator)
+                if action is not None and _action_key(action.group(1)) not in actions:
+                    continue
+                key = (row.mechanism, row.source.file, row.source.locator, repr(row.value))
+                if key in seen:
+                    continue
+                seen.add(key)
+                kept.append(row)
+            if len(kept) < len(chain):
+                kept = _ranked(kept, wins=any(row.wins for row in chain))
+            rows.extend(kept)
+        entity.candidates = sorted(rows, key=model.Candidate.sort_key)
 
 
 def _ranked(chain: list[model.Candidate], *, wins: bool) -> list[model.Candidate]:
@@ -2897,6 +2962,9 @@ def _bind_instance(
     for carrier in found:
         for row in carrier.parameter_reads:
             _bind_read(builder, item, carrier, row, report)
+    for carrier in found:
+        for row in carrier.parameter_writes:
+            _bind_write(builder, item, carrier, row)
     # The frames come last: a frame name can be a parameter value, and the parameter has to
     # carry its chain before its value can be read.
     for carrier in found:
@@ -3535,6 +3603,75 @@ def _bind_read(
         evidence=_source(carrier, row),
     )
     report.parameter_reads_bound += 1
+
+
+def _bind_write(
+    builder: model.AtlasBuilder, item: Instance, carrier: Carrier, row: dict[str, Any]
+) -> None:
+    """A node that sets its own declared parameter after it starts.
+
+    The value it writes replaces whatever a file or the default gave it, so a literal written
+    unconditionally wins the chain and every other row loses to it. A value the reader could
+    not follow, or a write under a condition, leaves the parameter with nothing winning and a
+    blind spot, because the value that runs is not one the files state.
+    """
+    if not carrier.file or row.get("name") is None:
+        return
+    try:
+        param_id = ids.build_param(item.node_id, ids.normalise_param_name(str(row["name"])))
+    except ContractError:
+        return
+    entity = builder.atlas.entities.get(param_id)
+    if entity is None or not entity.state:
+        return  # rclcpp and rclpy refuse to set a parameter nobody declared
+    site = _source(carrier, row)[0]
+    known = row.get("value_state") == "literal" and not row.get("condition")
+    value = row.get("value") if known else None
+    others = sorted(
+        (c for c in entity.candidates if c.profile == item.profile), key=lambda c: c.rank
+    )
+    written = model.Candidate(
+        value=value,
+        value_type=type(value).__name__ if known else "unknown",
+        mechanism=model.Mechanism.CODE_SET.value,
+        source=site,
+        rank=0,
+        wins=known,
+        profile=item.profile,
+        guard=str(row.get("condition") or ""),
+        note="the node sets this value itself once it runs",
+    )
+    lost = [
+        replace(
+            candidate,
+            rank=candidate.rank + 1,
+            wins=False,
+            shadow_kind=(
+                model.ShadowKind.RESTATED_IDENTICAL.value
+                if known and candidate.value == value
+                else model.ShadowKind.VALUE_CHANGED.value
+            )
+            if known
+            else candidate.shadow_kind,
+            shadowed_by=0 if known else candidate.shadowed_by,
+        )
+        for candidate in others
+    ]
+    builder.set_param(
+        param_id,
+        state=model.ParamState.EFFECTIVE.value if known else model.ParamState.OTHER.value,
+        candidates=[written, *lost],
+    )
+    if not known:
+        builder.unresolved(
+            model.Unresolved(
+                want=model.Want.PARAM_VALUE.value,
+                owner=param_id,
+                expr=str(row.get("expr") or row.get("name")),
+                reason="set_in_code",
+                evidence=[site],
+            )
+        )
 
 
 def _argv_assigned(item: Instance) -> dict[str, str]:

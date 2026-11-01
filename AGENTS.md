@@ -120,6 +120,7 @@ record and is not read.
 | `endpoints` | `{kind, raw, name, name_state, type, type_id, qos, owner_symbol, via_known_wrapper, condition, guard_parameters, line_hint}` |
 | `parameters` | `{name, type, default, has_default, default_state, reads, owner_symbol}` |
 | `parameter_reads` | `{name, api, target, owner_symbol, line_hint}` |
+| `parameter_writes` | `{name, value, value_state, expr, condition, owner_symbol, line_hint}`, a value the node sets on its own declared parameter |
 | `plugin_parameters` | `{base_class, lookup_name, suffix, type, default, has_default, default_state, reads, owner_symbol}` |
 | `tf_broadcasts` | `{kind, parent, child, parent_state, child_state, broadcaster, condition, guard_parameters, parent_from_parameter, child_from_parameter, owner_symbol, line_hint}` |
 | `tf_lookups` | `{api, target, source, target_state, source_state, target_from_parameter, source_from_parameter, owner_symbol, line_hint}` |
@@ -595,6 +596,11 @@ with per candidate provenance.
   declarations they read under the same want. What a node declares or reads back is taken
   from the profile the code ran in, because a sim and a real profile can start one node name
   from two executables.
+* A node that sets its own declared parameter (`set_parameters` in rclpy, `set_parameter` or
+  `set_parameters` in rclcpp) states a `parameter_writes` row. The join puts a `code_set`
+  candidate at rank 0 of that profile's chain: a literal written unconditionally wins and every
+  other row loses to it, and any other write wins nothing, leaves the parameter `other` and a
+  `set_in_code` blind spot, because the value that runs is not one a file states.
 * A python write whose value folded but whose guard did not is a candidate carrying the guard
   text, and remains a blind spot: the parameter stays `other` in that profile and nothing
   wins. Dropping the write hides the only line an engineer can edit, and letting it win names
@@ -1624,6 +1630,8 @@ so the declarations of those classes reach the node. A node handed on through
 `std::dynamic_pointer_cast<Self>(shared_from_this())` is still the node, and `node_ptr` is a
 name a node handle goes by. No release had shipped, so no stored id or waiver existed.
 
+* in `1.33`, the record key `parameter_writes` and the candidate mechanism `code_set` (section
+  7), and the blind spot reason `set_in_code`.
 * in `1.33`, the coded `publishes` and `subscribes` edge value `qos_overridden`, the QoS
   policies a parameters file overrides for that endpoint through
   `qos_overrides.<topic>.<publisher|subscription>.<policy>`. rclcpp and rclpy take such a key
@@ -1649,6 +1657,14 @@ the value each profile gives the parameter, where it named the endpoint by the p
 value alone; a parameter anywhere else in the string is the blind spot
 `parameter_inside_name`. A bare integer depth states the reliable and volatile defaults rclpy
 gives `QoSProfile(depth=n)`, as `rclcpp::QoS(n)` already did, which the running node reports.
+
+Inside `1.33`, with no new key, the chain a process leaves unnamed follows under a name its
+source states keeps only that process's launch rows. Every unnamed process of one namespace
+followed a block keyed on that name, so the chain held the inline dictionary of each of them
+and the file rows once per process, and the first process's value won for every node: a
+generated launch file with six unnamed nodes in `/` handed `/coded_2` the dictionary of
+`node_4`. A row an action states (`Node(x).parameters`, `Node(x).arguments`) stays only when
+that action starts the process, and a file row is kept once.
 
 A reader pinned to `1.0` still loads a `1.33` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re

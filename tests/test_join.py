@@ -1079,6 +1079,7 @@ def test_the_record_block_has_one_spelling_per_record_kind():
         "nodes",
         "parameters",
         "parameter_reads",
+        "parameter_writes",
         "plugin_parameters",
         "tf_broadcasts",
         "tf_lookups",
