@@ -1538,6 +1538,10 @@ class PyFile:
                 held.qos[chain[0]] = val.value if val.known else None
                 held.qos["mutated"] = True
                 return
+            if _is_self(root):
+                # `self.transform.header.frame_id = ...` in one method, sent from another
+                self.members[".".join(chain)] = val
+                return
             ctx.fields.setdefault(root.id, {})[".".join(chain)] = val
         elif isinstance(target, ast.Tuple | ast.List):
             for item in target.elts:
@@ -2584,6 +2588,12 @@ class PyFile:
             return [
                 (fields.get("header.frame_id", _UNKNOWN), fields.get("child_frame_id", _UNKNOWN))
             ]
+        if isinstance(node, ast.Attribute) and _is_self(node.value):
+            parent = self.members.get(f"{node.attr}.header.frame_id")
+            child = self.members.get(f"{node.attr}.child_frame_id")
+            if parent is None and child is None:
+                return []
+            return [(parent or _UNKNOWN, child or _UNKNOWN)]
         if isinstance(node, ast.Call):
             method = self._own_method(node, ctx)
             if method is not None:

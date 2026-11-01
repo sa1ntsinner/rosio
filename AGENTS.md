@@ -1677,6 +1677,15 @@ longer the literal the member held before. A python helper handed the node that 
 a block launch never names whose node the join found in the source and which ignores it, where
 the rule took that block for dead configuration.
 
+Inside `1.33`, with no new key, a transform workspace generated and run on jazzy moved three
+readings. A robot model a `robot_state_publisher` loads with a `frame_prefix` in its inline
+parameters is stated in that profile's slot with the prefix on every link and joint, which is
+what the node publishes; the `*` statement stays the file with its defaults. The `/tf_static`
+publisher of a launch `static_transform_publisher` follows the first remap of `/tf_static`, as
+every other endpoint does. A python node that fills `self.transform.header.frame_id` and
+`self.transform.child_frame_id` in one method and sends `self.transform` from another, a timer
+among them, states that pair where it was a `call_result` blind spot.
+
 A reader pinned to `1.0` still loads a `1.33` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

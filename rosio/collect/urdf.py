@@ -30,7 +30,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -1352,11 +1352,13 @@ def emit_loaded(
     profile: str,
     path: str,
     args: Sequence[tuple[str, str]],
+    prefix: str = "",
 ) -> bool:
     """One model as one profile loads it, expanded with the xacro arguments its launch line
-    passes, stated in that profile's slot. Returns False and writes nothing when those
-    arguments give the links and joints the defaults give, which the collector above already
-    states for every profile.
+    passes and named with the `frame_prefix` robot_state_publisher puts before every frame,
+    stated in that profile's slot. Returns False and writes nothing when that gives the
+    links and joints the defaults give, which the collector above already states for every
+    profile.
 
     A frame both expansions declare keeps the geometry the default expansion wrote, so the
     attribute does not depend on which pass ran first."""
@@ -1368,6 +1370,17 @@ def emit_loaded(
         )
     except CollectorError:
         default = None
+    if prefix:
+        found = replace(
+            found,
+            links=tuple(prefix + link for link in found.links),
+            joints=tuple(
+                replace(joint, parent=prefix + joint.parent, child=prefix + joint.child)
+                for joint in found.joints
+            ),
+            shapes=tuple((prefix + name, shapes) for name, shapes in found.shapes),
+            link_lines=tuple((prefix + name, line) for name, line in found.link_lines),
+        )
     if default is not None and (default.links, default.joints) == (found.links, found.joints):
         return False
     frame_models: dict[str, list[str]] = {}

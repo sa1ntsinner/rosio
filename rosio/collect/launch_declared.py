@@ -496,7 +496,7 @@ class LaunchDeclaredCollector:
         guessed.
         """
         profile_id = ids.build_profile(spec.slug)
-        loaded: dict[tuple[str, tuple[tuple[str, str], ...]], model.Source] = {}
+        loaded: dict[tuple[str, tuple[tuple[str, str], ...], str], model.Source] = {}
         for row in placed:
             # a site whose condition read false never loads its model in this profile
             if _site_off(row):
@@ -516,11 +516,12 @@ class LaunchDeclaredCollector:
                             evidence=[row.source],
                         )
                     )
-                elif read.xacro_args:
-                    loaded.setdefault((read.path, read.xacro_args), row.source)
-        for (path, args), source in sorted(loaded.items(), key=lambda item: item[0]):
+                elif read.xacro_args or _frame_prefix(row.node):
+                    key = (read.path, read.xacro_args, _frame_prefix(row.node))
+                    loaded.setdefault(key, row.source)
+        for (path, args, prefix), source in sorted(loaded.items(), key=lambda item: item[0]):
             try:
-                urdf.emit_loaded(ctx, run, profile_id, path, args)
+                urdf.emit_loaded(ctx, run, profile_id, path, args, prefix)
             except (CollectorError, ContractError) as exc:
                 file_id = ctx.ws.file_id(path)
                 message = ctx.ws.stated_message(str(exc).replace(path, file_id), ctx.cfg.ros_setup)
@@ -1492,9 +1493,24 @@ def _static_pair(
         confidence=confidence,
         evidence=evidence,
     )
-    # The broadcast goes out on /tf_static, so the graph has its publisher.
-    topic = ids.build_topic("/tf_static")
+    # The broadcast goes out on /tf_static, or where the first rule naming it sends it.
+    name = "/tf_static"
+    rule = None
+    for remap in getattr(node, "remaps", ()):
+        if remap.frm == name:
+            rule = [remap.frm, remap.to]
+            name = ids.normalise_ros_name(remap.to, node.namespace or "/", node.name or "")
+            break
+    topic = ids.build_topic(name)
     builder.node(topic)
+    values: dict[str, Any] = {
+        "raw_name": "/tf_static",
+        "type": "tf2_msgs/msg/TFMessage",
+        "via_known_wrapper": True,
+        "remapped": rule is not None,
+    }
+    if rule is not None:
+        values["remap"] = rule
     builder.edge(
         model.EdgeKind.PUBLISHES.value,
         node_id,
@@ -1503,11 +1519,7 @@ def _static_pair(
         layer=LAYER,
         profile=profile_id,
         run=run,
-        values={
-            "raw_name": "/tf_static",
-            "type": "tf2_msgs/msg/TFMessage",
-            "via_known_wrapper": True,
-        },
+        values=values,
         confidence=confidence,
         evidence=evidence,
     )
@@ -1970,6 +1982,20 @@ def _missing_file(ws: Workspace, failure: records.WalkException) -> str:
 
 
 _NO_SUCH_FILE = re.compile(r"No such file or directory: '([^']+)'")
+
+
+def _frame_prefix(node: Any) -> str:
+    """The `frame_prefix` a robot_state_publisher puts before every frame it publishes, when
+    an inline dict of its launch site states it as a string."""
+    if node.executable != "robot_state_publisher":
+        return ""
+    found = ""
+    for source in sorted(node.params, key=lambda item: item.order):
+        if source.kind == "inline_dict":
+            value = dict(source.values).get("frame_prefix")
+            if isinstance(value, str):
+                found = value
+    return found
 
 
 def _site_off(row: _Placed) -> bool:
