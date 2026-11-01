@@ -165,9 +165,11 @@ def _live(node: model.Node, profile: str) -> bool:
     if str(fact.values.get("state") or node.state) == EFFECTIVE:
         return True
     # A block followed under a name launch never states wins once the join reads that name
-    # in the source, and the fact the parameter collector wrote before it knew stays as said.
+    # in the source, or loses its win because that source ignores it, and the fact the
+    # parameter collector wrote before it knew stays as said.
     return bool(fact.values.get("owner")) and any(
-        row.wins and row.profile == profile for row in node.candidates
+        (row.wins or row.note == join.IGNORED_NOTE) and row.profile == profile
+        for row in node.candidates
     )
 
 

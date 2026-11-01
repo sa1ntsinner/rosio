@@ -1747,11 +1747,12 @@ def _dead_remaps(atlas: Atlas) -> dict[str, _Dead]:
     return out
 
 
-def read_whole(atlas: Atlas) -> Callable[[str, str], bool]:
+def read_whole(atlas: Atlas, wants: tuple[str, ...] = ()) -> Callable[[str, str], bool]:
     """Whether the join read the whole source of a node in a profile, the one definition the
     rules that claim an absence use: the node is bound to code, no topic, service or action
     name in it is a blind spot, it hands itself to no class or function outside the read set,
-    and no source of its packages was refused."""
+    and no source of its packages was refused. `wants` narrows the names that count to the
+    ones a rule asks about."""
     from rosio import join
 
     blind: dict[str, set[str]] = {}
@@ -1767,7 +1768,7 @@ def read_whole(atlas: Atlas) -> Callable[[str, str], bool]:
 
     def whole(node_id: str, profile: str) -> bool:
         if profile not in blind:
-            blind[profile] = join.blind_nodes(atlas, _NAME_WANTS, profile)
+            blind[profile] = join.blind_nodes(atlas, wants or _NAME_WANTS, profile)
         read = rules.coded_sources(atlas, node_id, profile)
         return not (
             not read

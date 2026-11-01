@@ -429,6 +429,9 @@ class Endpoint:
     attribute: str = ""
     lifecycle: bool = False
     construction: str = ""
+    sub_receiver: str = ""
+    """A member the call is made on that no sub node was known for when the call was read,
+    which a later method of the class may still make one (`prepare()` in an initializer)."""
     conditional_site: bool = False
     """A construction that a guard could have wrapped. A member initialiser cannot be
     conditional, so there is no condition to report for one."""
@@ -2008,8 +2011,13 @@ class _Reader:
         """The sub namespace of the node handle a call is made on, None for a plain node."""
         if receiver is None:
             return None
+        if receiver.type in ("pointer_expression", "parenthesized_expression"):
+            inner = receiver.named_children[-1] if receiver.named_children else None
+            return self._sub_namespace(inner)
         if receiver.type == "call_expression":
             name, inner, _template = _call_parts(receiver, self.src)
+            if name == "get" and not _args(receiver):
+                return self._sub_namespace(inner)
             if name != "create_sub_node":
                 return None
             arguments = _args(receiver)
@@ -2082,13 +2090,10 @@ class _Reader:
             return True
         ref = self.resolve(arguments[name_position])
         sub = None if action or factory else self._sub_namespace(receiver)
-        if sub is not None and not (ref.status == LITERAL and ref.value[:1] in ("/", "~")):
-            # rclcpp prefixes a sub node's namespace onto every name that is not absolute or
-            # private (`extend_name_with_sub_namespace` in node_impl.hpp)
-            if sub.status == LITERAL and ref.status == LITERAL:
-                ref = replace(ref, value=f"{sub.value}/{ref.value}")
-            else:
-                ref = Ref(UNRESOLVED, expr=f"{sub.expr or sub.value}/{ref.expr or ref.value}")
+        ref = _under_sub_node(ref, sub)
+        later = ""
+        if sub is None and receiver is not None and self.klass and not (action or factory):
+            later = self._member_receiver(receiver)
         self.unit.endpoints.append(
             Endpoint(
                 kind=kind,
@@ -2105,9 +2110,26 @@ class _Reader:
                 guard=self.guard,
                 unknown_count="loop" if self._in_loop(node) else "",
                 attribute=self._publisher_member(node) if kind == "publisher" else "",
+                sub_receiver=later,
             )
         )
         return True
+
+    def _member_receiver(self, receiver: Any) -> str:
+        while receiver is not None and receiver.type in (
+            "pointer_expression",
+            "parenthesized_expression",
+            "call_expression",
+        ):
+            if receiver.type == "call_expression":
+                name, inner, _template = _call_parts(receiver, self.src)
+                if name != "get" or _args(receiver):
+                    return ""
+                receiver = inner
+            else:
+                receiver = receiver.named_children[-1] if receiver.named_children else None
+        text = _flat(receiver, self.src).removeprefix("this->") if receiver is not None else ""
+        return text if text.isidentifier() and text not in _SELF_HANDLES else ""
 
     def _publisher_member(self, node: Any) -> str:
         parent = node.parent
@@ -2333,9 +2355,21 @@ class _Reader:
             target = _flat(values[1], self.src)
             # The out parameter form writes the value into a variable, and that variable is
             # the topic or the frame a few lines later.
+            held = target.strip("&* ").removeprefix("this->")
             known = self.defaults.get(ref.value) if ref.resolved else None
             if known is not None and known.status == LITERAL:
-                self.bind(target.strip("&* "), known)
+                self.bind(held, known)
+            elif ref.status == LITERAL:
+                self.bind(
+                    held,
+                    Ref(
+                        UNRESOLVED,
+                        "",
+                        _flat(node, self.src),
+                        origin="parameter",
+                        source_name=ref.value,
+                    ),
+                )
             number = self.numbers.get(ref.value) if ref.resolved else None
             if number is not None:
                 self.numbers[target.strip("&* ")] = number
@@ -3414,6 +3448,18 @@ def parse_text(
     for name, values, _site in sites:
         reader.constructor_arguments.setdefault(name, []).append(values)
     reader.walk(root)
+    unit.endpoints = [
+        replace(
+            item,
+            name=_under_sub_node(
+                item.name, unit.sub_namespaces.get((item.owner_class, item.sub_receiver))
+            ),
+            sub_receiver="",
+        )
+        if item.sub_receiver
+        else item
+        for item in unit.endpoints
+    ]
     unit.endpoints = _aliased_interfaces(root, src, unit.endpoints)
     unit.type_aliases = _type_aliases(root, src)
     unit.plugin_loaders = sorted(set(_PLUGIN_LOADER.findall(text)))
@@ -4307,6 +4353,16 @@ def _helper_arguments(units: Sequence[Unit]) -> None:
                     and (held is None or held.status != LITERAL)
                 ):
                     unit.members[member] = value
+
+
+def _under_sub_node(ref: Ref, sub: Ref | None) -> Ref:
+    """rclcpp prefixes a sub node's namespace onto every name that is not absolute or private
+    (`extend_name_with_sub_namespace` in node_impl.hpp)."""
+    if sub is None or (ref.status == LITERAL and ref.value[:1] in ("/", "~")):
+        return ref
+    if sub.status == LITERAL and ref.status == LITERAL:
+        return replace(ref, value=f"{sub.value}/{ref.value}")
+    return Ref(UNRESOLVED, expr=f"{sub.expr or sub.value}/{ref.expr or ref.value}")
 
 
 def _finish_node_helpers(units: Sequence[Unit]) -> None:

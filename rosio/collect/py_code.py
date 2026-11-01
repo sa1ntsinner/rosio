@@ -1638,6 +1638,11 @@ class PyFile:
         if _is_self(node.value):
             held = self.members.get(node.attr)
             return held.carry(text) if held is not None else Val(expr=text, reason="unbound_name")
+        if isinstance(node.value, ast.Name):
+            # `node.channel = "scan"` in a helper handed the node, read back a line later
+            held = ctx.fields.get(node.value.id, {}).get(node.attr)
+            if held is not None:
+                return held.carry(text)
         preset = _QOS_PRESETS.get(node.attr)
         dotted = _dotted(node)
         if preset and any(part in dotted for part in ("QoSPresetProfiles", "qos")):

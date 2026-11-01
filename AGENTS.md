@@ -1666,6 +1666,16 @@ generated launch file with six unnamed nodes in `/` handed `/coded_2` the dictio
 `node_4`. A row an action states (`Node(x).parameters`, `Node(x).arguments`) stays only when
 that action starts the process, and a file row is kept once.
 
+Inside `1.33`, with no new key, the C++ generated workspaces of the conformance harness moved
+four readings. A call on a sub node held in a member (`subnode_.get()->create_client(...)`)
+takes the sub namespace, also when the member is made by a method the constructor's
+initializer list calls, which is read after the call. `get_parameter_or(name, member_,
+default)` hands `member_` the parameter, so a name built from it is the profile's value and no
+longer the literal the member held before. A python helper handed the node that sets
+`node.channel` and reads it back names that endpoint. `param.set_undeclared` reports a key of
+a block launch never names whose node the join found in the source and which ignores it, where
+the rule took that block for dead configuration.
+
 A reader pinned to `1.0` still loads a `1.33` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
@@ -1787,8 +1797,9 @@ agree with their own layers and can never connect, which is a defect at `error`.
 
 `service.no_server` is `warn`. It fires when a node calls a service or an action that no node
 of the profile serves, and only when the caller's source was read whole the way
-`remap.matches_nothing` reads it, no node of the profile holds a service or action name the
-reader could not follow, every declared node in that profile was read whole, no remap target
+`remap.matches_nothing` reads it, no node of the profile holds a name of the same kind the
+reader could not follow (an action name nobody followed makes only services under `_action/`,
+so it hides no plain service), every declared node in that profile was read whole, no remap target
 ends in the name, and a node whose whole source was
 read serves another name of the same type. It names that name, in the caller's namespace
 first and then the closest by spelling, because a client of a name nobody serves is nearly

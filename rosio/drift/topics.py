@@ -962,7 +962,7 @@ def service_no_server(atlas: model.Atlas) -> list[model.Finding]:
                 servers.setdefault((profile, key), {}).setdefault(edge.dst, set()).add(edge.src)
             else:
                 clients.setdefault((edge.dst, profile), []).append((edge, fact))
-    blind: dict[str, tuple[set[str], tuple[str, ...]]] = {}
+    blind: dict[tuple[str, str], tuple[set[str], tuple[str, ...]]] = {}
     # A remap whose target ends like the name may hand it to a node rosio did not read.
     remapped = {
         name
@@ -976,9 +976,10 @@ def service_no_server(atlas: model.Atlas) -> list[model.Finding]:
         name = ids.label_for(channel)
         if (channel, profile) in served or _library_service(name) or name in remapped:
             continue
-        if profile not in blind:
-            blind[profile] = _blind_owners(atlas, profile)
-        owners, prefixes = blind[profile]
+        kind = ids.kind_of(channel)
+        if (profile, kind) not in blind:
+            blind[(profile, kind)] = _blind_owners(atlas, profile, kind)
+        owners, prefixes = blind[(profile, kind)]
         if owners or name.startswith(prefixes):
             continue
         calls = [row for row in calls if whole(row[0].src, profile)]
@@ -1001,15 +1002,17 @@ def service_no_server(atlas: model.Atlas) -> list[model.Finding]:
     return [_no_server(key[0], rows) for key, rows in sorted(groups.items())]
 
 
-def _blind_owners(atlas: model.Atlas, profile: str) -> tuple[set[str], tuple[str, ...]]:
-    """The nodes of a profile that could serve any name, and the name prefixes under which
-    an unread node whose services `known_names.SERVICE_SCOPE` states could serve one."""
+def _blind_owners(atlas: model.Atlas, profile: str, kind: str) -> tuple[set[str], tuple[str, ...]]:
+    """The nodes of a profile that could serve any name of this kind, and the name prefixes
+    under which an unread node whose services `known_names.SERVICE_SCOPE` states could serve
+    one. An action name nobody followed makes only services under `_action/`, which no client
+    of a plain service name is waiting for, so it hides only actions."""
     from rosio import join
     from rosio.drift import controllers, frames
     from rosio.resolve import known_names
 
-    wants = (model.Want.SERVICE_NAME.value, model.Want.ACTION_NAME.value)
-    whole = frames.read_whole(atlas)
+    wants = (model.Want.ACTION_NAME.value if kind == "action" else model.Want.SERVICE_NAME.value,)
+    whole = frames.read_whole(atlas, wants)
     unread: set[str] = set()
     prefixes: list[str] = []
     for node in atlas.by_kind(model.NodeKind.NODE.value):
