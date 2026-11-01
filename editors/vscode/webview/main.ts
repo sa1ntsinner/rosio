@@ -94,11 +94,17 @@ function resolvedShare(summary: Summary): string {
   return `${((100 * resolved) / (resolved + open)).toFixed(1)}% of names resolved`;
 }
 
+/** What a layer that states no fact about the entity still says through a relation. */
+function namedBy(entity: Entity, layer: Layer): string {
+  const relation = (entity.relations ?? []).find((r) => r.layers.includes(layer));
+  return relation ? relationPhrase(relation) : "says nothing about it";
+}
+
 /** The layers the whole atlas holds, which an entity card tells apart from its own. */
 let atlasLayers: Layer[] = [];
 
 /** On one entity an absent layer read the workspace and said nothing about this thing. */
-function layersStrip(present: Layer[], entity = false): HTMLElement {
+function layersStrip(present: Layer[], entity?: Entity): HTMLElement {
   return h(
     "div",
     { class: "layers", role: "list", "aria-label": "Layers in this atlas" },
@@ -108,7 +114,7 @@ function layersStrip(present: Layer[], entity = false): HTMLElement {
         "div",
         { class: `layer ${has ? "present" : "absent"}`, "data-layer": layer, role: "listitem" },
         h("div", { class: "name" }, layer),
-        h("div", { class: "note" }, has ? LAYER_WHAT[layer].present : entity && atlasLayers.includes(layer) ? "says nothing about it" : LAYER_WHAT[layer].absent),
+        h("div", { class: "note" }, has ? LAYER_WHAT[layer].present : entity && atlasLayers.includes(layer) ? namedBy(entity, layer) : LAYER_WHAT[layer].absent),
       );
     }),
   );
@@ -418,6 +424,8 @@ function lead(entity: Entity): string {
   if (entity.conflicts.length) return `The layers disagree on ${entity.conflicts.join(", ")}.`;
   if (entity.layers.length > 1) return `${entity.layers.join(", ")} agree on it.`;
   if (entity.layers.length === 1) return `Only the ${entity.layers[0]} layer states it.`;
+  const relation = (entity.relations ?? []).find((r) => r.layers.length);
+  if (relation) return `No layer states a fact about it. It is known by name, ${relationPhrase(relation)}.`;
   return "No layer states a fact about it, it is known by name only.";
 }
 
@@ -570,6 +578,17 @@ const RELATION_TITLE: Record<string, [string, string]> = {
   uses_type: ["Type", "Used by"],
 };
 
+function relationTitle(kind: string, direction: "in" | "out"): string {
+  const named = words(kind).replace(/^./, (first) => first.toUpperCase());
+  const titles = RELATION_TITLE[kind] ?? [named, `${named} (in)`];
+  return direction === "out" ? titles[0] : titles[1];
+}
+
+/** One relation as a phrase: "looked up by /scan_filter". */
+function relationPhrase(relation: Relation): string {
+  return `${relationTitle(relation.kind, relation.direction).toLowerCase()} ${relation.label || relation.id}`;
+}
+
 const RELATION_ORDER = Object.keys(RELATION_TITLE);
 const RELATIONS_SHOWN = 12;
 
@@ -590,9 +609,7 @@ function relationGroups(entity: Entity): HTMLElement | null {
     { class: "relations" },
     ...ordered.map(([key, rows]) => {
       const [kind, direction] = key.split("|");
-      const named = words(kind).replace(/^./, (first) => first.toUpperCase());
-      const titles = RELATION_TITLE[kind] ?? [named, `${named} (in)`];
-      const title = direction === "out" ? titles[0] : titles[1];
+      const title = relationTitle(kind, direction as "in" | "out");
       const sorted = rows.slice().sort((a, b) => (a.label || a.id).localeCompare(b.label || b.id));
       const list = h("div", { class: "chips" }, ...sorted.slice(0, RELATIONS_SHOWN).map(relationLink));
       const group = h("div", { class: "relation" }, h("h2", {}, title, h("span", { class: "count" }, String(rows.length))), list);
@@ -749,7 +766,7 @@ function renderEntity(entity: Entity, findings: Finding[]): HTMLElement {
         button("Find", { type: "find" }),
       ),
     ),
-    layersStrip(entity.layers, true),
+    layersStrip(entity.layers, entity),
     effectiveFigures(entity),
     about.length ? h("section", {}, h("h2", {}, "Findings"), h("div", { class: "rows" }, ...about.map(findingRow))) : null,
     parameterChain(entity),
