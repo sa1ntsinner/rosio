@@ -1,45 +1,44 @@
-`rosio` answers questions about the ROS 2 workspace in this repository from an atlas it
-built beforehand. The atlas holds four layers: declared (launch files, yaml, urdf), coded
-(the C++ and python sources), observed (a live probe) and recorded (rosbag2). Answers come
-from the CLI, not a model: no tokens, no network, the same question returns the same bytes.
+`rosio` answers questions about this ROS 2 workspace from a prebuilt atlas of four layers:
+declared (launch, yaml, urdf), coded (C++ and python), observed (a live probe) and recorded
+(rosbag2). The CLI answers, not a model, and the same question returns the same bytes.
 
-The rule that matters: a yaml value is usually not the value that reached the node. Overlay
-files, launch inline dicts, `--ros-args` and launch time rewrites all outrank the base yaml.
-Ask rosio for the effective value and the file to edit. Reach for grep only after rosio
-says it could not resolve something.
-
-Commands worth knowing, all read only:
+The rule that matters: a yaml value is usually not the value that reached the node.
+Overlays, launch inline dicts, `--ros-args` and launch rewrites outrank the base yaml. Ask
+rosio for the effective value and the file to edit; grep only once rosio says it could not
+resolve something.
 
 ```
 rosio param <node> <name>        the candidate chain behind one parameter, winner first
 rosio query <text>               find a node, topic, parameter, frame, plugin or symbol
 rosio explain <id or finding>    one entity or one finding in full, with provenance
+rosio explain <file>:<line>      what that line sets and whether it wins
 rosio drift --min-severity warn  where the layers disagree, each with a fix
 rosio graph --focus <node>       who talks to what, with QoS
-rosio migrate plan --to jazzy    what a release upgrade changes, with file:line and source
+rosio migrate plan --to jazzy    what a release upgrade changes, with file:line
 ```
 
-A finding that carries `edits` in `rosio drift --json` is a fix rosio can state exactly: in
-the cited file, on line `line_hint`, replace the whole word `find` with `replace`, and only
-when it occurs there once. After editing, run `rosio extract` and `rosio drift` again and
-check that the finding is gone rather than assuming it.
+To fix a finding:
 
-Run `rosio migrate apply --to <release>` and make the by hand changes. Finish with
-`rosio migrate verify --to <release>`.
+1. Run `rosio explain <file>:<line>` on the line you mean to edit. It says whether each
+   value there wins or which line outbids it. Editing a losing line changes nothing.
+2. `edit <file>:<line>: replace 'a' with 'b'` under a finding is an exact fix: replace that
+   whole word on that line only.
+3. Run `rosio extract` again. It lists the findings that went and the ones that arrived.
+   The fix is done when its finding is gone and nothing new arrived.
 
-A finding already accepted here lives in `rosio-waivers.yaml`, a `waivers:` list of `key`
-(a finding id or a `sha256:` fingerprint, both printed by `rosio drift --json`) and a
-mandatory `reason`. `rosio drift --waivers rosio-waivers.yaml` prints those anyway with
-the reason, stops `--fail-on` grading them, and names every key that matched nothing, so a
+Over MCP the same steps are the `drift`, `explain` and `check` tools.
+
+An accepted finding goes in `rosio-waivers.yaml`: a `waivers:` list of `key` (finding id or
+`sha256:` fingerprint) and a mandatory `reason`. `rosio drift --waivers rosio-waivers.yaml`
+stops grading those and names every key that matched nothing, so a
 stale waiver reports itself. Propose a waiver with a reason rather than lowering `--fail-on`.
 
-Add `--atlas <path>/atlas.json` when the atlas is not under `./rosio-out`. If there is no
-atlas yet, build one with `rosio extract <workspace src> --out rosio-out`, which reads
-files only and starts no ROS node.
+Add `--atlas <path>/atlas.json` when the atlas is not under `./rosio-out`. With no atlas
+yet, `rosio extract <workspace src> --out rosio-out` builds one; it reads files only and
+starts no ROS node.
 
-Worked example, from the `nav2_bringup` that ships with ROS 2 jazzy, in a profile that runs
-`bringup_launch.py` with `use_composition:=True`. Question: does the controller run on
-simulated time?
+Example, the `nav2_bringup` jazzy ships, profile `bringup_launch.py` with
+`use_composition:=True`. Does the controller run on sim time?
 
 ```
 $ rosio param /controller_server use_sim_time --profile nav2_bringup_composed
@@ -50,9 +49,6 @@ use_sim_time on /controller_server   state effective
         nav2_bringup/launch/navigation_launch.py:253 [install] SetParameter
 ```
 
-No parameters file sets it. Line 253 of `navigation_launch.py` is a `SetParameter` in the
-group that loads the components, and it hands each of them the `use_sim_time` launch
-argument, false unless the caller passes it. Grepping the yaml finds nothing.
-
-Answer from that output and stop. If rosio reports a value as unknown or unresolved, say
-so instead of quoting a number out of a yaml file.
+Line 253 is a `SetParameter` handing each component the `use_sim_time` launch argument,
+false unless passed; grepping yaml finds nothing. If rosio says a value is unknown or
+unresolved, say so instead of quoting a number out of a yaml file.

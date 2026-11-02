@@ -20,7 +20,7 @@ from rosio.serve import tools
 ROOT = Path(__file__).resolve().parents[1]
 
 WORD_NUMBERS = {
-    "twelve": 12,
+    "thirteen": 13,
     "twenty": 20,
     "forty eight": 48,
     "forty nine": 49,
@@ -40,8 +40,9 @@ SERVED_TOOLS = (
     "stamps",
     "transform",
     "migrate",
+    "check",
 )
-"""The twelve the server exposes, in the order `serve/server.py` returns them."""
+"""The thirteen the server exposes, in the order `serve/server.py` returns them."""
 
 
 USER_DOCS = (
@@ -175,10 +176,10 @@ def test_the_published_rule_counts_match_the_registry():
 
 def test_the_published_tool_names_match_the_server():
     readme = doc("docs/assistants.md")
-    published = re.search(r"Twelve tools: (.+?)\.\s", flat(readme)).group(1)
+    published = re.search(r"Thirteen tools: (.+?)\.\s", flat(readme)).group(1)
     named = re.findall(r"`([a-z_]+)`", published)
     assert named == list(SERVED_TOOLS)
-    assert WORD_NUMBERS["twelve"] == len(SERVED_TOOLS)
+    assert WORD_NUMBERS["thirteen"] == len(SERVED_TOOLS)
     for name in SERVED_TOOLS:
         assert callable(getattr(tools, name))
 

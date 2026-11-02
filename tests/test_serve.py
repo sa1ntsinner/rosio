@@ -572,7 +572,7 @@ def test_unresolved_counts_against_what_was_wanted_as_the_overview_does():
 # the tool set as an interface
 
 
-def test_the_tool_set_is_twelve_named_tools_with_a_description_each(atlas_file: Path):
+def test_the_tool_set_is_thirteen_named_tools_with_a_description_each(atlas_file: Path):
     functions = server.bindings(tools.AtlasSource(atlas_file))
 
     names = [function.__name__ for function in functions]
@@ -589,6 +589,7 @@ def test_the_tool_set_is_twelve_named_tools_with_a_description_each(atlas_file: 
         "stamps",
         "transform",
         "migrate",
+        "check",
     ]
     for function in functions:
         assert function.__doc__ and len(function.__doc__.split()) >= 8
@@ -817,6 +818,7 @@ def test_the_server_registers_every_tool_when_mcp_is_installed(atlas_file: Path)
         "stamps",
         "transform",
         "migrate",
+        "check",
     }
 
 

@@ -87,6 +87,26 @@ def test_the_rover_extracts_as_shipped_without_a_build(
     assert [node.id for node in atlas.by_kind("profile")] == ["profile:rover"]
 
 
+@pytest.mark.ros
+@pytest.mark.slow
+def test_a_line_says_whether_it_wins_and_a_fix_shows_as_one_finding_gone(tmp_path: Path) -> None:
+    from rosio import query
+
+    workspace = tmp_path / "rover_ws"
+    shutil.copytree(EXAMPLES / "rover_ws", workspace)
+    before = _extract(workspace, tmp_path / "out")
+    shadowed = query.explain(before, "config/rover.yaml:4").text()
+    assert "loses to 10.0 from rover_bringup/launch/bringup.launch.py:32" in shadowed
+    typo = query.explain(before, "src/rover_bringup/config/rover.yaml:9").text()
+    assert "replace 'stop_distnce' with 'stop_distance'" in typo
+
+    config = workspace / "src/rover_bringup/config/rover.yaml"
+    config.write_text(config.read_text().replace("stop_distnce", "stop_distance"))
+    delta = query.finding_delta(before, _extract(workspace, tmp_path / "out")).data
+    assert [row["rule"] for row in delta["gone"]] == ["param.set_undeclared"]
+    assert delta["new"] == []
+
+
 def _extract(workspace: Path, out: Path) -> model.Atlas:
     code = cli.main(
         [

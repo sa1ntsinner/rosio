@@ -139,7 +139,7 @@ class Options:
 
 
 def bindings(source: tools.AtlasSource) -> list[Any]:
-    """The twelve functions the server exposes. The signature is the tool schema and the
+    """The thirteen functions the server exposes. The signature is the tool schema and the
     docstring is what a model reads before choosing, so both are part of the product."""
 
     def overview() -> str:
@@ -226,6 +226,13 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         within = store.workspace() if store.confined else None
         return tools.migrate(workspace, to, start=start, package=package, within=within)
 
+    def check() -> str:
+        """After editing files, extract the workspace again and list the findings that went
+        and the ones that arrived, each new one with its line and fix. A fix is done when
+        its finding is gone and nothing new arrived. Takes seconds on a small workspace and
+        minutes on a large one."""
+        return tools.check(store)
+
     store = source
     return [
         overview,
@@ -240,6 +247,7 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         stamps,
         transform,
         migrate,
+        check,
     ]
 
 

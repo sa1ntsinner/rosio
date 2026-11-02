@@ -404,6 +404,7 @@ def drift(
             lines.append(f"      at: {slices.site(row, locator=True)}")
         if item.fix:
             lines.append(f"      fix: {item.fix}")
+        lines.extend(f"      {row}" for row in slices.edit_lines(item))
         lines.append(f"      explain: {item.fingerprint}")
     if len(rows) > len(kept):
         lines.append(f"  and {len(rows) - len(kept)} more, raise limit or filter by only")
@@ -424,7 +425,12 @@ def explain(atlas: Atlas, selector: str, *, limit: int | None = None) -> str:
     selector = _text(selector)
     if not selector:
         raise UsageError("explain needs a selector, for example /controller_server or /scan")
-    if selector.startswith(("find:", "sha256:")) or slices.is_rule(selector):
+    spot = slices._LINE.match(selector)
+    if (
+        selector.startswith(("find:", "sha256:"))
+        or slices.is_rule(selector)
+        or (spot and slices.files_named(atlas, spot["path"]))
+    ):
         answer = slices.explain(atlas, selector, limit=_limit(limit))
         if not answer.ok:
             raise UsageError("\n".join(answer.lines))
@@ -1952,10 +1958,61 @@ def migrate(
     return _fit(lines, "narrow with package=<name>")
 
 
+CHECK_SECONDS = 900
+
+
+def check(source: AtlasSource, *, limit: int | None = None) -> str:
+    """Extract the served workspace again and state the findings that went and arrived.
+
+    The extraction runs as its own process, the way `rosio extract` runs from a shell, with
+    the rosio.yaml of the workspace, and writes over the atlas this server reads, so every
+    later answer is about the edited tree.
+    """
+    import subprocess
+    import sys
+
+    from rosio.extract import carries_layer
+
+    target = source.path / ATLAS_NAME if source.path.is_dir() else source.path
+    if target.name != ATLAS_NAME:
+        raise UsageError(
+            f"check rewrites the atlas extract writes, {ATLAS_NAME}, and this server reads "
+            f"{target.name}; run rosio extract yourself and serve its output"
+        )
+    before = source.atlas() if source.present else None
+    workspace = source.workspace()
+    command = [sys.executable, "-m", "rosio", "extract", str(workspace)]
+    command += ["--out", str(target.parent.absolute()), "--quiet"]
+    try:
+        done = subprocess.run(
+            command, cwd=workspace, capture_output=True, text=True, timeout=CHECK_SECONDS
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise UsageError(f"extract did not finish within {CHECK_SECONDS} seconds") from exc
+    if done.returncode != 0:
+        said = (done.stderr or done.stdout).strip().splitlines()[-6:]
+        raise UsageError("extract failed:\n" + "\n".join(said))
+    after = source.atlas()
+    lines = [f"extracted {workspace.name} again"]
+    if before is not None and carries_layer(before, "observed"):
+        lines.append("the observed layer of the old atlas is gone, run rosio probe to add it")
+    if before is None:
+        held = plural(len(after.findings), "finding")
+        lines.append(f"there was no atlas before, this one holds {held}")
+        lines.append("call drift for them")
+        return _fit(lines, "call drift with min_severity=error")
+    delta = slices.finding_delta(before, after, limit=_limit(limit, WIDE_LIMIT))
+    lines.extend(delta.lines)
+    if not delta.data["gone"] and not delta.data["new"]:
+        lines.append("no finding moved, so an edit meant to fix one did not reach it")
+    return _fit(lines, "call drift for the full list")
+
+
 __all__ = [
     "DEFAULT_LIMIT",
     "MAX_BYTES",
     "AtlasSource",
+    "check",
     "current_release",
     "diagram",
     "drift",

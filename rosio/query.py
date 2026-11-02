@@ -422,6 +422,9 @@ def explain(atlas: Atlas, selector: str, *, limit: int = DEFAULT_LIMIT) -> Answe
     text = (selector or "").strip()
     if text.startswith("find:") or text.startswith("sha256:"):
         return _explain_finding(atlas, text)
+    spot = _LINE.match(text)
+    if spot and files_named(atlas, spot["path"]):
+        return _explain_line(atlas, spot["path"], int(spot["line"]), limit)
     if is_rule(text):
         return _explain_rule(atlas, text, limit)
     entity_id, matches, how = _one(atlas, text)
@@ -509,6 +512,7 @@ def _explain_finding(atlas: Atlas, handle: str) -> Answer:
                 lines.append(f"  say: {item.spoken}")
             for source in item.where:
                 lines.append(f"      {site(source, locator=True)}")
+            lines.extend(f"  {row}" for row in edit_lines(item))
             lines.append(f"  profiles {_profiles(item.profiles)}")
             return Answer(verb="explain", data=data, lines=lines)
     return Answer(
@@ -517,6 +521,138 @@ def _explain_finding(atlas: Atlas, handle: str) -> Answer:
         data={"handle": handle, "findings": len(atlas.findings)},
         lines=[f"no finding with that id or fingerprint, this atlas holds {len(atlas.findings)}"],
     )
+
+
+_LINE = re.compile(r"^(?P<path>[^\s:]+):(?P<line>\d+)$")
+
+
+def files_named(atlas: Atlas, path: str) -> list[str]:
+    """The file entities a path written by a person names: the whole package path, a path
+    that ends in it (`src/bot/config/x.yaml`), or its tail (`config/x.yaml`)."""
+    wanted = path.replace("\\", "/").removeprefix("./")
+    found = []
+    for entity_id, node in atlas.entities.items():
+        if node.kind != "file":
+            continue
+        name = file_label(entity_id)
+        if wanted == name or wanted.endswith("/" + name) or name.endswith("/" + wanted):
+            found.append(entity_id)
+    exact = [item for item in found if file_label(item) == wanted]
+    return exact or sorted(found)
+
+
+def edit_lines(item: Finding) -> list[str]:
+    """The exact replacements of a finding, one line each, as a reader applies them."""
+    return [
+        f"edit {site(row)}: replace {row.get('find')!r} with {row.get('replace')!r}"
+        for row in item.extra.get("edits") or []
+    ]
+
+
+def _at(source: Source | Mapping[str, Any] | None, files: set[str], line: int) -> bool:
+    if source is None:
+        return False
+    row = source.to_json() if isinstance(source, Source) else source
+    return row.get("file") in files and row.get("line_hint") == line
+
+
+def _explain_line(atlas: Atlas, path: str, line: int, limit: int) -> Answer:
+    """What one line of one file feeds: the parameter values it sets and whether each one
+    wins, what the layers state from it, and the findings that cite it. It answers the
+    question to ask before editing a line: does anything run with what it says."""
+    files = set(files_named(atlas, path))
+    if len(files) > 1:
+        return _ambiguous("explain", path, sorted(files), atlas)
+    params: list[dict[str, Any]] = []
+    stated: dict[str, set[str]] = {}
+    nearby: set[int] = set()
+
+    def seen(source: Source | None) -> bool:
+        if source is not None and source.file in files and source.line_hint is not None:
+            nearby.add(source.line_hint)
+        return _at(source, files, line)
+
+    for entity_id, node in atlas.entities.items():
+        for row in node.candidates:
+            if not seen(row.source):
+                continue
+            winner = next((c for c in node.candidates if c.profile == row.profile and c.wins), None)
+            if row.wins:
+                verdict = "wins, the node runs with it"
+            elif winner is not None:
+                verdict = (
+                    f"loses to {_value(winner.value)} from {site(winner.source)} "
+                    f"({winner.mechanism}), so a new value here reaches no node in this profile"
+                )
+            else:
+                verdict = f"wins nothing: {row.note or row.shadow_kind or node.state}"
+            params.append(
+                {
+                    "param": label(entity_id),
+                    "profile": profile_name(row.profile),
+                    "value": row.value,
+                    "wins": row.wins,
+                    "verdict": verdict,
+                }
+            )
+        for fact in node.facts:
+            if any(seen(source) for source in fact.evidence):
+                stated.setdefault(f"{node.kind} {label(entity_id)}", set()).add(fact.layer)
+    for edge in atlas.edges.values():
+        for fact in edge.facts:
+            if any(seen(source) for source in fact.evidence):
+                name = f"{edge.kind} {label(edge.src)} -> {label(edge.dst)}"
+                stated.setdefault(name, set()).add(fact.layer)
+    findings = [
+        item
+        for item in sorted(atlas.findings, key=Finding.sort_key)
+        if any(seen(source) for source in item.where)
+        or any(_at(row, files, line) for row in item.extra.get("edits") or [])
+    ]
+    blind = [entry for entry in atlas.unresolved if any(seen(source) for source in entry.evidence)]
+    where = f"{file_label(next(iter(files)))}:{line}"
+    data: dict[str, Any] = {
+        "file": next(iter(files)),
+        "line": line,
+        "parameters": params,
+        "stated": {name: sorted(layers) for name, layers in sorted(stated.items())},
+        "findings": [_finding_row(item) for item in findings],
+        "unresolved": [entry.expr for entry in blind],
+    }
+    lines = [f"{where}, what this atlas read from it"]
+    if params:
+        lines.append("  parameter values it sets")
+        kept, hidden = _cap(params, limit)
+        for row in kept:
+            lines.append(
+                f"    {row['param']} = {_value(row['value'])} in {row['profile']}: {row['verdict']}"
+            )
+        _more(lines, hidden, "parameter values")
+    if stated:
+        lines.append("  what the layers state from it")
+        kept, hidden = _cap(sorted(stated.items()), limit)
+        for name, layers in kept:
+            lines.append(f"    {name} ({', '.join(sorted(layers))})")
+        _more(lines, hidden, "statements")
+    for entry in blind[:limit]:
+        lines.append(f"  unresolved {entry.want}: {entry.expr} ({entry.reason})")
+    for item in findings[:limit]:
+        lines.append(f"  {item.severity} {item.rule}: {item.title}")
+        lines.extend(f"      {row}" for row in edit_lines(item))
+        lines.append(f"      explain {item.fingerprint}")
+    if not (params or stated or findings or blind):
+        close = sorted(nearby, key=lambda other: (abs(other - line), other))[:5]
+        lines.append(
+            "  nothing in this atlas was read from this line, so no node, launch or model "
+            "fact depends on it"
+        )
+        if close:
+            lines.append(f"  lines of this file it did read: {', '.join(map(str, sorted(close)))}")
+    elif params and not any(row["wins"] for row in params):
+        lines.append(
+            "  no value on this line wins in any profile, so a new value here reaches no node"
+        )
+    return Answer(verb="explain", data=data, lines=lines)
 
 
 def is_rule(text: str) -> bool:
@@ -1495,6 +1631,34 @@ def diff(
             _more(lines, counts[key] - len(kept), f"{key} {what}")
     lines.extend(_build_lines(build))
     return Answer(verb="diff", data=data, lines=lines)
+
+
+def finding_delta(before: Atlas, after: Atlas, *, limit: int = DEFAULT_LIMIT) -> Answer:
+    """The findings an edit removed and the ones it added, which is how a fix is checked: a
+    finding is the same finding while its id holds, whatever its wording does."""
+    old = {item.id: item for item in before.findings}
+    new = {item.id: item for item in after.findings}
+    gone = sorted((old[key] for key in old.keys() - new.keys()), key=Finding.sort_key)
+    added = sorted((new[key] for key in new.keys() - old.keys()), key=Finding.sort_key)
+    kept = len(old.keys() & new.keys())
+    data = {
+        "gone": [_finding_row(item) for item in gone],
+        "new": [_finding_row(item) for item in added],
+        "unchanged": kept,
+    }
+    lines = [f"findings: {len(gone)} gone, {len(added)} new, {kept} unchanged"]
+    for item in gone[:limit]:
+        lines.append(f"  gone {item.severity} {item.rule}: {item.title}")
+    _more(lines, len(gone) - limit, "gone")
+    for item in added[:limit]:
+        lines.append(f"  new  {item.severity} {item.rule}: {item.title}")
+        lines.append(f"       {item.spoken}")
+        for source in item.where[:2]:
+            lines.append(f"       at {site(source, locator=True)}")
+        lines.extend(f"       {row}" for row in edit_lines(item))
+        lines.append(f"       explain {item.fingerprint}")
+    _more(lines, len(added) - limit, "new")
+    return Answer(verb="extract", data=data, lines=lines)
 
 
 def _nothing_moved(compared: Mapping[str, Any]) -> bool:

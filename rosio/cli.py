@@ -1127,15 +1127,22 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
             instances["bag"] = BagCollector(paths=tuple(bags))
             instances["stamps"] = StampsCollector(paths=tuple(bags))
-    _observed_dropped(extract_mod.out_path(cfg))
+    before = _observed_dropped(extract_mod.out_path(cfg))
     started = time.perf_counter()
     atlas = extract_mod.run(cfg, ws, collectors=collectors, instances=instances, progress=say)
     elapsed = time.perf_counter() - started
 
     report = extract_mod.summary(atlas)
     target = extract_mod.out_path(cfg)
+    delta = None
+    if before is not None and "drift.findings" in before.capabilities:
+        from rosio.query import finding_delta
+
+        delta = finding_delta(before, atlas)
     if args.json:
         payload = dict(report)
+        if delta is not None:
+            payload["findings_delta"] = delta.data
         payload["out"] = str(target)
         payload["bytes"] = target.stat().st_size
         payload["volatile"] = {"wall_seconds": round(elapsed, 3)}
@@ -1143,6 +1150,10 @@ def cmd_extract(args: argparse.Namespace) -> int:
     elif not args.quiet:
         print(f"{PROG} extract: {target.absolute()} ({_bytes(target)})")
         _print_summary(report, elapsed, atlas)
+        if delta is not None:
+            print("  against the atlas this run replaced:")
+            for line in delta.lines:
+                print(f"    {line}")
         _stale_note(target, atlas)
 
     if args.fail_on_violation and report["exceptions"]:
@@ -1154,22 +1165,24 @@ def cmd_extract(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _observed_dropped(target) -> None:
+def _observed_dropped(target):
     """Say so when extract replaces an atlas a probe extended: extract starts a new atlas,
-    and the observed layer is only ever added by `rosio probe` afterwards."""
+    and the observed layer is only ever added by `rosio probe` afterwards. The atlas it
+    replaces is returned, so the findings an edit removed can be stated."""
     from rosio.extract import carries_layer
     from rosio.model import Atlas, Layer
 
     try:
         old = Atlas.loads(target.read_text(encoding="utf-8")) if target.is_file() else None
     except (OSError, ValueError, RosioError):
-        return
+        return None
     if old is not None and carries_layer(old, Layer.OBSERVED.value):
         print(
             f"{PROG} extract: {target} carried the observed layer, which this run replaces; "
             f"run {PROG} probe again after it to keep it",
             file=sys.stderr,
         )
+    return old
 
 
 def _progress(verb: str, *, quiet: bool):

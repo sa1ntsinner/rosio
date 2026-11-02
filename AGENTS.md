@@ -2185,7 +2185,7 @@ One owner per module per milestone. Do not edit a module you do not own in your 
 | `rosio/agent/install.py` | M6 | the install and uninstall writers, idempotent, no silent overwrite |
 | `rosio/agent/templates/` | M6 | the four files the installers copy into a user's repository |
 | `rosio/serve/__init__.py` | M6 | the serve package surface |
-| `rosio/serve/tools.py` | M6 | the twelve tools as plain functions, eleven over a loaded atlas and `migrate` over the sources, no mcp involved |
+| `rosio/serve/tools.py` | M6 | the thirteen tools as plain functions, eleven over a loaded atlas, `migrate` over the sources and `check`, which extracts the served workspace again, no mcp involved |
 | `rosio/serve/server.py` | M6 | the mcp server, both transports, the key check |
 | `rosio/serve/__main__.py` | M6 | `python -m rosio.serve`, the same options as `rosio serve` |
 | `rosio/history.py` | M7 | the git hooks, the rebuild they run and the two revision mode of `diff` |
