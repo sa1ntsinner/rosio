@@ -30,6 +30,7 @@ from rosio.model import (
     Candidate,
     Edge,
     Finding,
+    Mechanism,
     Node,
     Source,
     strip_volatile,
@@ -899,6 +900,15 @@ def param(
                 f"   edit {site(effective.source, tag=tag)}"
             )
             winner = next((row for row in chain if row.wins and row.profile == item), None)
+            if winner is not None and winner.mechanism == Mechanism.YAML_WILDCARD.value:
+                reached = _reached_by(atlas, winner.source, item)
+                owner = label(ids.parse_param(entity.id)[0])
+                lines.append(
+                    f"    that line is a wildcard key handed to {plural(len(reached), 'node')} "
+                    f"({', '.join(reached[:4])}{' and more' if len(reached) > 4 else ''}); to "
+                    f"change {owner} alone, set it in a {owner} block written after the "
+                    "wildcard block, which wins because the later key wins"
+                )
             got, wants = drift_params.refused_type(entity, item, winner) if winner else ("", "")
             if wants:
                 data["profiles"][item]["refused"] = {"value_type": got, "declared_type": wants}
@@ -1637,6 +1647,25 @@ READ_LESS = frozenset(
     {"launch.raised", "launch.unloadable", "extract.pass_incomplete", "extract.input_refused"}
 )
 """Rules that say an extraction read less, so the findings it no longer holds prove nothing."""
+
+
+def _reached_by(atlas: Atlas, source: Source, profile: str) -> list[str]:
+    """The nodes one parameters file line hands a value to in one profile."""
+    nodes = set()
+    for entity_id, node in atlas.entities.items():
+        if node.kind != "param":
+            continue
+        for row in node.candidates:
+            if (
+                row.profile == profile
+                and row.source
+                and (
+                    (row.source.file, row.source.line_hint, row.source.locator)
+                    == (source.file, source.line_hint, source.locator)
+                )
+            ):
+                nodes.add(label(ids.parse_param(entity_id)[0]))
+    return sorted(nodes)
 
 
 def finding_delta(before: Atlas, after: Atlas, *, limit: int = DEFAULT_LIMIT) -> Answer:

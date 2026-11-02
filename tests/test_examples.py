@@ -124,6 +124,21 @@ def test_findings_a_broken_extraction_lost_are_not_reported_as_fixed(tmp_path: P
     assert "unread rather than fixed" in delta.text()
 
 
+@pytest.mark.ros
+@pytest.mark.slow
+def test_a_wildcard_winner_says_how_to_change_one_node_alone(tmp_path: Path) -> None:
+    """An agent told to edit the winning line changed a /** key every node is handed."""
+    from rosio import query
+
+    workspace = tmp_path / "rover_ws"
+    shutil.copytree(EXAMPLES / "rover_ws", workspace)
+    config = workspace / "src/rover_bringup/config/rover.yaml"
+    config.write_text(config.read_text() + "\n/**:\n  ros__parameters:\n    max_speed: 0.9\n")
+    text = query.param(_extract(workspace, tmp_path / "out"), "/safety_stop", "max_speed").text()
+    assert "wildcard key handed to 2 nodes (/safety_stop, /scan_filter)" in text
+    assert "set it in a /safety_stop block written after the wildcard block" in text
+
+
 def _extract(workspace: Path, out: Path) -> model.Atlas:
     code = cli.main(
         [
