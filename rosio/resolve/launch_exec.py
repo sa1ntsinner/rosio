@@ -234,6 +234,16 @@ def sourced_environment(ros_setup: Sequence[str] = ()) -> dict[str, str] | None:
     return env
 
 
+def _log_dir() -> str:
+    """Where an unsandboxed launch walk lets ROS write its logs: a directory of its own under
+    the temporary directory, never the user's ~/.ros."""
+    import tempfile
+
+    path = Path(tempfile.gettempdir()) / "rosio-ros-log"
+    path.mkdir(exist_ok=True)
+    return str(path)
+
+
 def _python(ros_setup: Sequence[str], script: str) -> tuple[list[str], dict[str, str] | None]:
     """The command and environment that run a python3 command line in the sourced setup.
 
@@ -470,6 +480,10 @@ def walk(
             ]
         )
         command = [*prefix, "--", *command]
+    else:
+        # A launch file that logs writes under ~/.ros, which a coding agent's sandbox holds
+        # read only, and the walk then raised and dropped every node of the profile.
+        child_env = {**(child_env or os.environ), "ROS_LOG_DIR": _log_dir()}
     try:
         done = (children or Children()).run(
             command, child_env, model.dumps(request), max(1.0, float(timeout))

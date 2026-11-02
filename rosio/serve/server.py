@@ -459,10 +459,26 @@ def build(source: tools.AtlasSource) -> Any:
     # the text is the answer, and a structured copy of it beside it doubles what a small
     # context window has to hold
     structured = "structured_output" in inspect.signature(server.add_tool).parameters
+    annotated = "annotations" in inspect.signature(server.add_tool).parameters
     for function in functions:
-        extra = {"structured_output": False} if structured else {}
+        extra: dict[str, Any] = {"structured_output": False} if structured else {}
+        if annotated:
+            extra["annotations"] = _annotations(function.__name__)
         server.add_tool(function, name=function.__name__, description=_summary(function), **extra)
     return server
+
+
+def _annotations(name: str) -> Any:
+    """Every tool reads, and `check` rewrites the atlas and nothing else. An assistant that runs
+    unattended asks before a tool without these hints, and with nobody to answer it refused
+    every call."""
+    from mcp.types import ToolAnnotations
+
+    if name == "check":
+        return ToolAnnotations(
+            readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        )
+    return ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 
 
 def _summary(function: Any) -> str:

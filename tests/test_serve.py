@@ -820,6 +820,10 @@ def test_the_server_registers_every_tool_when_mcp_is_installed(atlas_file: Path)
         "migrate",
         "check",
     }
+    # An unattended assistant refuses every tool it would have to ask about.
+    hints = {tool.name: tool.model_dump(by_alias=True)["annotations"] for tool in listed}
+    writes = {name for name, hint in hints.items() if not hint["readOnlyHint"]}
+    assert writes == {"check"}
 
 
 def test_the_http_app_carries_the_path_the_stateless_mode_and_the_key(atlas_file: Path):

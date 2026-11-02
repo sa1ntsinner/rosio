@@ -107,6 +107,23 @@ def test_a_line_says_whether_it_wins_and_a_fix_shows_as_one_finding_gone(tmp_pat
     assert delta["new"] == []
 
 
+@pytest.mark.ros
+@pytest.mark.slow
+def test_findings_a_broken_extraction_lost_are_not_reported_as_fixed(tmp_path: Path) -> None:
+    """A coding agent's sandbox held ~/.ros read only, the launch walk raised, and extract
+    said six findings went."""
+    from rosio import query
+
+    workspace = tmp_path / "rover_ws"
+    shutil.copytree(EXAMPLES / "rover_ws", workspace)
+    before = _extract(workspace, tmp_path / "out")
+    launch = workspace / "src/rover_bringup/launch/bringup.launch.py"
+    launch.write_text(launch.read_text().replace("    return", "    raise OSError(30)\n    return"))
+    delta = query.finding_delta(before, _extract(workspace, tmp_path / "out"))
+    assert delta.data["read_less"] == ["launch.raised"]
+    assert "unread rather than fixed" in delta.text()
+
+
 def _extract(workspace: Path, out: Path) -> model.Atlas:
     code = cli.main(
         [

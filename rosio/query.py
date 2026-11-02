@@ -1633,6 +1633,12 @@ def diff(
     return Answer(verb="diff", data=data, lines=lines)
 
 
+READ_LESS = frozenset(
+    {"launch.raised", "launch.unloadable", "extract.pass_incomplete", "extract.input_refused"}
+)
+"""Rules that say an extraction read less, so the findings it no longer holds prove nothing."""
+
+
 def finding_delta(before: Atlas, after: Atlas, *, limit: int = DEFAULT_LIMIT) -> Answer:
     """The findings an edit removed and the ones it added, which is how a fix is checked: a
     finding is the same finding while its id holds, whatever its wording does."""
@@ -1647,6 +1653,13 @@ def finding_delta(before: Atlas, after: Atlas, *, limit: int = DEFAULT_LIMIT) ->
         "unchanged": kept,
     }
     lines = [f"findings: {len(gone)} gone, {len(added)} new, {kept} unchanged"]
+    lost = sorted({item.rule for item in added if item.rule in READ_LESS})
+    if gone and lost:
+        data["read_less"] = lost
+        lines.append(
+            f"  this run read less than the last one ({', '.join(lost)}), so a finding that "
+            "went may be unread rather than fixed: clear that problem and extract again"
+        )
     for item in gone[:limit]:
         lines.append(f"  gone {item.severity} {item.rule}: {item.title}")
     _more(lines, len(gone) - limit, "gone")
