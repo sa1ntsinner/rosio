@@ -472,6 +472,19 @@ def test_orphan_root_is_silent_on_a_model_one_profile_expands_with_its_own_argum
     assert frame_rules.frame_orphan_root(_prefixed_atlas(broken_joint=False).build()) == []
 
 
+def test_orphan_root_is_silent_on_one_model_a_profile_loads_under_two_prefixes():
+    """A fleet launch file starts one robot_state_publisher per robot with frame_prefix
+    robot1/ and robot2/, which is two robots, not one with a second root."""
+    builder = _builder()
+    robot = _model_file(builder, "fx_robot.urdf")
+    for prefix in ("robot1/", "robot2/"):
+        for frame in ("base_link", "os_sensor"):
+            _link(builder, prefix + frame, [robot])
+        joint = (prefix + "sensor_joint", prefix + "base_link", prefix + "os_sensor")
+        _joint(builder, robot, *joint, [0.4, 0.0, 0.25], profile=NAV)
+    assert frame_rules.frame_orphan_root(builder.build()) == []
+
+
 def test_orphan_root_still_fires_inside_the_expansion_one_profile_loads():
     found = frame_rules.frame_orphan_root(_prefixed_atlas(broken_joint=True).build())
     assert [item.subject for item in found] == ["frame:tb3/laser_mount"]

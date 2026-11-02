@@ -1363,13 +1363,16 @@ def emit_loaded(
     A frame both expansions declare keeps the geometry the default expansion wrote, so the
     attribute does not depend on which pass ran first."""
     shares = {**launch_exec.installed_shares(ctx.ws), **launch_exec.source_shares(ctx.ws)}
-    found = parse_xacro_file(path, args, resolve_package=ctx.ws.share, shares=shares)
-    try:
-        default: UrdfModel | None = parse_xacro_file(
-            path, (), resolve_package=ctx.ws.share, shares=shares
-        )
-    except CollectorError:
-        default = None
+    default: UrdfModel | None
+    if path.endswith(URDF_SUFFIX) and not uses_xacro(path):
+        # Read the way the urdf pass reads it, so both state one strategy on the file.
+        found = default = parse_urdf_file(path, resolve_package=ctx.ws.share)
+    else:
+        found = parse_xacro_file(path, args, resolve_package=ctx.ws.share, shares=shares)
+        try:
+            default = parse_xacro_file(path, (), resolve_package=ctx.ws.share, shares=shares)
+        except CollectorError:
+            default = None
     if prefix:
         found = replace(
             found,

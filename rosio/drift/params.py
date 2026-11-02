@@ -1473,9 +1473,12 @@ def orphan_block(atlas: model.Atlas) -> list[model.Finding]:
         slugs = _and([rules.slug_of(item) for item in dead])
         named = ("profiles " if len(dead) > 1 else "profile ") + slugs
         at = rules.where(first.source)
-        live_in = sorted({item for block in blocks for item in block.live_in} - set(dead))
+        if {item for block in blocks for item in block.live_in} - set(dead):
+            # Another profile reads the block from the same file, which is how nav2 shares one
+            # parameters file between its launch files: the block is live configuration.
+            continue
         unproven = [block for block in blocks if not block.proven]
-        variant = "shared" if live_in else ("unproven" if len(unproven) == len(blocks) else "")
+        variant = "unproven" if len(unproven) == len(blocks) else ""
         severity = rules.severity_of("param.orphan_block", variant)
         caveat = ""
         if unproven:
@@ -1485,16 +1488,6 @@ def orphan_block(atlas: model.Atlas) -> list[model.Finding]:
                 f" {blind} processes of {'profiles' if len(unproven) > 1 else 'profile'} "
                 f"{where} carry no name rosio could form, so the block is dead there unless "
                 "one of them answers to it."
-            )
-        if live_in:
-            count = len(live_in)
-            others = ", ".join(rules.slug_of(item) for item in live_in[:3])
-            if count > 3:
-                others += f" and {count - 3} more"
-            launch = f"profile {others} launches" if count == 1 else f"profiles {others} launch"
-            caveat += (
-                f" The file is shared: {launch} a node that reads this block, so it is not "
-                "dead configuration."
             )
         keys = _keys(len(set().union(*(block.keys for block in blocks))))
         out.append(

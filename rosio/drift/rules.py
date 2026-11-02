@@ -161,7 +161,6 @@ VARIANT_SEVERITY: dict[str, dict[str, str]] = {
     "looked_up": {"frame.not_in_urdf": WARN},
     "renamed": {"frame.not_in_urdf": WARN},
     "stamped": {"frame.not_in_urdf": WARN},
-    "shared": {"param.orphan_block": INFO},
     "unbudgeted": {"resolution.below_budget": INFO},
     "absent": {"model.mesh_missing": WARN},
 }
@@ -177,9 +176,7 @@ epoch offset to warn, and `strong` raises measured topic skew or clock drift to 
 `looked_up` raises a frame the code looks up by name to warn: a lookup of a frame nothing
 states fails on every call. `renamed` raises a frame the code broadcasts under a link of the
 loaded model to warn when the model holds a child of that link with a close name: the robot
-then has two frames for one part. `shared` lowers an orphan block to info when another profile
-launches a node that reads it from the same file, which is how nav2 shares one parameters
-file between its launch files. `absent` lowers a missing mesh to warn when no tree holds it,
+then has two frames for one part. `absent` lowers a missing mesh to warn when no tree holds it,
 because then the path is wrong or the file was never committed and rosio cannot say which,
 while a mesh only the source holds is a missing install line."""
 

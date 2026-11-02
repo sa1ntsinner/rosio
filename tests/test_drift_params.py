@@ -1549,11 +1549,10 @@ def _shared_block_atlas(*, read_elsewhere: bool) -> model.Atlas:
     return builder.build()
 
 
-def test_param_orphan_block_is_a_note_when_another_profile_reads_the_block():
-    (found,) = _run(_shared_block_atlas(read_elsewhere=True), "param.orphan_block")
-    assert found.severity == model.Severity.INFO.value
-    assert "The file is shared: profile other launches a node that reads this block" in found.say
-    assert found.id == _run(_orphan_atlas(), "param.orphan_block")[0].id
+def test_param_orphan_block_is_silent_when_another_profile_reads_the_block():
+    """A fleet launch file that names the shared file for one node of a second profile made
+    a note per block the first profile reads, after an agent fixed the path correctly."""
+    assert _run(_shared_block_atlas(read_elsewhere=True), "param.orphan_block") == []
 
 
 def test_param_orphan_block_stays_a_warning_when_no_other_profile_reads_the_block():

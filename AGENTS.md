@@ -1706,6 +1706,14 @@ default, which is what the node runs with.
   `remap.matches_nothing` the endpoint name closest to a plain remap source. `rosio drift`
   prints the line to edit first, as `path:line`, and no longer lists a severity with no finding.
 
+Inside `1.34`, with no new key, three readings moved after a coding agent fixed planted faults
+in a generated fleet workspace and rosio reported its correct fixes. A plain `.urdf` that a
+robot_state_publisher loads with a `frame_prefix` is read as the urdf pass reads it, where it
+went through xacro and the file entity refused the second strategy, which lost both robot
+models. `frame.orphan_root` takes one model a profile loads under two prefixes for two robots.
+`param.orphan_block` is silent on a block another profile reads from the same file, where it
+was a note. No release had shipped, so no stored id or waiver existed.
+
 A reader pinned to `1.0` still loads a `1.34` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

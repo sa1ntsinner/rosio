@@ -950,3 +950,25 @@ def test_init_comments_out_a_launch_file_another_one_starts(tmp_path: Path):
     slugs = [item["slug"] for item in yaml.safe_load(text)["profiles"]]
     assert len(slugs) == 1 and "robot" not in slugs[0]
     assert "# fleet/fleet.launch.py includes and starts this one" in text
+
+
+@pytest.mark.ros
+def test_a_plain_urdf_two_robots_load_under_prefixes_is_read_without_an_error(tmp_path: Path):
+    """A fleet launch file read one plain urdf through xacro for its frame_prefix, and the
+    file entity refused the second strategy, so the run lost both robot models."""
+    urdf = (
+        '<robot name="cart"><link name="base_footprint"/><link name="base_link"/>'
+        '<joint name="body" type="fixed"><parent link="base_footprint"/>'
+        '<child link="base_link"/></joint></robot>'
+    )
+    model_text = f"open('{tmp_path}/src/p/cart.urdf').read()"
+    robots = ", ".join(
+        "Node(package='robot_state_publisher', executable='robot_state_publisher', "
+        f"namespace='{robot}', parameters=[{{'robot_description': {model_text}, "
+        f"'frame_prefix': '{robot}/'}}])"
+        for robot in ("robot1", "robot2")
+    )
+    package(tmp_path, "p", {"cart.urdf": urdf, "run.launch.py": launch(robots)})
+    atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
+    assert not [row for run in atlas.by_kind("run") for row in run.attrs.get("exceptions", [])]
+    assert {"frame:robot1/base_link", "frame:robot2/base_link"} <= set(atlas.entities)

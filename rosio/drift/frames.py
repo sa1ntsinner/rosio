@@ -708,7 +708,9 @@ def _families(
             # One tree repeated under another frame prefix is a second robot.
             twin = _twins(shapes[first], shapes[second])
             joins_system = first == 0 and SYSTEM_SOURCE in models[second] and not twin
-            if shared - {SYSTEM_SOURCE} or joins_system:
+            # One model a profile loads under two prefixes is two robots, not one robot
+            # whose second root the model leaves.
+            if (shared - {SYSTEM_SOURCE} and not twin) or joins_system:
                 family_of[find(second)] = find(first)
     families: dict[int, list[Sequence[str]]] = {}
     for index, group in enumerate(ordered):
