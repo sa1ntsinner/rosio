@@ -109,6 +109,9 @@ def test_a_remap_whose_source_the_node_never_names_is_a_dead_remap(tmp_path: Pat
     assert dead[0].severity == "warn"
     assert "cmd_vel_raw" in dead[0].detail
     assert "run.launch.py" in dead[0].say
+    assert [(row["find"], row["replace"]) for row in dead[0].extra["edits"]] == [
+        ("cmd_vel_out", "cmd_vel_raw")
+    ]
     assert findings(atlas, "remap.unresolved") == []
 
 

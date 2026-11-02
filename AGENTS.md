@@ -1702,7 +1702,8 @@ default, which is what the node runs with.
   `root`, `line_hint`, `find` and `replace`. A reader applies a row only where the cited line
   holds `find` once as a whole word, so an edited or moved line is left alone; the language
   server offers the rows as one quick fix. `param.set_undeclared` states the rename of a key one
-  slip from a declared name, and `frame.not_in_urdf` the frame name the model has. `rosio drift`
+  slip from a declared name, `frame.not_in_urdf` the frame name the model has, and
+  `remap.matches_nothing` the endpoint name closest to a plain remap source. `rosio drift`
   prints the line to edit first, as `path:line`, and no longer lists a severity with no finding.
 
 A reader pinned to `1.0` still loads a `1.34` file: `Atlas.from_json` compares the major

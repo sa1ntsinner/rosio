@@ -155,15 +155,17 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         return tools.param_chain(source.atlas(), node, name, profile=profile)
 
     def drift(min_severity: str = "", only: str = "", profile: str = "", limit: int = 5) -> str:
-        """Findings ready to quote, each with one sentence, the line to edit and the
-        fingerprint explain takes."""
+        """Findings ready to quote, each with one sentence, the line to edit, the exact edit
+        when rosio knows it, and the fingerprint explain takes."""
         return tools.drift(
             source.atlas(), min_severity=min_severity, rule=only, profile=profile, limit=limit
         )
 
     def explain(selector: str, limit: int = 8) -> str:
         """One entity in full: its layers, facts, conflicts, effective values and
-        provenance. Or one finding, or every finding of one rule."""
+        provenance. Or one finding, or every finding of one rule. Or a file and line such
+        as config/robot.yaml:12: each value that line sets and whether it wins or which
+        line outbids it, so call it before editing a line."""
         return tools.explain(source.atlas(), selector, limit=limit)
 
     def query(question: str, limit: int = 8) -> str:
@@ -259,7 +261,7 @@ ARGUMENTS = {
     "only": "one drift rule id such as param.shadowed",
     "limit": "how many rows to return",
     "selector": "a name such as /planner_server, /scan or base_link, a full id, a finding "
-    "fingerprint or id, or a rule id",
+    "fingerprint or id, a rule id, or a file and line such as config/robot.yaml:12",
     "question": 'plain words, for example "which nodes publish cmd_vel"',
     "source": "where to start: a name such as /scan_filter, or a full id",
     "target": "where to end: a name such as /cmd_vel, or a full id",

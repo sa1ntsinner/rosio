@@ -1637,6 +1637,16 @@ def remap_matches_nothing(atlas: Atlas) -> list[Finding]:
             if near
             else f"write the endpoint name the node uses at {at}, or delete the remap"
         )
+        where = [row for entry, _ in group for row in entry.evidence]
+        plain = near and source == source.lstrip("~/") and not near[0].startswith(("~", "/"))
+        edits = (
+            {
+                model.dumps(item): item
+                for item in (rules.edit(row, source, near[0]) for row in where if row.line_hint)
+            }
+            if plain
+            else {}
+        )
         findings.append(
             Finding(
                 rule="remap.matches_nothing",
@@ -1658,7 +1668,8 @@ def remap_matches_nothing(atlas: Atlas) -> list[Finding]:
                 discriminator=_disc(expr),
                 profiles=sorted(profiles),
                 layers=[model.Layer.DECLARED.value, model.Layer.CODED.value],
-                where=[row for entry, _ in group for row in entry.evidence],
+                where=where,
+                extra={"edits": [edits[key] for key in sorted(edits)]} if edits else {},
             )
         )
     return findings
