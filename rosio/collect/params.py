@@ -2037,6 +2037,8 @@ def _file_inputs(
     document = _load(path)
     if document is None:
         return [], f"{path} could not be read"
+    if document.data is None:
+        return [], ""
     if not document.is_parameter_file():
         return [], f"{path} is not a parameter file: {yaml_lines.refuse_reason(document.data)}"
     reshaped, root_key = _reshape(source, document)
@@ -2417,6 +2419,9 @@ def _refusal(path: str) -> str:
         document = yaml_lines.load_file(path)
     except CollectorError as exc:
         return str(exc).replace(path, Path(path).name)
+    if document.data is None:
+        # rcl takes an empty parameters file and sets nothing (measured on jazzy)
+        return ""
     return yaml_lines.refuse_reason(document.data)
 
 

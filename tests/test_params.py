@@ -4011,3 +4011,10 @@ def test_a_missing_launch_input_behind_a_false_condition_is_not_refused(ws):
     atlas = build(ws, [walk])
     assert atlas.get(ws.file_id(missing)) is None
     assert not [item for item in atlas.unresolved if item.reason == "file_missing"]
+
+
+def test_an_empty_parameters_file_is_read_as_setting_nothing(tmp_path: Path):
+    """laser_filters ships an empty pass through example, and rcl starts the node with it."""
+    empty = tmp_path / "pass_through.yaml"
+    empty.write_text("", encoding="utf-8")
+    assert params_collect._refusal(str(empty)) == ""
