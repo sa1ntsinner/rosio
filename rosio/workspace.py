@@ -76,13 +76,14 @@ IGNORE_MARKERS = ("COLCON_IGNORE", "AMENT_IGNORE", "CATKIN_IGNORE")
 LAUNCH_SUFFIXES = (
     ".launch.py",
     "_launch.py",
+    "-launch.py",
     ".launch.xml",
     ".launch.yaml",
     ".launch.yml",
     ".launch",
 )
-"""Both spellings are in live use, and the bare `.launch` files are ROS 1 XML that a
-resolver has to recognise rather than fail on."""
+"""All three python spellings are in live use (velodyne writes `-launch.py`), and the bare
+`.launch` files are ROS 1 XML that a resolver has to recognise rather than fail on."""
 
 PARAM_YAML_SUFFIXES = (".yaml", ".yml")
 

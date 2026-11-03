@@ -58,6 +58,7 @@ PYTHON_SUFFIXES = (".py",)
 LAUNCH_SUFFIXES = (
     ".launch.py",
     "_launch.py",
+    "-launch.py",
     ".launch.xml",
     ".launch.yaml",
     ".launch.yml",

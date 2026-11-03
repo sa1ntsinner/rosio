@@ -1304,7 +1304,7 @@ class _Reader:
         # `Subscriber<CameraInfo> sub_depth_info_, sub_rgb_info_;` declares two members.
         for declarator in node.children_by_field_name("declarator") if self.klass else ():
             member = _text(declarator, self.src).strip("&* ")
-            if declarator.type == "field_identifier" and type_text and "<" not in type_text:
+            if declarator.type == "field_identifier" and type_text:
                 self.unit.field_types[(self.klass, member)] = type_text
             if default is not None:
                 self.unit.members[(self.klass, member)] = replace(
@@ -1362,7 +1362,7 @@ class _Reader:
             return
         target = declarator
         while target is not None and target.type != "function_declarator":
-            target = _child(target, "declarator")
+            target = _inner_declarator(target)
         parameters = _child(target, "parameters") if target is not None else None
         if parameters is None:
             return
@@ -1381,7 +1381,7 @@ class _Reader:
     def _function_name(self, declarator: Any) -> tuple[str, str]:
         target = declarator
         while target is not None and target.type != "function_declarator":
-            target = _child(target, "declarator")
+            target = _inner_declarator(target)
         if target is None:
             return "", ""
         inner = _child(target, "declarator")
@@ -1403,7 +1403,7 @@ class _Reader:
     def _parameters(self, declarator: Any) -> bool:
         target = declarator
         while target is not None and target.type != "function_declarator":
-            target = _child(target, "declarator")
+            target = _inner_declarator(target)
         if target is None:
             return False
         parameters = _child(target, "parameters")
@@ -2842,6 +2842,15 @@ def _is_node_argument(node: Any, src: bytes) -> bool:
     )
 
 
+def _inner_declarator(node: Any) -> Any:
+    """The declarator one level in. A reference declarator (`Logger& get()`) holds it as an
+    unnamed child where a pointer declarator names the field."""
+    inner = _child(node, "declarator")
+    if inner is None and node.type == "reference_declarator" and node.named_child_count:
+        inner = node.named_children[-1]
+    return inner
+
+
 def _is_node_handle(node: Any, src: bytes) -> bool:
     """A node handed to a call: the node itself, or one of its interfaces."""
     text = _text(node, src).strip().lstrip("*&")
@@ -3142,7 +3151,7 @@ def _wrappers(root: Any, src: bytes, *, lambdas: bool = True) -> dict[str, tuple
             name_types = ("std::string", "string")
             declarator = _child(node, "declarator")
             while declarator is not None and declarator.type != "function_declarator":
-                declarator = _child(declarator, "declarator")
+                declarator = _inner_declarator(declarator)
             inner = _child(declarator, "declarator") if declarator is not None else None
             if inner is None:
                 continue
@@ -3333,7 +3342,7 @@ def _initialized_class(node: Any, src: bytes) -> str:
         if parent.type == "function_definition":
             declarator = _child(parent, "declarator")
             while declarator is not None and declarator.type != "function_declarator":
-                declarator = _child(declarator, "declarator")
+                declarator = _inner_declarator(declarator)
             name = _child(declarator, "declarator") if declarator is not None else None
             qualified = _text(name, src) if name is not None else ""
             if "::" in qualified:
@@ -3599,7 +3608,7 @@ def _signatures(root: Any, src: bytes) -> dict[str, list[tuple[int, list[str]]]]
             continue
         declarator = _child(node, "declarator")
         while declarator is not None and declarator.type != "function_declarator":
-            declarator = _child(declarator, "declarator")
+            declarator = _inner_declarator(declarator)
         function = _child(declarator, "declarator") if declarator is not None else None
         parameters = _child(declarator, "parameters") if declarator is not None else None
         if function is None or parameters is None:
@@ -3716,7 +3725,7 @@ def _main_constructions(root: Any, src: bytes) -> list[tuple[str, list[Any], Any
         if node.type == "function_definition":
             declarator = _child(node, "declarator")
             while declarator is not None and declarator.type != "function_declarator":
-                declarator = _child(declarator, "declarator")
+                declarator = _inner_declarator(declarator)
             name = _child(declarator, "declarator") if declarator is not None else None
             in_main = name is not None and _text(name, src) == "main"
         if node.type == "lambda_expression":
@@ -4059,7 +4068,7 @@ def _member_initial(units: Sequence[Unit], pkg: str, owner: str, member: str) ->
             elif node.type == "function_definition":
                 declarator = _child(node, "declarator")
                 while declarator is not None and declarator.type != "function_declarator":
-                    declarator = _child(declarator, "declarator")
+                    declarator = _inner_declarator(declarator)
                 function = _child(declarator, "declarator") if declarator is not None else None
                 if function is None:
                     continue
@@ -4242,7 +4251,7 @@ def _enclosing_method(node: Any, src: bytes) -> str:
         node = node.parent
     target = _child(node, "declarator") if node is not None else None
     while target is not None and target.type != "function_declarator":
-        target = _child(target, "declarator")
+        target = _inner_declarator(target)
     inner = _child(target, "declarator") if target is not None else None
     return _flat(inner, src).rpartition("::")[2] if inner is not None else ""
 
@@ -5036,7 +5045,7 @@ def _declared_defaults(
             for member in body.named_children:
                 declarator = _child(member, "declarator")
                 while declarator is not None and declarator.type != "function_declarator":
-                    declarator = _child(declarator, "declarator")
+                    declarator = _inner_declarator(declarator)
                 if declarator is None:
                     continue
                 function = _child(declarator, "declarator")
@@ -6578,6 +6587,9 @@ class CppCodeCollector:
         sym_id: str,
         plugin_id: str,
     ) -> None:
+        if not item.name.value.strip("."):
+            # `name_ + "." + name` inside a declare wrapper: each call site states the name
+            return
         ws = ctx.ws
         builder = ctx.builder
         plugin = ids.parse_plugin(plugin_id)
@@ -6608,6 +6620,9 @@ class CppCodeCollector:
         sym_id: str,
         plugin_id: str,
     ) -> None:
+        if not item.name.value.strip("."):
+            # `name_ + "." + name` inside a declare wrapper: each call site states the name
+            return
         ws = ctx.ws
         builder = ctx.builder
         plugin = ids.parse_plugin(plugin_id)

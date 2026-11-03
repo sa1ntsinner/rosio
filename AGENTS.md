@@ -1714,6 +1714,17 @@ models. `frame.orphan_root` takes one model a profile loads under two prefixes f
 `param.orphan_block` is silent on a block another profile reads from the same file, where it
 was a note. No release had shipped, so no stored id or waiver existed.
 
+Inside `1.34`, with no new key, extracting thirty public ROS 2 repositories moved several
+readings. A C++ function that returns a reference (`rclcpp::Logger& get()`) keeps its name,
+where its symbol id had an empty segment and the file was refused, so `sym` ids of such
+functions are new. A member whose type is a template (`filters::FilterChain<Scan>`) states
+that type, and a class a node hands itself or its parameters interface to that no workspace
+source defines and no wrapper row states may declare any name, so `param.set_undeclared` is
+silent on the keys of such a node. A parameter whose every winning profile is rewritten
+without a winner is no longer `effective`. A repository holding `package.xml` at its top is
+its own src root, its `src` being that package's sources. A python launch file named
+`-launch.py` is a launch file. No release had shipped, so no stored id or waiver existed.
+
 A reader pinned to `1.0` still loads a `1.34` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

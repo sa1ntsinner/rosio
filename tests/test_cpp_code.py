@@ -64,6 +64,19 @@ def test_nav2_lifecycle_node_keeps_its_literal_name():
     assert cpp.file_report(unit)["nodes"][0]["name"] == "controller_server"
 
 
+def test_a_function_returning_a_reference_keeps_its_name():
+    """moveit's `rclcpp::Logger& getGlobalRootLogger()` made a sym id with no name."""
+    unit = cpp.parse_text(
+        "rclcpp::Logger& get_logger_ref() {\n"
+        '  static auto node = rclcpp::Node::make_shared("logs");\n'
+        "  return node->get_logger();\n}\n",
+        path="c.cpp",
+    )
+    cpp.analyse([unit])
+    (row,) = cpp.file_report(unit)["nodes"]
+    assert (row["symbol"], row["name"]) == ("get_logger_ref", "logs")
+
+
 @pytest.mark.parametrize(
     ("options", "stated"),
     [

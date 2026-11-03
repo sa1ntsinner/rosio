@@ -776,7 +776,8 @@ def _default_roots(workspace: Any) -> tuple[RootSpec, ...]:
 
     A directory that is itself an ament prefix (`/opt/ros/<distro>`, a colcon `install/`,
     merged or isolated) is one install root, and so is a workspace holding only `install/`.
-    Packages beside that `install/` make the directory the src root as well.
+    Packages beside that `install/` make the directory the src root as well. A directory
+    holding `package.xml` is a package, and its `src` is that package's source code.
     The merged index is asked first, because `/opt/ros/<distro>` also holds a `src`.
     """
     if isinstance(workspace, Workspace):
@@ -791,7 +792,7 @@ def _default_roots(workspace: Any) -> tuple[RootSpec, ...]:
     out: list[RootSpec] = []
     src = directory / "src"
     install = directory / "install"
-    if src.is_dir():
+    if src.is_dir() and not (directory / "package.xml").is_file():
         out.append(RootSpec(kind="src", path=str(src)))
     elif not _is_install_tree(install):
         if _is_install_tree(directory):
@@ -882,7 +883,9 @@ def _not_a_profile(path: str) -> bool:
 def _slug_candidates(package: str, relative: str) -> tuple[str, ...]:
     stem = _slug_for(relative)
     flat = re.sub(r"[^A-Za-z0-9]+", "_", relative.removeprefix("launch/")).strip("_")
-    return (stem, f"{package}.{stem}", f"{package}.{flat}")
+    # `driver.launch.py` and `driver_launch.py` flatten alike, the dotted path never does
+    dotted = re.sub(r"[^A-Za-z0-9.]+", "_", relative.removeprefix("launch/")).strip("_")
+    return (stem, f"{package}.{stem}", f"{package}.{flat}", f"{package}.{dotted}")
 
 
 def _unique_slug(package: str, relative: str, rows: Sequence[tuple[str, str, str]]) -> str:

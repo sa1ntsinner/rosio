@@ -511,6 +511,30 @@ def test_a_non_effective_parameter_has_no_effective_value():
     assert atlas.entities[PARAM].effective == {}
 
 
+def test_rewriting_every_winning_profile_without_a_winner_drops_the_effective_state():
+    """rtabmap: two profiles won through a code default, then each was rewritten when the
+    node turned out to set the value itself, and the entity stayed effective with no winner."""
+    builder = minimal_builder()
+    builder.node(NODE_CTL, name_source=NameSource.UNKNOWN.value)
+
+    def row(profile: str, wins: bool) -> Candidate:
+        return Candidate(
+            value=1,
+            value_type="int",
+            mechanism=Mechanism.YAML_BASE.value,
+            source=Source(file=FILE_BASE),
+            rank=0,
+            wins=wins,
+            profile=profile,
+        )
+
+    for profile in ("profile:a", "profile:b"):
+        builder.set_param(PARAM, state=ParamState.EFFECTIVE.value, candidates=[row(profile, True)])
+    for profile in ("profile:a", "profile:b"):
+        builder.set_param(PARAM, state=ParamState.OTHER.value, candidates=[row(profile, False)])
+    assert builder.atlas.entities[PARAM].state == ParamState.OTHER.value
+
+
 def test_two_winning_candidates_in_one_profile_are_refused():
     builder = minimal_builder()
     builder.node(NODE_CTL, name_source=NameSource.UNKNOWN.value)

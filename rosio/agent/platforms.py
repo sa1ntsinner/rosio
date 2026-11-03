@@ -1,8 +1,10 @@
 """The table of assistants rosio can install itself into, one row per assistant.
 
-Four mechanisms cover almost every tool, plus the MCP registration as a fifth:
+Four mechanisms cover almost every tool, plus a reference file beside a skill and the MCP
+registration:
 
     skill         a self contained file the tool loads on demand, ours end to end
+    reference     a file beside the skill that the skill tells the reader to open
     rules         a self contained rules file, ours end to end
     instructions  a managed section inside a file the user also writes in
     mcp           a server entry merged into a json or toml config the user also writes in
@@ -32,7 +34,7 @@ from pathlib import Path
 
 from rosio.errors import UsageError
 
-MECHANISMS = ("instructions", "mcp", "rules", "skill")
+MECHANISMS = ("instructions", "mcp", "reference", "rules", "skill")
 SCOPES = ("project", "user")
 
 SKILL_NAME = "rosio"
@@ -102,7 +104,7 @@ class Target:
 
     @property
     def writer(self) -> str:
-        if self.mechanism in ("skill", "rules"):
+        if self.mechanism in ("skill", "rules", "reference"):
             return "whole_file"
         if self.mechanism == "instructions":
             return "section"
@@ -128,6 +130,8 @@ class Platform:
 
 _SKILL = f".claude/skills/{SKILL_NAME}/SKILL.md"
 _PORTABLE_SKILL = f".agents/skills/{SKILL_NAME}/SKILL.md"
+_REVIEW = f".claude/skills/{SKILL_NAME}/review.md"
+_PORTABLE_REVIEW = f".agents/skills/{SKILL_NAME}/review.md"
 
 
 PLATFORMS: tuple[Platform, ...] = (
@@ -142,6 +146,13 @@ PLATFORMS: tuple[Platform, ...] = (
                 template="skill.md",
                 note="the cross framework skills directory several tools now read, same "
                 "SKILL.md layout as the Claude Code skill",
+            ),
+            Target(
+                mechanism="reference",
+                project=_PORTABLE_REVIEW,
+                user=_PORTABLE_REVIEW,
+                template="review.md",
+                note="the bug classes of ROS 2 code, read beside the skill when hunting bugs",
             ),
         ),
     ),
@@ -188,6 +199,13 @@ PLATFORMS: tuple[Platform, ...] = (
                 "project scope path carries the same layout and was not",
             ),
             Target(
+                mechanism="reference",
+                project=_REVIEW,
+                user=_REVIEW,
+                template="review.md",
+                note="the bug classes of ROS 2 code, which the skill names by this path",
+            ),
+            Target(
                 mechanism="instructions",
                 project="CLAUDE.md",
                 user=".claude/CLAUDE.md",
@@ -212,6 +230,14 @@ PLATFORMS: tuple[Platform, ...] = (
         key="codex",
         title="Codex CLI",
         targets=(
+            Target(
+                mechanism="reference",
+                project=_PORTABLE_REVIEW,
+                user=_PORTABLE_REVIEW,
+                template="review.md",
+                note="the bug classes of ROS 2 code, which the AGENTS.md section names by this "
+                "path",
+            ),
             Target(
                 mechanism="instructions",
                 project="AGENTS.md",

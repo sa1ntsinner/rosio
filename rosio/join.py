@@ -1323,6 +1323,23 @@ def parameter_declarations(
             exprs.setdefault((parsed.package, klass), []).append(entry.expr)
         elif entry.reason == "node_handle_untraced":
             untraced.setdefault(parsed.package, set()).add(klass)
+    # a class handed the node that no source here defines and no wrapper row states
+    # (`filters::FilterChain` configured with the parameters interface) may declare any name
+    for carrier in found:
+        if not carrier.file:
+            continue
+        pkg = ids.parse_file(carrier.file).package
+        for row in carrier.classes:
+            for other in row.get("node_handoffs", []):
+                spelled = _class_type(str(other))
+                if (
+                    spelled
+                    and not str(other).endswith("()")
+                    and not any(_short(spelled) in held for held in classes.values())
+                    and wrappers.lookup(spelled.split("<", 1)[0], "cpp") is None
+                ):
+                    key = (pkg, _short(_class_type(str(row.get("name") or ""))))
+                    exprs.setdefault(key, []).append(spelled)
     for node in atlas.by_kind(model.NodeKind.NODE.value):
         for fact in node.facts:
             if fact.layer != CODED:

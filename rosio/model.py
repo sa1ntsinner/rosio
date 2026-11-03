@@ -1642,6 +1642,9 @@ class AtlasBuilder:
                     f"parameter {param_id} has {count} winning candidates in profile {profile}"
                 )
         node.state = stronger_param_state(node.state, wanted) if kept and node.state else wanted
+        if node.state == ParamState.EFFECTIVE.value and not winners:
+            # every profile that won was rewritten without a winner since
+            node.state = wanted
         node.candidates = rows
         if note:
             node.attrs.setdefault("notes", [])

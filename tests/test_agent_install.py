@@ -195,7 +195,7 @@ def test_no_template_names_anything_from_a_private_workspace():
     travelling with them, and a worked example has to come from something the reader can
     open: nav2_bringup ships with ROS 2 humble."""
     needles = private_needles()
-    for name in ("core.md", "skill.md", "rules.mdc", "instructions.md"):
+    for name in ("core.md", "skill.md", "rules.mdc", "instructions.md", "review.md"):
         text = (ins.TEMPLATES / name).read_text(encoding="utf-8")
         for needle in needles:
             assert needle.lower() not in text.lower(), (name, needle)
@@ -264,7 +264,7 @@ def test_the_content_stays_under_a_page():
 
 
 def test_the_content_carries_no_dash_punctuation():
-    for name in ("core.md", "skill.md", "rules.mdc", "instructions.md"):
+    for name in ("core.md", "skill.md", "rules.mdc", "instructions.md", "review.md"):
         text = (ins.TEMPLATES / name).read_text(encoding="utf-8")
         for dash in ("\u2014", "\u2013"):
             assert dash not in text
@@ -280,10 +280,11 @@ def test_every_template_renders_with_no_placeholder_left():
 # install, project scope
 
 
-def test_install_writes_the_three_files_claude_code_reads(tmp_path):
+def test_install_writes_the_four_files_claude_code_reads(tmp_path):
     report = ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
     assert statuses(report) == {
         str(tmp_path / ".claude/skills/rosio/SKILL.md"): ins.CREATED,
+        str(tmp_path / ".claude/skills/rosio/review.md"): ins.CREATED,
         str(tmp_path / "CLAUDE.md"): ins.CREATED,
         str(tmp_path / ".mcp.json"): ins.CREATED,
     }
@@ -373,7 +374,7 @@ def test_install_is_idempotent(tmp_path):
 
 def test_a_dry_run_writes_nothing_and_still_reports_every_file(tmp_path):
     report = ins.install("claude-code", "project", root=tmp_path, dry_run=True)
-    assert len(report.actions) == 3
+    assert len(report.actions) == 4
     assert snapshot(tmp_path) == {}
     assert "would create " in report.text()
     assert "would created" not in report.text()
@@ -511,7 +512,11 @@ def test_user_scope_writes_under_the_home_directory_only(tmp_path):
     root.mkdir()
     report = ins.install("claude-code", "user", root=root, home=home)
     assert snapshot(root) == {}
-    assert sorted(snapshot(home)) == [".claude/CLAUDE.md", ".claude/skills/rosio/SKILL.md"]
+    assert sorted(snapshot(home)) == [
+        ".claude/CLAUDE.md",
+        ".claude/skills/rosio/SKILL.md",
+        ".claude/skills/rosio/review.md",
+    ]
     assert "no file at project scope" not in report.text()
 
 

@@ -2727,10 +2727,13 @@ class ParamsCollector:
                 evidence.append(ctx.ws.source(site))
             if not exists and path in origins:
                 evidence.append(ctx.ws.source(origins[path]))
-            if not exists and reader is not None:
+            # a reader inside a launch file no root holds (nav2_bringup from the release)
+            # has no line here to cite
+            held = reader is not None and _readable(ctx.ws, reader.path)
+            if not exists and held:
                 evidence.append(ctx.ws.source(reader))
             if expr is not None:
-                if reader is not None and not evidence:
+                if held and not evidence:
                     evidence.append(ctx.ws.source(reader))
                 reason = (
                     reason.replace(Path(path).name, identity.EXTERNAL_TOKEN)

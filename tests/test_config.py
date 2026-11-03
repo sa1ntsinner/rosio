@@ -54,6 +54,14 @@ def test_default_config_has_one_profile_per_launch_file(bench: Path) -> None:
     assert [spec.kind for spec in cfg.roots] == ["src", "install"]
 
 
+def test_a_repository_that_is_one_package_is_its_own_src_root(workspace: Path) -> None:
+    """A cloned single package repository holds `src/` for its C++ sources, not packages."""
+    _write(workspace / "package.xml", MANIFEST.format(name="solo"))
+    _write(workspace / "src" / "node.cpp", "int main() {}\n")
+    cfg = default_config(str(workspace))
+    assert [(spec.kind, Path(spec.path)) for spec in cfg.roots] == [("src", workspace.absolute())]
+
+
 def test_default_config_entrypoint_names_its_origin(bench: Path) -> None:
     cfg = default_config(str(bench))
     profile = cfg.profile("nx_navigation")

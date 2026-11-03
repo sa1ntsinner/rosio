@@ -250,9 +250,12 @@ def _python(ros_setup: Sequence[str], script: str) -> tuple[list[str], dict[str,
     `script` is the argument list after `python3`, already quoted for a shell.
     """
     env = sourced_environment(ros_setup)
+    # `python3 -c` puts the working directory first on its path, and a package directory
+    # named `launch` there (usb_cam ships one) then hides the launch library
+    run = f"cd / && exec python3 {script}" if script.startswith("-c ") else f"exec python3 {script}"
     if env is None:
-        return ["bash", "-lc", _sourced(ros_setup, f"exec python3 {script}")], None
-    return ["bash", "-c", f"exec python3 {script}"], env
+        return ["bash", "-lc", _sourced(ros_setup, run)], None
+    return ["bash", "-c", run], env
 
 
 def importable(names: Sequence[str], ros_setup: Sequence[str] = ()) -> frozenset[str] | None:
