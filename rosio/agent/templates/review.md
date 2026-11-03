@@ -12,8 +12,8 @@ robot code yourself.
    the cited line of each finding and report the ones that hold.
 2. List every package that holds source, controllers, lifecycle nodes, planners and drivers
    first, and work through all of them. Most bugs sit in packages a short hunt never opens.
-   Mark each package done as you go, and do not stop while one is left unmarked. With more than a handful of packages and a way to start
-   subagents, hand each one a group of packages, these checks and the reporting rule below,
+   Mark each package done as you go, and do not stop while one is left unmarked. With more
+   than a handful of packages and a way to start subagents, hand each one a group of packages, these checks and the reporting rule below,
    and merge what they return after checking each claim against the code yourself.
 3. In each package read every node end to end: the constructor or `on_configure`, each
    callback, the parameter callback, and `on_activate`, `on_deactivate` and `on_cleanup`.
@@ -24,18 +24,6 @@ robot code yourself.
 5. After each bug, search sibling code for the same mistake: a pattern wrong once is often
    wrong twice.
 
-## Where bugs cluster
-
-Run these searches and read every hit; each is a site the checks below apply to.
-
-```
-rg -n 'add_on_set_parameters_callback|add_post_set_parameters_callback|dynamicParametersCallback'
-rg -n 'on_configure|on_cleanup|on_deactivate' --type cpp --type py
-rg -n 'handle_goal|handle_accepted|goal->|request->' --type cpp
-rg -n 'rclcpp::Clock\(\)|system_clock::now|steady_clock::now|time\.time\(\)'
-rg -n '\babs\(|atan2|deg2rad|M_PI|size\(\) ?-1|i >= 0'
-rg -n 'catch \(.*TransformException|lookupTransform|lookup_transform'
-```
 
 ## Checks, most productive first
 
