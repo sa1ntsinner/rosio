@@ -24,6 +24,19 @@ robot code yourself.
 5. After each bug, search sibling code for the same mistake: a pattern wrong once is often
    wrong twice.
 
+## Where bugs cluster
+
+Run these searches and read every hit; each is a site the checks below apply to.
+
+```
+rg -n 'add_on_set_parameters_callback|add_post_set_parameters_callback|dynamicParametersCallback'
+rg -n 'on_configure|on_cleanup|on_deactivate' --type cpp --type py
+rg -n 'handle_goal|handle_accepted|goal->|request->' --type cpp
+rg -n 'rclcpp::Clock\(\)|system_clock::now|steady_clock::now|time\.time\(\)'
+rg -n '\babs\(|atan2|deg2rad|M_PI|size\(\) ?-1|i >= 0'
+rg -n 'catch \(.*TransformException|lookupTransform|lookup_transform'
+```
+
 ## Checks, most productive first
 
 **Lifecycle re-entry.** Walk configure, cleanup, configure again, and activate, deactivate,
