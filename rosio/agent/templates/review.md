@@ -12,7 +12,7 @@ robot code yourself.
    the cited line of each finding and report the ones that hold.
 2. List every package that holds source, controllers, lifecycle nodes, planners and drivers
    first, and work through all of them. Most bugs sit in packages a short hunt never opens.
-   Mark each package done as you go. With more than a handful of packages and a way to start
+   Mark each package done as you go, and do not stop while one is left unmarked. With more than a handful of packages and a way to start
    subagents, hand each one a group of packages, these checks and the reporting rule below,
    and merge what they return after checking each claim against the code yourself.
 3. In each package read every node end to end: the constructor or `on_configure`, each
