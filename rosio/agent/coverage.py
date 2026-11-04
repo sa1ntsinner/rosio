@@ -9,6 +9,8 @@ from pathlib import Path
 
 SKIP = {".git", "rosio-out", "test", "tests", "build", "install"}
 SRC = {".cpp", ".hpp", ".h", ".cc", ".py"}
+MARK = "rosio: this session opened"
+NUDGES = 3
 
 
 def sources(root: Path) -> list[Path]:
@@ -44,7 +46,8 @@ def touched(transcript: str) -> str:
 
 def _run() -> None:
     data = json.load(sys.stdin)
-    if data.get("stop_hook_active"):
+    nudges = Path(data["transcript_path"]).read_text(encoding="utf-8").count(MARK)
+    if nudges >= NUDGES or (data.get("stop_hook_active") and not nudges):
         return
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or ".")
     seen = touched(data["transcript_path"])
@@ -60,14 +63,19 @@ def _run() -> None:
             unread.extend(path for path in files if path.name not in seen)
     if not total or read == 0 or read * 10 >= total * 8:
         return
-    big = sorted(unread, key=lambda path: (-path.stat().st_size, path.as_posix()))[:25]
+    big = []
+    for package in sorted({path.parent for path in unread}):
+        mine = [path for path in unread if path.parent == package]
+        big += sorted(mine, key=lambda path: (-path.stat().st_size, path.as_posix()))[:3]
+    big = sorted(big, key=lambda path: (-path.stat().st_size, path.as_posix()))[:30]
     print(json.dumps({"decision": "block", "reason": (
-        f"rosio: this session opened {read} of the {total} source files in this repository. "
-        f"Per package, files opened of files held: {'; '.join(rows[:40])}. The largest files not "
-        f"opened: {', '.join(path.relative_to(root).as_posix() for path in big)}. If this is a bug hunt "
-        "or a review, read the node, plugin and driver files among them the way "
-        ".claude/skills/rosio/review.md asks and "
-        "add what you find to the report before finishing. Otherwise finish now."
+        f"{MARK} {read} of the {total} source files in this repository "
+        f"(reminder {nudges + 1} of {NUDGES}). Per package, files opened of files held: "
+        f"{'; '.join(rows[:40])}. Large files not opened: "
+        f"{', '.join(path.relative_to(root).as_posix() for path in big)}. If this is a bug hunt "
+        "or a review, it is not finished: read these files end to end the way "
+        ".claude/skills/rosio/review.md asks, handing groups of packages to subagents when you "
+        "can start them, and add each bug you confirm to the report. Otherwise finish now."
     )}))
 
 
