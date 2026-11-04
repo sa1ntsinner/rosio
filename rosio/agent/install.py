@@ -43,6 +43,7 @@ REMOVED = "removed"
 ABSENT = "absent"
 SKIPPED = "skipped"
 PRUNED = "pruned"
+COVERAGE_COMMAND = "rosio hook coverage"
 
 WOULD = {CREATED: "create", UPDATED: "update", REMOVED: "remove", PRUNED: "prune"}
 """What a dry run says it would do, per status. `kept`, `unchanged` and `absent` read the
@@ -355,6 +356,9 @@ def _install_section(
 def _install_json(
     target: plat.Target, path: Path, report: Report, command: Sequence[str], *, force: bool
 ) -> None:
+    if target.mechanism == "hook":
+        _coverage_hook(target, path, report, remove=False)
+        return
     doc = _load_json(path)
     node = _container(doc, target.container, create=True)
     key = f"{target.container}.{plat.SKILL_NAME}"
@@ -442,6 +446,9 @@ def _uninstall_section(target: plat.Target, path: Path, report: Report) -> None:
 
 
 def _uninstall_json(target: plat.Target, path: Path, report: Report) -> None:
+    if target.mechanism == "hook":
+        _coverage_hook(target, path, report, remove=True)
+        return
     if not path.is_file():
         report.actions.append(Action(path, target.mechanism, ABSENT))
         return
@@ -463,6 +470,55 @@ def _uninstall_json(target: plat.Target, path: Path, report: Report) -> None:
     if not report.dry_run:
         _remove(path)
     report.actions.append(Action(path, target.mechanism, REMOVED, "file held nothing else"))
+
+
+def _coverage_hook(target: plat.Target, path: Path, report: Report, *, remove: bool) -> None:
+    doc = _load_json(path)
+    node = _container(doc, target.container, create=not remove)
+    entries = node.get("Stop", []) if node is not None else []
+    if not isinstance(entries, list):
+        raise UsageError(f"hooks.Stop is not a list in {path}, fix it by hand")
+    wanted = []
+    found = False
+    for entry in entries:
+        hooks = entry.get("hooks") if isinstance(entry, dict) else None
+        if not isinstance(hooks, list):
+            wanted.append(entry)
+            continue
+        kept = [
+            hook for hook in hooks
+            if not (isinstance(hook, dict) and hook.get("command") == COVERAGE_COMMAND)
+        ]
+        if len(kept) == len(hooks):
+            wanted.append(entry)
+            continue
+        found = True
+        if not remove:
+            wanted.append(entry)
+        elif kept:
+            wanted.append({**entry, "hooks": kept})
+    undo = f"delete the {COVERAGE_COMMAND} command from hooks.Stop in {path}"
+    if (remove and not found) or (not remove and found):
+        status = UNCHANGED if found else ABSENT
+        report.actions.append(Action(path, target.mechanism, status, undo=undo))
+        return
+    if remove:
+        if wanted:
+            node["Stop"] = wanted
+        else:
+            node.pop("Stop", None)
+        _drop_empty(doc, target.container)
+        status = REMOVED
+    else:
+        wanted.append({"matcher": "", "hooks": [{"type": "command", "command": COVERAGE_COMMAND}]})
+        node["Stop"] = wanted
+        status = UPDATED if path.is_file() else CREATED
+    if not report.dry_run:
+        if doc:
+            _write(path, dumps(doc))
+        else:
+            _remove(path)
+    report.actions.append(Action(path, target.mechanism, status, "hooks.Stop coverage command", undo))
 
 
 def _drop_empty(doc: dict, container: str) -> None:

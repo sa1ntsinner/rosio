@@ -81,8 +81,8 @@ VERBS = (
 the MCP graph tool, and draws it as Graphviz or Mermaid. `migrate` moves a workspace between
 ROS 2 releases. `bundle` carries an
 atlas and the files its findings cite to someone on another machine. `init` writes the
-configuration extraction would fall back to as a `rosio.yaml` to edit. `hook` manages the
-git side of keeping an atlas current (the hooks, the merge driver and the rebuild). `stamps`
+configuration extraction would fall back to as a `rosio.yaml` to edit. `hook` manages git
+hooks, the merge driver and the Claude Code Stop hook. `stamps`
 checks the header stamps of one recording and needs neither a workspace nor a ROS
 installation, which is why it is a verb of its own and not a flag of `extract`."""
 
@@ -653,15 +653,24 @@ def build_parser() -> argparse.ArgumentParser:
     hook = _sub(
         subparsers,
         "hook",
-        "keep the atlas current from git itself",
+        "manage git hooks and the Claude Code Stop hook",
         "Install the git hooks that rebuild the atlas after a commit, a checkout and a "
         "merge, register the merge driver that resolves two rebuilds of atlas.json without "
-        "conflict markers, and report what a rebuild costs. A hook never blocks: a failed "
-        "rebuild prints one line and exits zero.",
+        "conflict markers, and report what a rebuild costs. A failed rebuild prints one "
+        "line and exits zero. The coverage action runs the Claude Code Stop hook "
+        "registered by rosio install claude-code.",
         flags=(),
     )
     hook.set_defaults(hook_command=None)
     hooks = hook.add_subparsers(dest="hook_command", metavar="action")
+    _hook_sub(
+        hooks,
+        "coverage",
+        "nudge once toward source files the session never opened",
+        "The Claude Code Stop hook registered by rosio install claude-code. Reads hook "
+        "JSON from stdin and nudges once when source coverage is below 80 percent.",
+        flags=(),
+    )
 
     hook_install = _hook_sub(
         hooks,
@@ -2102,11 +2111,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_hook(args: argparse.Namespace) -> int:
-    """Manage the git side: the hooks, the merge driver and the rebuild they run."""
+    """Manage git hooks and run the Claude Code Stop hook."""
     action = getattr(args, "hook_command", None)
     if not action:
         raise UsageError(
-            "hook takes an action: install, status, uninstall, run or merge. "
+            "hook takes an action: install, status, uninstall, run, merge or coverage. "
             f"start with {PROG} hook install"
         )
     return _HOOK_ACTIONS[action](args)
@@ -2198,7 +2207,14 @@ def _hook_merge(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _hook_coverage(_args: argparse.Namespace) -> int:
+    from rosio.agent.coverage import main
+
+    return main()
+
+
 _HOOK_ACTIONS: dict[str, Callable[[argparse.Namespace], int]] = {
+    "coverage": _hook_coverage,
     "install": _hook_install,
     "status": _hook_status,
     "uninstall": _hook_uninstall,

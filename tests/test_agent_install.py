@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -25,6 +26,59 @@ def snapshot(root: Path) -> dict[str, str]:
 
 def statuses(report) -> dict[str, str]:
     return {str(action.path): action.status for action in report.actions}
+
+
+@pytest.mark.parametrize("scope", plat.SCOPES)
+def test_coverage_hook_install_is_idempotent_and_keeps_user_stop_entries(tmp_path, scope):
+    root, home = tmp_path / "project", tmp_path / "home"
+    base = root if scope == "project" else home
+    config = base / ".claude/settings.json"
+    config.parent.mkdir(parents=True)
+    own = {"matcher": "", "hooks": [{"type": "command", "command": "my-check"}]}
+    original = {"hooks": {"Stop": [own], "SessionStart": []}, "permissions": {"allow": []}}
+    config.write_text(json.dumps(original), encoding="utf-8")
+    ins.install("claude-code", scope, root=root, home=home)
+    again = ins.install("claude-code", scope, root=root, home=home)
+    assert statuses(again)[str(config)] == ins.UNCHANGED
+    assert json.loads(config.read_text(encoding="utf-8"))["hooks"]["Stop"] == [
+        own,
+        {"matcher": "", "hooks": [{"type": "command", "command": "rosio hook coverage"}]},
+    ]
+    ins.uninstall("claude-code", scope, root=root, home=home)
+    assert json.loads(config.read_text(encoding="utf-8")) == original
+
+
+def test_coverage_hook_nudges_once_for_unopened_sources(tmp_path, monkeypatch, capsys):
+    from rosio import cli
+
+    (tmp_path / "package.xml").write_text("<package/>", encoding="utf-8")
+    for name in ("node.py", "driver.cpp", "plugin.hpp", "other.cc", "helper.h"):
+        (tmp_path / name).write_text("source", encoding="utf-8")
+    skipped = tmp_path / "rosio-out"
+    skipped.mkdir()
+    (skipped / "generated.py").write_text("ignored", encoding="utf-8")
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        json.dumps({
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "input": {"file_path": str(tmp_path / "node.py")}},
+            ]},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    data = {"cwd": str(tmp_path), "transcript_path": str(transcript)}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(data)))
+    assert cli.main(["hook", "coverage"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["decision"] == "block"
+    assert "1 of the 5 source files" in result["reason"]
+    assert ".claude/skills/rosio/review.md" in result["reason"]
+    data["stop_hook_active"] = True
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(data)))
+    assert cli.main(["hook", "coverage"]) == 0
+    assert capsys.readouterr().out == ""
 
 
 # the table
@@ -52,7 +106,7 @@ def test_every_target_has_a_known_mechanism_a_path_and_a_writer():
             assert target.mechanism in plat.MECHANISMS
             assert target.project or target.user
             assert target.writer in ("whole_file", "section", "json_merge", "toml_section")
-            if target.mechanism == "mcp":
+            if target.mechanism in ("mcp", "hook"):
                 assert target.container
             else:
                 assert (ins.TEMPLATES / target.template).is_file()
@@ -280,13 +334,14 @@ def test_every_template_renders_with_no_placeholder_left():
 # install, project scope
 
 
-def test_install_writes_the_four_files_claude_code_reads(tmp_path):
+def test_install_writes_the_five_files_claude_code_reads(tmp_path):
     report = ins.install("claude-code", "project", root=tmp_path, home=tmp_path / "home")
     assert statuses(report) == {
         str(tmp_path / ".claude/skills/rosio/SKILL.md"): ins.CREATED,
         str(tmp_path / ".claude/skills/rosio/review.md"): ins.CREATED,
         str(tmp_path / "CLAUDE.md"): ins.CREATED,
         str(tmp_path / ".mcp.json"): ins.CREATED,
+        str(tmp_path / ".claude/settings.json"): ins.CREATED,
     }
     skill = (tmp_path / ".claude/skills/rosio/SKILL.md").read_text(encoding="utf-8")
     assert skill.endswith(ins.MANAGED_NOTE + "\n")
@@ -374,7 +429,7 @@ def test_install_is_idempotent(tmp_path):
 
 def test_a_dry_run_writes_nothing_and_still_reports_every_file(tmp_path):
     report = ins.install("claude-code", "project", root=tmp_path, dry_run=True)
-    assert len(report.actions) == 4
+    assert len(report.actions) == 5
     assert snapshot(tmp_path) == {}
     assert "would create " in report.text()
     assert "would created" not in report.text()
@@ -514,6 +569,7 @@ def test_user_scope_writes_under_the_home_directory_only(tmp_path):
     assert snapshot(root) == {}
     assert sorted(snapshot(home)) == [
         ".claude/CLAUDE.md",
+        ".claude/settings.json",
         ".claude/skills/rosio/SKILL.md",
         ".claude/skills/rosio/review.md",
     ]

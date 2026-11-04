@@ -83,6 +83,7 @@ rosio uninstall [--scope SCOPE] [--root DIR] [--home DIR] [--dry-run] [--force] 
 rosio serve [--atlas FILE] [--stdio | --http] [--host ADDR] [--port N] [--api-key KEY] [--path PATH] [--stateless] [--workspace DIR]
 rosio hook install [--repo DIR] [--python PATH] [--workspace PATH] [--config FILE] [--force] [--dry-run] [--no-measure]
 rosio hook status [--repo DIR]
+rosio hook coverage  # Claude Code Stop hook registered by rosio install claude-code
 rosio hook uninstall [--repo DIR] [--force] [--dry-run]
 rosio hook run [--repo DIR] [--event NAME] [--no-cache]
 rosio hook merge [--path PATH] [--result FILE] BASE OURS THEIRS  # the merge driver git calls for atlas.json
