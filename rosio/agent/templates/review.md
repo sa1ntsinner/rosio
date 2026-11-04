@@ -10,11 +10,14 @@ robot code yourself.
    parameter no code declares, a remap that matches nothing, a file a launch default names
    that does not exist, a frame no model has. Reading the C++ alone does not show these. Open
    the cited line of each finding and report the ones that hold.
-2. List every package that holds source, controllers, lifecycle nodes, planners and drivers
-   first, and work through all of them. Most bugs sit in packages a short hunt never opens.
-   Mark each package done as you go, and do not stop while one is left unmarked. With more
-   than a handful of packages and a way to start subagents, hand each one a group of
-   packages, these checks and the reporting rule below, and merge what they return after checking each claim against the code yourself.
+2. Write `HUNT.md` beside the report before reading any code: one line per package that holds
+   source, controllers, lifecycle nodes, planners and drivers first, each with its node and
+   plugin files. Work through all of them, and tick a line only after reading every file on
+   it end to end. Most bugs sit in packages a short hunt never opens, and the first bugs are
+   the ones every reviewer finds. Do not write the report while a line is unticked. With more
+   than a handful of packages and a way to start subagents, hand each one a group of lines,
+   these checks and the reporting rule below, and merge what they return after checking each
+   claim against the code yourself.
 3. In each package read every node end to end: the constructor or `on_configure`, each
    callback, the parameter callback, and `on_activate`, `on_deactivate` and `on_cleanup`.
    Then go through the checks below.
