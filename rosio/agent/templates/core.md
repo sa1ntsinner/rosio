@@ -29,7 +29,7 @@ Over MCP the same steps are the `drift`, `explain` and `check` tools.
 
 Hunting bugs or reviewing ROS 2 code: first read `review.md` in the rosio skill folder
 (`.claude/skills/rosio/` or `.agents/skills/rosio/`), where ROS 2 code goes wrong and how
-to find each case cheaply.
+to cover every package of the repository rather than the first few.
 
 An accepted finding goes in `rosio-waivers.yaml`: a `waivers:` list of `key` (finding id or
 `sha256:` fingerprint) and a mandatory `reason`. `rosio drift --waivers rosio-waivers.yaml`

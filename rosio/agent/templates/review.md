@@ -3,6 +3,10 @@
 Read this before you look for bugs in a ROS 2 repository, review a change to one, or change
 robot code yourself.
 
+A hunt is finished when every package is read, not when the first bugs turn up or a handful
+of files look clean. Your first step is the package list in `HUNT.md` (step 2), and the
+report waits until every line of it is ticked.
+
 ## How to work
 
 1. Run `rosio drift --min-severity warn` first. rosio has already compared the launch files,
