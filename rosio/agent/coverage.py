@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -46,7 +47,9 @@ def touched(transcript: str) -> str:
 
 def _run() -> None:
     data = json.load(sys.stdin)
-    nudges = Path(data["transcript_path"]).read_text(encoding="utf-8").count(MARK)
+    # a transcript records one hook message several times, so count by its number
+    said = re.findall(r"\(reminder (\d+) of", Path(data["transcript_path"]).read_text(encoding="utf-8"))
+    nudges = max(map(int, said), default=0)
     if nudges >= NUDGES or (data.get("stop_hook_active") and not nudges):
         return
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or ".")

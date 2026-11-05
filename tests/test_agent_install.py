@@ -80,12 +80,12 @@ def test_coverage_hook_nudges_once_for_unopened_sources(tmp_path, monkeypatch, c
     assert cli.main(["hook", "coverage"]) == 0
     assert capsys.readouterr().out == ""
     with transcript.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps({"feedback": result["reason"]}) + "\n")
+        stream.write(json.dumps({"feedback": result["reason"] * 5}) + "\n")
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(data)))
     assert cli.main(["hook", "coverage"]) == 0
     assert "reminder 2 of 3" in capsys.readouterr().out
     with transcript.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps({"feedback": result["reason"] * 2}) + "\n")
+        stream.write(json.dumps({"feedback": result["reason"].replace("reminder 1", "reminder 3")}) + "\n")
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(data)))
     assert cli.main(["hook", "coverage"]) == 0
     assert capsys.readouterr().out == ""
