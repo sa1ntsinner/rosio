@@ -132,6 +132,8 @@ _SKILL = f".claude/skills/{SKILL_NAME}/SKILL.md"
 _PORTABLE_SKILL = f".agents/skills/{SKILL_NAME}/SKILL.md"
 _REVIEW = f".claude/skills/{SKILL_NAME}/review.md"
 _PORTABLE_REVIEW = f".agents/skills/{SKILL_NAME}/review.md"
+_CODING = f".claude/skills/{SKILL_NAME}/coding.md"
+_PORTABLE_CODING = f".agents/skills/{SKILL_NAME}/coding.md"
 
 
 PLATFORMS: tuple[Platform, ...] = (
@@ -153,6 +155,14 @@ PLATFORMS: tuple[Platform, ...] = (
                 user=_PORTABLE_REVIEW,
                 template="review.md",
                 note="the bug classes of ROS 2 code, read beside the skill when hunting bugs",
+            ),
+            Target(
+                mechanism="reference",
+                project=_PORTABLE_CODING,
+                user=_PORTABLE_CODING,
+                template="coding.md",
+                note="habits for writing, changing and debugging ROS 2 code, which the skill "
+                "names by this path",
             ),
         ),
     ),
@@ -214,6 +224,14 @@ PLATFORMS: tuple[Platform, ...] = (
                 note="the bug classes of ROS 2 code, which the skill names by this path",
             ),
             Target(
+                mechanism="reference",
+                project=_CODING,
+                user=_CODING,
+                template="coding.md",
+                note="habits for writing, changing and debugging ROS 2 code, which the skill "
+                "names by this path",
+            ),
+            Target(
                 mechanism="instructions",
                 project="CLAUDE.md",
                 user=".claude/CLAUDE.md",
@@ -245,6 +263,14 @@ PLATFORMS: tuple[Platform, ...] = (
                 template="review.md",
                 note="the bug classes of ROS 2 code, which the AGENTS.md section names by this "
                 "path",
+            ),
+            Target(
+                mechanism="reference",
+                project=_PORTABLE_CODING,
+                user=_PORTABLE_CODING,
+                template="coding.md",
+                note="habits for writing, changing and debugging ROS 2 code, which the skill "
+                "names by this path",
             ),
             Target(
                 mechanism="instructions",

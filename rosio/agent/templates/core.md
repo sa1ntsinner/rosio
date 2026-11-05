@@ -27,9 +27,8 @@ To fix a finding:
 
 Over MCP the same steps are the `drift`, `explain` and `check` tools.
 
-Hunting bugs or reviewing ROS 2 code: first read `review.md` in the rosio skill folder
-(`.claude/skills/rosio/` or `.agents/skills/rosio/`), where ROS 2 code goes wrong and how
-to cover every package.
+In the rosio skill folder (`.claude/skills/rosio/` or `.agents/skills/rosio/`): read
+`review.md` before hunting bugs or reviewing, `coding.md` before writing or debugging code.
 
 An accepted finding goes in `rosio-waivers.yaml`: a `waivers:` list of `key` (finding id or
 `sha256:` fingerprint) and a mandatory `reason`. `rosio drift --waivers rosio-waivers.yaml`

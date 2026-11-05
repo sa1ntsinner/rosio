@@ -41,13 +41,14 @@ The server starts without an atlas, and each tool then names the extract command
 Over `--http`, `migrate` reads and `check` extracts only the served workspace: the directory `--workspace` names, else
 the one above the `rosio-out` that holds the atlas, else the directory of the atlas itself.
 A worst case answer is under 4 KB. On very small models prefer the command
-line, where the skill file is 3.3 KB and carries seven commands, the waiver file and a worked example.
+line, where the skill file is 3.2 KB and carries seven commands, the waiver file and a worked example.
 
 For Claude Code, Codex and the portable skills directory, install also writes `review.md` beside
 the skill: where ROS 2 code usually goes wrong (copy and paste, units and angles, frames, clocks,
 parameters, QoS, executors, lifecycle, sensor message edge cases) and how to find each case with
 a search instead of reading whole packages. The skill tells an agent to read it before hunting
-bugs or reviewing a change, so it costs nothing on other tasks.
+bugs or reviewing a change, so it costs nothing on other tasks. `coding.md` beside it holds the
+habits for writing, changing and debugging ROS 2 code, read before an agent edits code.
 
 ## Privacy
 
