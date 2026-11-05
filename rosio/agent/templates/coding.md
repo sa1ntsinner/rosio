@@ -128,6 +128,44 @@ the code you write.
 * Copy and paste is where `x` stays `x` in the `y` line. After duplicating a block, read it
   once for each renamed symbol.
 
+## On a real machine
+
+What careful drivers and controllers do (UR, franka, ros2_controllers, nav2 collision
+monitor, velodyne, socketcan) and average code does not:
+
+* Expire commands in the control cycle itself, and replace an expired command with a stop
+  target driven through the limiter (`diff_drive_controller` writes zero on timeout). Expire
+  control input an estimator uses the same way.
+* Arm the device's own watchdog when it has one; a check in ROS does nothing once the host
+  hangs. Arbitration (`twist_mux`) or collision filtering is not a motor watchdog.
+* Missing, stale or untransformable safety data, or an unset footprint, means stop, never
+  free space.
+* Latch faults. Require a cleared fault, zero commands and fresh state before activation or
+  an E stop reset; a software heartbeat does not undo an external stop.
+* Cancel, abort, deactivate, error and shutdown each send an explicit stop, while the
+  publisher or interface still works, and only then release it.
+* Track freshness per data stream on a monotonic clock. One message received is not a live
+  stream; diagnostics report data age, not only frequency.
+* Every device wait is bounded: nonblocking sockets with a finite `poll`, bus reads with a
+  timeout told apart from other errors, state transitions with a deadline that returns
+  failure. A nonpositive timeout must not mean wait forever.
+* `read` and `write` return `ERROR` on a failed transfer; reconnect with a pause and a fresh
+  handle; a malformed packet is dropped before its payload is copied.
+* In `update`, `read` and `write`: `try_lock` handoffs, publication from a worker
+  (`RealtimePublisher`), buffers sized before the loop, no slow device configuration. Run
+  periodic cycles from a steady timeline and skip a missed period rather than bursting.
+* On activation seed position commands from the measured position and velocity commands with
+  zero; after a mode switch wait for fresh state; on deactivation clear buffered commands and
+  limiter history.
+* Reject non finite commands at the hardware boundary, check array sizes and joint names
+  before indexing, and check drivetrain geometry (wheel radius, separation) is positive.
+* Limit velocity, acceleration and jerk with the measured period, decelerate on reversal,
+  scale coupled axes together, and check stopping distance before a joint limit.
+* A failed start rolls back what it activated; cleanup reports the failure of what it
+  delegated to.
+* Stop and join worker threads before destroying what their callbacks touch; device callbacks
+  must not reach publishers that are still being built.
+
 ## Undefined and unwanted behaviour
 
 * C++: `v[i + 1]` on the last element, `v.size()-1` on an empty vector, a `size_t` loop
