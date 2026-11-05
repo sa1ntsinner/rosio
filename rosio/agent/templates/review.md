@@ -48,6 +48,24 @@ NaN or inf in a sensor value. `LaserScan` ranges outside `range_min` and `range_
 results than it asked for, `v.size()-1` on an empty container, a `size_t` counting down to
 `i >= 0`. A zero that means "disabled" in one place and "expire at once" in another (timeouts).
 
+**Identity.** A value read by position after the names were reordered, filtered or
+overwritten; storage sized from one set and indexed by another; rates or results appended in
+arrival order and read by topic number.
+
+**Guards that do not stop.** An error logged and execution carrying on; a failed setter whose
+result is ignored so the old target is used; success reported before the work is done or after
+an error was overwritten; a flag set before the prerequisite succeeded.
+
+**State carried over.** A field one goal sets and the next goal inherits (an optional id); a
+function static holding per request data; a cache cleared while pointers into it are kept.
+
+**Values that mean two things.** Zero, false, empty and missing treated alike; `if timeout:`
+where zero means disabled; a sentinel compared with the wrong value; an inverted `&&`/`||`.
+
+**Metadata against payload.** `height`, `step`, `encoding` or field types that do not describe
+the bytes; a header frame set before the transform failed; a computed value never stored or
+passed on.
+
 **Parameters.** `rosio param <node> <name>` gives the value that reaches the node.
 - Read without a declaration: `get_parameter` throws (`param.read_undeclared`).
 - A dynamic parameter callback that updates the member but not the object built from it at

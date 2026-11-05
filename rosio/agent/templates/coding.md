@@ -17,6 +17,65 @@ purpose: every line is a mistake that shipped in a real robot stack.
 4. Match the file: its naming, error handling, logging macros, units and container types. A
    fix written in another style gets rejected in review even when it is right.
 
+## The mistakes that ship most, most frequent first
+
+Confirmed bugs in public ROS 2 repositories come down to these habits. Check each one against
+the code you write.
+
+1. Bounds: before `front()`, `back()`, `points[i + 1]`, a search result or an index from a
+   message, make sure the container holds it. Handle empty and single element inputs first.
+2. Identity: a value stays with its name. Map joint and topic names to indices explicitly,
+   keep the map through filtering and reordering, and size storage from the same set that
+   indexes it. A value in a valid slot that belongs to another joint crashes nothing.
+3. Guards that stop: a failed check returns, continues or throws at the right scope. Logging
+   an error and carrying on, or reporting success before the work is done, is the bug.
+4. Configuration names: use the exact declared key and type everywhere, build scoped names
+   with one separator (`name + "." + key`), declare before reading, convert launch strings
+   to the type the API takes.
+5. Outside input: parse completely, catch the parser's exceptions, check required fields and
+   accepted values. Resolve a path and check it stays inside its directory before deleting.
+6. Message metadata from the payload: `height`, `width`, `step`, `encoding`, field types and
+   the header describe the bytes you send. Check sizes before decoding a binary message.
+7. State per use: decide what survives a new goal, a reset, a seek or a cache clear, and reset
+   the rest together. No per request state in function statics or stale cached pointers.
+8. Predicates for every value: separate `None`, empty, zero and false. Write the truth table
+   for a disabled setting (a zero timeout that means "off") before choosing `&&` or `||`.
+9. Launch wiring: every argument reaches its consumer under the name it reads, every file a
+   launch names is installed, defaults and namespaces are run once. `rosio drift` checks
+   much of this.
+10. Ownership: one owner per resource, captures that outlive nothing, threads stopped and
+    joined before what they use is freed, no `delete` on memory a library owns.
+11. Formulas: write units and invariants first, keep old values an update still needs, check
+    a hand computed case and both endpoints of every loop.
+12. Clocks: one clock per purpose (above), full seconds and nanoseconds, age is now minus
+    stamp, and temporal state resets on a backward jump.
+13. Lifecycle: every resource has the transition that makes it, the one that stops its users
+    and the one that frees it. A failed transition rolls back what it made.
+14. Diagnostics and tests tell the truth: print the value the check used, assert the change
+    the code promised, not a value that was already true.
+15. Initialise every member and every local on every branch before a callback or thread can
+    see it.
+16. A parameter update the callback accepts reaches the running code: the object built from
+    it, the timer, the threshold, the transform.
+17. Numbers in range: check finiteness and the domain before dividing, `sqrt`, `log`, clamping
+    or narrowing; keep NaN out of filters and actuator commands.
+18. Use what you computed: the updated value, the returned result, the option the caller
+    passed, not the original.
+19. Units and width: name the unit, convert once at the boundary, never cast epoch stamps to
+    `float` or 32 bit before subtracting.
+20. Frames: the output header names the frame the data is in after a transform succeeded;
+    on failure drop or retry, never publish untransformed data under the target frame.
+21. Do not edit a container you iterate, a borrowed message, or a shared mutable default.
+22. Spatial math: state vector order, bases and multiplication order; rotate a covariance
+    as `R * C * R^T`; test with a rotation that is not the identity.
+23. Parallel arrays in a message have the lengths their names say; reject the message if not.
+24. Signs and angles: limits on magnitude, sign kept apart, angle differences wrapped.
+25. Every wait has a deadline and a shutdown check, and a timeout is an outcome.
+26. Each goal or async request is tracked by its own handle from before dispatch to exactly one
+    completion; rejection and cancellation are explicit.
+27. Stop paths remove authority: on cancel, abort, error or stale input send the stop
+    command, and start with motion disabled until every input is valid.
+
 ## Debugging: look before you guess
 
 * Reproduce first. Write the input or call sequence that breaks it, then the smallest test
