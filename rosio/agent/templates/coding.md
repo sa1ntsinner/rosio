@@ -197,7 +197,10 @@ monitor, velodyne, socketcan) and average code does not:
   function, a `launch_testing` test for a launch file or a node interaction. When the check
   sits in a private callback or needs hardware, move the decision into a small function that
   takes plain values (the goal, the joint names) and test that; it is the better design too.
-  A test you could not run here still goes in, with the command that runs it.
+  A test calls only public functions, never a private or protected member, and is added to
+  the package's CMake or setup the way its neighbours are. A test that breaks the build is
+  worse than none: when you cannot compile it here, keep it to that one public call and say
+  in your report that it was not run, with the command that runs it.
 * Build and run it: `colcon build --packages-select <pkg>` then
   `colcon test --packages-select <pkg> --event-handlers console_direct+`. Run `rosio extract`
   again after touching launch, yaml or models, and check that no new finding arrived.
