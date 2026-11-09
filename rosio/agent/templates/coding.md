@@ -217,7 +217,9 @@ monitor, velodyne, socketcan) and average code does not:
   takes plain values (the goal, the joint names) and test that; it is the better design too.
   Never change a public header, signature or class interface only to make a test possible:
   that is scope a reviewer rejects. When no test fits without it, leave the test out and
-  say in your report how it could be tested.
+  say in your report how it could be tested. A race, a hang or a missed callback is the
+  same: a test that never runs the two threads or the late completion that caused it proves
+  nothing, so leave it out and name the interleaving in the report.
   A test calls only public functions, never a private or protected member, and is added to
   the package's CMake or setup the way its neighbours are. Where neighbouring tests do read
   members, find how (`FRIEND_TEST`, a friend class) and give the new test the same access, or
