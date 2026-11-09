@@ -213,6 +213,9 @@ monitor, velodyne, socketcan) and average code does not:
   function, a `launch_testing` test for a launch file or a node interaction. When the check
   sits in a private callback or needs hardware, move the decision into a small function that
   takes plain values (the goal, the joint names) and test that; it is the better design too.
+  Never change a public header, signature or class interface only to make a test possible:
+  that is scope a reviewer rejects. When no test fits without it, leave the test out and
+  say in your report how it could be tested.
   A test calls only public functions, never a private or protected member, and is added to
   the package's CMake or setup the way its neighbours are. Where neighbouring tests do read
   members, find how (`FRIEND_TEST`, a friend class) and give the new test the same access, or
