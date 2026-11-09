@@ -1,4 +1,5 @@
-"""One Stop hook nudge toward packages with source the session never opened."""
+"""Stop hook: a session that changed code reviews its diff once against coding.md, and one that
+only read is nudged toward the packages it never opened."""
 
 from __future__ import annotations
 
@@ -12,6 +13,8 @@ SKIP = {".git", "rosio-out", "test", "tests", "build", "install"}
 SRC = {".cpp", ".hpp", ".h", ".cc", ".py"}
 MARK = "rosio: this session opened"
 NUDGES = 3
+REVIEW = "rosio: this session changed"
+EDITS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 
 def sources(root: Path) -> list[Path]:
@@ -27,6 +30,28 @@ def packages(root: Path) -> list[Path]:
         xml.parent for xml in root.rglob("package.xml")
         if not SKIP.intersection(xml.relative_to(root).parts) and sources(xml.parent)
     )
+
+
+def edited(transcript: str, root: Path) -> list[str]:
+    paths = set()
+    with open(transcript, encoding="utf-8") as stream:
+        for line in stream:
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if message.get("type") != "assistant":
+                continue
+            for content in message.get("message", {}).get("content", []):
+                if content.get("type") == "tool_use" and content.get("name") in EDITS:
+                    path = Path(content.get("input", {}).get("file_path", ""))
+                    try:
+                        rel = path.resolve().relative_to(root.resolve())
+                    except ValueError:
+                        continue
+                    if rel.parts and rel.parts[0] not in (".claude", "rosio-out") and rel.suffix != ".md":
+                        paths.add(rel.as_posix())
+    return sorted(paths)
 
 
 def touched(transcript: str) -> str:
@@ -48,11 +73,24 @@ def touched(transcript: str) -> str:
 def _run() -> None:
     data = json.load(sys.stdin)
     # a transcript records one hook message several times, so count by its number
-    said = re.findall(r"\(reminder (\d+) of", Path(data["transcript_path"]).read_text(encoding="utf-8"))
+    text = Path(data["transcript_path"]).read_text(encoding="utf-8")
+    said = re.findall(r"\(reminder (\d+) of", text)
     nudges = max(map(int, said), default=0)
     if nudges >= NUDGES or (data.get("stop_hook_active") and not nudges):
         return
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or ".")
+    changed = edited(data["transcript_path"], root)
+    if changed:
+        if REVIEW not in text:
+            print(json.dumps({"decision": "block", "reason": (
+                f"{REVIEW} {', '.join(changed[:10])}. Before you finish, read "
+                ".claude/skills/rosio/coding.md and check the diff against it: the same fix on "
+                "every caller and sibling path, a test beside the package's tests that fails "
+                "without the change, comments of one line that say why and none that restate "
+                "the code, nothing unrelated touched, and the package built or the test run when "
+                "a toolchain is here. Fix what falls short, then finish."
+            )}))
+        return
     seen = touched(data["transcript_path"])
     rows, unread, total, read = [], [], 0, 0
     for package in packages(root):

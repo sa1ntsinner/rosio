@@ -48,6 +48,28 @@ def test_coverage_hook_install_is_idempotent_and_keeps_user_stop_entries(tmp_pat
     assert json.loads(config.read_text(encoding="utf-8")) == original
 
 
+def test_a_session_that_changed_code_reviews_its_diff_once(tmp_path, monkeypatch, capsys):
+    from rosio import cli
+
+    (tmp_path / "package.xml").write_text("<package/>", encoding="utf-8")
+    (tmp_path / "node.py").write_text("source", encoding="utf-8")
+    transcript = tmp_path / "session.jsonl"
+    edit = {"type": "tool_use", "name": "Edit", "input": {"file_path": str(tmp_path / "node.py")}}
+    transcript.write_text(json.dumps({"type": "assistant", "message": {"content": [edit]}}) + "\n",
+                          encoding="utf-8")
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    data = json.dumps({"cwd": str(tmp_path), "transcript_path": str(transcript)})
+    monkeypatch.setattr(sys, "stdin", io.StringIO(data))
+    assert cli.main(["hook", "coverage"]) == 0
+    reason = json.loads(capsys.readouterr().out)["reason"]
+    assert "node.py" in reason and "coding.md" in reason
+    with transcript.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({"feedback": reason}) + "\n")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(data))
+    assert cli.main(["hook", "coverage"]) == 0
+    assert capsys.readouterr().out == ""
+
+
 def test_coverage_hook_nudges_once_for_unopened_sources(tmp_path, monkeypatch, capsys):
     from rosio import cli
 
