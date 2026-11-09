@@ -107,8 +107,9 @@ def _run() -> None:
                 "header or signature changed only for the test (leave the test out instead); "
                 "comments of one line "
                 "that say why and none that restate the code; nothing unrelated touched; and the package built or the test run when "
-                "a toolchain is here. Fix what falls short, then finish. In the report state "
-                "what you built or ran and what you could not, and nothing the diff does not "
+                "a toolchain is here, the test seen failing once with the fix undone. Fix what falls "
+                "short, then finish. In the report state what you built or ran with the result "
+                "its output printed, what you could not, and nothing the diff does not "
                 "show; do not recite this list."
             )}))
         return

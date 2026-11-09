@@ -12,9 +12,11 @@ purpose: every line is a mistake that shipped in a real robot stack.
    wrong result. A fix you never saw fail is a guess.
 3. Search for every other path that reaches the same defect (`rg` the function, the field,
    the pattern) and fix them together, in the shared function when there is one.
-4. Make the smallest change, then check it with the failing case and the build.
-5. Report what you ran and its result, what you could not run and why, and any other defect
-   you saw but did not fix.
+4. Make the smallest change, then check it with the failing case and the build. Undo the fix
+   once and run the test again: a test that still passes tests something else.
+5. Report what you ran and the result its output printed, not the one you expected; a build
+   that failed is reported as failed. Name what you could not run and why, and any other
+   defect you saw but did not fix.
 
 ## Before you type
 
