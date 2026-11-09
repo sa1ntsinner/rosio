@@ -103,7 +103,9 @@ def _run() -> None:
                 "every caller and sibling path, a test beside the package's tests that fails "
                 "without the change, comments of one line that say why and none that restate "
                 "the code, nothing unrelated touched, and the package built or the test run when "
-                "a toolchain is here. Fix what falls short, then finish."
+                "a toolchain is here. Fix what falls short, then finish. In the report state "
+                "what you built or ran and what you could not, and nothing the diff does not "
+                "show; do not recite this list."
             )}))
         return
     seen = touched(data["transcript_path"])

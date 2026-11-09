@@ -198,7 +198,9 @@ monitor, velodyne, socketcan) and average code does not:
   sits in a private callback or needs hardware, move the decision into a small function that
   takes plain values (the goal, the joint names) and test that; it is the better design too.
   A test calls only public functions, never a private or protected member, and is added to
-  the package's CMake or setup the way its neighbours are. A test that breaks the build is
+  the package's CMake or setup the way its neighbours are. Where neighbouring tests do read
+  members, find how (`FRIEND_TEST`, a friend class) and give the new test the same access, or
+  it does not compile. A test that breaks the build is
   worse than none: when you cannot compile it here, keep it to that one public call and say
   in your report that it was not run, with the command that runs it.
 * Build and run it: `colcon build --packages-select <pkg>` then
