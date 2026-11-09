@@ -194,7 +194,10 @@ monitor, velodyne, socketcan) and average code does not:
 * Log once with context a user can act on (`node`, value, limit, what happens next), at the
   right level: `ERROR` for what stops the robot, `WARN` for degraded, `DEBUG` for the rest.
 * Leave one test that fails without the fix, at the level the bug lives: a unit test for a
-  function, a `launch_testing` test for a launch file or a node interaction.
+  function, a `launch_testing` test for a launch file or a node interaction. When the check
+  sits in a private callback or needs hardware, move the decision into a small function that
+  takes plain values (the goal, the joint names) and test that; it is the better design too.
+  A test you could not run here still goes in, with the command that runs it.
 * Build and run it: `colcon build --packages-select <pkg>` then
   `colcon test --packages-select <pkg> --event-handlers console_direct+`. Run `rosio extract`
   again after touching launch, yaml or models, and check that no new finding arrived.
