@@ -3,6 +3,19 @@
 Read this before you write, change or debug code in a ROS 2 repository. It is short on
 purpose: every line is a mistake that shipped in a real robot stack.
 
+## Fixing a reported bug, in order
+
+1. Find the line that produces the symptom and say why it does, with the input that triggers
+   it. When the code already handles that input, the report is wrong or already fixed: say
+   so and change nothing.
+2. Write the failing case first: the smallest test, or a call with that input, that shows the
+   wrong result. A fix you never saw fail is a guess.
+3. Search for every other path that reaches the same defect (`rg` the function, the field,
+   the pattern) and fix them together, in the shared function when there is one.
+4. Make the smallest change, then check it with the failing case and the build.
+5. Report what you ran and its result, what you could not run and why, and any other defect
+   you saw but did not fix.
+
 ## Before you type
 
 1. Read the whole node you are changing: constructor or `on_configure`, every callback, the
@@ -203,9 +216,13 @@ monitor, velodyne, socketcan) and average code does not:
   A test calls only public functions, never a private or protected member, and is added to
   the package's CMake or setup the way its neighbours are. Where neighbouring tests do read
   members, find how (`FRIEND_TEST`, a friend class) and give the new test the same access, or
-  it does not compile. A test that breaks the build is
-  worse than none: when you cannot compile it here, keep it to that one public call and say
-  in your report that it was not run, with the command that runs it.
+  it does not compile. Generated tests fail to build for three reasons: a function, header
+  or constructor that does not exist as written, a test dependency missing from the build
+  (`ament_add_gtest` and `find_package(ament_cmake_gtest)`, a `test_depend` in
+  `package.xml`), and a private member. Before you finish, `rg` every name the test calls and
+  check its signature, and copy the CMake lines of a neighbouring test. A test that breaks
+  the build is worse than none: when you cannot compile it here, keep it to that one public
+  call and say in your report that it was not run, with the command that runs it.
 * Build and run it: `colcon build --packages-select <pkg>` then
   `colcon test --packages-select <pkg> --event-handlers console_direct+`. Run `rosio extract`
   again after touching launch, yaml or models, and check that no new finding arrived.
