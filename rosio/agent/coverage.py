@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -51,6 +52,20 @@ def edited(transcript: str, root: Path) -> list[str]:
                         continue
                     if rel.parts and rel.parts[0] not in (".claude", "rosio-out") and rel.suffix != ".md":
                         paths.add(rel.as_posix())
+    # agents also edit through the shell, so a changed file the session named counts too
+    seen = touched(transcript)
+    git = ["git", "-C", str(root)]
+    for cmd in (["diff", "--name-only", "--relative", "HEAD"], ["ls-files", "--others", "--exclude-standard"]):
+        try:
+            out = subprocess.run(git + cmd, capture_output=True, text=True, timeout=20).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for rel in out.splitlines():
+            parts = Path(rel).parts
+            if (parts and parts[0] not in (".claude", "rosio-out") and Path(rel).suffix != ".md"
+                    and Path(rel).name not in ("CLAUDE.md", ".mcp.json", "rosio.yaml")
+                    and Path(rel).name in seen):
+                paths.add(Path(rel).as_posix())
     return sorted(paths)
 
 

@@ -70,6 +70,29 @@ def test_a_session_that_changed_code_reviews_its_diff_once(tmp_path, monkeypatch
     assert capsys.readouterr().out == ""
 
 
+def test_a_file_changed_through_the_shell_counts_as_changed(tmp_path, monkeypatch, capsys):
+    import subprocess
+
+    from rosio import cli
+
+    (tmp_path / "package.xml").write_text("<package/>", encoding="utf-8")
+    (tmp_path / "node.py").write_text("a = 1\n", encoding="utf-8")
+    git = ["git", "-C", str(tmp_path), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run(git + ["init", "-q"], check=True)
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-qm", "base"], check=True)
+    (tmp_path / "node.py").write_text("a = 2\n", encoding="utf-8")
+    transcript = tmp_path / "session.jsonl"
+    bash = {"type": "tool_use", "name": "Bash", "input": {"command": "sed -i s/1/2/ node.py"}}
+    transcript.write_text(json.dumps({"type": "assistant", "message": {"content": [bash]}}) + "\n",
+                          encoding="utf-8")
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    data = json.dumps({"cwd": str(tmp_path), "transcript_path": str(transcript)})
+    monkeypatch.setattr(sys, "stdin", io.StringIO(data))
+    assert cli.main(["hook", "coverage"]) == 0
+    assert "changed node.py" in json.loads(capsys.readouterr().out)["reason"]
+
+
 def test_coverage_hook_nudges_once_for_unopened_sources(tmp_path, monkeypatch, capsys):
     from rosio import cli
 
