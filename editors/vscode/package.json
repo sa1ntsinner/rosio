@@ -101,7 +101,7 @@
     "viewsWelcome": [
       {
         "view": "rosio.findings",
-        "contents": "No atlas in this workspace yet.\n[Extract the atlas](command:rosio.extract)\nrosio reads launch files, parameter yaml, urdf, interfaces and the C++ and Python sources, and writes rosio-out/atlas.json."
+        "contents": "No atlas in this workspace yet.\n[Extract the atlas](command:rosio.extract)"
       },
       {
         "view": "rosio.unresolved",
@@ -109,23 +109,23 @@
       },
       {
         "view": "rosio.launch",
-        "contents": "Nothing to show yet.\nOnce the atlas is extracted, the launch files each profile in rosio.yaml starts are listed here with the files they include and every node they start, each one click from its line."
+        "contents": "Launch files and the nodes they start appear here once the atlas is extracted."
       },
       {
         "view": "rosio.frames",
-        "contents": "Nothing to show yet.\nOnce the atlas is extracted, the links and joints of each urdf and xacro model and the frames the code broadcasts or looks up are listed here, parent above child."
+        "contents": "Robot model links and the frames the code uses appear here once the atlas is extracted."
       },
       {
         "view": "rosio.system",
-        "contents": "The nodes, topics, parameters and frames of the system, once the atlas is extracted."
+        "contents": "Nodes, topics, parameters and frames appear here once the atlas is extracted."
       },
       {
         "view": "rosio.migration",
-        "contents": "List what moving this workspace to another ROS 2 release changes: dependencies the release does not ship, removed headers, CMake functions and APIs, each with its line and source.\n[Plan migration](command:rosio.planMigration)\nExact rewrites are applied in one step; the rest stay listed here, one sentence each."
+        "contents": "See what moving this workspace to another ROS 2 release changes, line by line.\n[Plan migration](command:rosio.planMigration)"
       },
       {
         "view": "rosio.params",
-        "contents": "No parameters yet.\nOnce the atlas is extracted, every parameter a profile sets is listed here by node, with the value that wins and every line it overrides."
+        "contents": "Every parameter with the value that wins appears here once the atlas is extracted."
       }
     ],
     "commands": [
@@ -211,6 +211,23 @@
         "title": "Apply fix",
         "category": "rosio",
         "icon": "$(lightbulb-autofix)"
+      },
+      {
+        "command": "rosio.fixAll",
+        "title": "Apply every exact fix",
+        "shortTitle": "Apply fixes",
+        "category": "rosio",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "rosio.copyFinding",
+        "title": "Copy finding",
+        "category": "rosio"
+      },
+      {
+        "command": "rosio.copyFindings",
+        "title": "Copy all findings",
+        "category": "rosio"
       }
     ],
     "keybindings": [
@@ -223,6 +240,12 @@
         "command": "rosio.openAtlas",
         "key": "ctrl+alt+shift+r",
         "mac": "cmd+alt+shift+r"
+      },
+      {
+        "command": "rosio.fixAll",
+        "key": "ctrl+alt+.",
+        "mac": "cmd+alt+.",
+        "when": "rosio.fixable"
       }
     ],
     "menus": {
@@ -276,6 +299,16 @@
           "command": "rosio.clearMigration",
           "when": "view == rosio.migration && rosio.migrationPlanned",
           "group": "navigation@9"
+        },
+        {
+          "command": "rosio.fixAll",
+          "when": "view == rosio.findings && rosio.fixable",
+          "group": "navigation@0"
+        },
+        {
+          "command": "rosio.copyFindings",
+          "when": "view == rosio.findings",
+          "group": "copy"
         }
       ],
       "view/item/context": [
@@ -298,6 +331,11 @@
           "command": "rosio.fixFinding",
           "when": "view == rosio.findings && viewItem == finding.fixable",
           "group": "inline"
+        },
+        {
+          "command": "rosio.copyFinding",
+          "when": "view == rosio.findings && viewItem =~ /^finding/",
+          "group": "copy"
         }
       ],
       "explorer/context": [
@@ -314,6 +352,10 @@
         },
         {
           "command": "rosio.fixFinding",
+          "when": "false"
+        },
+        {
+          "command": "rosio.copyFinding",
           "when": "false"
         }
       ]

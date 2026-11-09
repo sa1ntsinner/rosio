@@ -65,33 +65,13 @@ function aboutTheSystem(finding: Finding): boolean {
   return !ABOUT_THE_READ.some((prefix) => finding.rule.startsWith(prefix));
 }
 
-/** The finding to read first: the most severe, and one about the system over one about the read. */
-function leadFinding(findings: Finding[]): Finding | undefined {
-  for (const severity of SEVERITY_ORDER) {
-    const tier = findings.filter((finding) => finding.severity === severity);
-    const lead = tier.find(aboutTheSystem) ?? tier[0];
-    if (lead) return lead;
-  }
-  return undefined;
-}
-
 function oneFinding(summary: Summary, findings: Finding[]): string {
   const { error, warn, info } = summary.findings;
-  const lead = leadFinding(findings);
-  if (!lead) return "The layers agree. Nothing in this atlas needs a look.";
-  const counts = [
-    error ? plural(error, "error") : "",
-    warn ? plural(warn, "warning") : "",
-    info ? plural(info, "note") : "",
-  ].filter(Boolean);
-  return `${counts.join(", ")}. Start with: ${lead.title}.`;
-}
-
-function resolvedShare(summary: Summary): string {
-  const resolved = Object.values(summary.counters.resolved ?? {}).reduce((a, b) => a + b, 0);
-  const open = Object.values(summary.counters.unresolved ?? {}).reduce((a, b) => a + b, 0);
-  if (resolved + open === 0) return "";
-  return `${((100 * resolved) / (resolved + open)).toFixed(1)}% of names resolved`;
+  if (!findings.length) return "The layers agree. Nothing in this atlas needs a look.";
+  // The list below starts with the finding to read first, so the line above it only counts.
+  return [error ? plural(error, "error") : "", warn ? plural(warn, "warning") : "", info ? plural(info, "note") : ""]
+    .filter(Boolean)
+    .join(", ");
 }
 
 /** What a layer that states no fact about the entity still says through a relation. */
@@ -110,11 +90,12 @@ function layersStrip(present: Layer[], entity?: Entity): HTMLElement {
     { class: "layers", role: "list", "aria-label": "Layers in this atlas" },
     ...LAYERS.map((layer) => {
       const has = present.includes(layer);
+      const note = entity && atlasLayers.includes(layer) ? namedBy(entity, layer) : LAYER_WHAT[layer].absent;
       return h(
         "div",
-        { class: `layer ${has ? "present" : "absent"}`, "data-layer": layer, role: "listitem" },
-        h("div", { class: "name" }, layer),
-        h("div", { class: "note" }, has ? LAYER_WHAT[layer].present : entity && atlasLayers.includes(layer) ? namedBy(entity, layer) : LAYER_WHAT[layer].absent),
+        { class: `layer ${has ? "present" : "absent"}`, "data-layer": layer, role: "listitem", title: has ? LAYER_WHAT[layer].present : "" },
+        h("span", { class: "name" }, layer),
+        !has && h("span", { class: "note" }, note),
       );
     }),
   );
@@ -137,10 +118,14 @@ function findingRow(finding: Finding): HTMLElement {
         finding.say,
         " ",
         h("span", {}, `Fix: ${finding.fix}`),
-        finding.fixable && h("button", { class: "fix" }, "Apply fix"),
       ),
     ),
-    first ? h("a", { class: "where", title: "Open the line" }, fileAndLine(first.uri, first.line)) : h("span", {}),
+    h(
+      "span",
+      { class: "end" },
+      finding.fixable && h("button", { class: "fix" }, "Apply fix"),
+      first && h("a", { class: "where", title: "Open the line" }, fileAndLine(first.uri, first.line)),
+    ),
   );
   const open = () => first && vscode.postMessage({ type: "open", uri: first.uri, line: first.line });
   row.querySelector(".fix")?.addEventListener("click", (event) => {
@@ -167,6 +152,35 @@ function findingRow(finding: Finding): HTMLElement {
 }
 
 const ROWS_PER_GROUP = 8;
+const FOLD_FROM = 4;
+
+/** Many findings of one rule read as one line that opens, so a rule that fires often hides no other. */
+function foldedRows(rows: Finding[]): HTMLElement[] {
+  const byRule = new Map<string, Finding[]>();
+  for (const finding of rows) byRule.set(finding.rule, [...(byRule.get(finding.rule) ?? []), finding]);
+  const out: HTMLElement[] = [];
+  for (const finding of rows) {
+    const same = byRule.get(finding.rule) ?? [];
+    if (same.length < FOLD_FROM) out.push(findingRow(finding));
+    else if (same[0] === finding) {
+      out.push(
+        h(
+          "details",
+          { class: "fold" },
+          h(
+            "summary",
+            { class: "row" },
+            h("span", { class: `sev ${finding.severity}` }, SEVERITY_WORD[finding.severity]),
+            h("div", { class: "what" }, h("span", {}, `${finding.title}, and ${same.length - 1} more like it`), h("span", { class: "rule" }, finding.rule)),
+            h("span", {}),
+          ),
+          ...same.map(findingRow),
+        ),
+      );
+    }
+  }
+  return out;
+}
 
 /** What the system is made of, in the order an engineer reads it. Internal kinds stay out. */
 const LEDGER_KINDS: [string, string][] = [
@@ -196,17 +210,18 @@ function findingGroups(findings: Finding[]): HTMLElement {
     ...groups.map((rows, index) => {
       if (!rows.length) return null;
       const severity = SEVERITY_ORDER[index];
-      const list = h("div", { class: "rows" }, ...rows.slice(0, ROWS_PER_GROUP).map(findingRow));
+      const folded = foldedRows(rows);
+      const list = h("div", { class: "rows" }, ...folded.slice(0, ROWS_PER_GROUP));
       const group = h(
         "div",
         { class: "group" },
         h("h2", {}, SEVERITY_TITLE[severity], h("span", { class: "count" }, String(rows.length))),
         list,
       );
-      if (rows.length > ROWS_PER_GROUP) {
+      if (folded.length > ROWS_PER_GROUP) {
         const more = h("a", { class: "more", tabindex: "0" }, `Show all ${rows.length}`);
         more.addEventListener("click", () => {
-          list.replaceChildren(...rows.map(findingRow));
+          list.replaceChildren(...folded);
           more.remove();
         });
         group.append(more);
@@ -216,53 +231,17 @@ function findingGroups(findings: Finding[]): HTMLElement {
   );
 }
 
-function ledger(summary: Summary): HTMLElement {
-  const counters = summary.counters;
-  const counts = counters.entities_by_kind ?? {};
-  const kinds = LEDGER_KINDS.filter(([kind]) => counts[kind]).map(([kind, name]) => [name, counts[kind]] as const);
-  // A kind every name of which resolved says nothing; the share line under the title covers it.
-  const rates = Object.entries(counters.resolution_rate ?? {})
-    .filter(([, rate]) => rate < 1)
-    .sort();
-  const unresolved = counters.unresolved ?? {};
+/** What was read, on one line, and the way to what could not be. */
+function holds(summary: Summary): HTMLElement {
+  const counts = summary.counters.entities_by_kind ?? {};
+  const kinds = LEDGER_KINDS.filter(([kind]) => counts[kind]).map(([kind, name]) => plural(counts[kind], name.slice(0, -1), name));
+  const open = Object.values(summary.counters.unresolved ?? {}).reduce((a, b) => a + b, 0);
   return h(
-    "div",
-    {},
-    h(
-      "div",
-      { class: "ledger" },
-      h("h2", {}, "What the atlas holds"),
-      h(
-        "table",
-        {},
-        h("tbody", {}, ...kinds.map(([name, count]) => h("tr", {}, h("td", {}, name), h("td", { class: "num" }, count.toLocaleString())))),
-      ),
-    ),
-    rates.length
-      ? h(
-          "div",
-          { class: "ledger" },
-          h("h2", {}, "Not resolved"),
-          h(
-            "table",
-            {},
-            h("thead", {}, h("tr", {}, h("th", {}, "name kind"), h("th", { class: "num" }, "resolved"), h("th", { class: "num" }, "open"))),
-            h(
-              "tbody",
-              {},
-              ...rates.map(([want, rate]) =>
-                h(
-                  "tr",
-                  {},
-                  h("td", {}, want.replace("_", " ")),
-                  h("td", { class: "num" }, `${(100 * rate).toFixed(1)}%`),
-                  h("td", { class: "num" }, String(unresolved[want] ?? 0)),
-                ),
-              ),
-            ),
-          ),
-        )
-      : null,
+    "p",
+    { class: "holds" },
+    kinds.join(" · "),
+    open ? " · " : null,
+    open ? link(`${plural(open, "name")} not resolved`, { type: "unresolved" }, "Show them in the side bar") : null,
   );
 }
 
@@ -287,6 +266,7 @@ function renderAtlas(summary: Summary, findings: Finding[], workspace: string): 
     );
   }
   const profiles = summary.profiles.length ? summary.profiles.join(", ") : "no profile";
+  const fixable = findings.filter((finding) => finding.fixable).length;
   return h(
     "main",
     {},
@@ -298,12 +278,20 @@ function renderAtlas(summary: Summary, findings: Finding[], workspace: string): 
         {},
         h("h1", {}, workspace),
         h("p", { class: "finding" }, oneFinding(summary, findings)),
-        h("p", { class: "muted" }, [profiles, readFrom(summary), resolvedShare(summary)].filter(Boolean).join(" · ")),
+        h("p", { class: "muted" }, [profiles, readFrom(summary)].filter(Boolean).join(" · ")),
       ),
-      h("div", { class: "actions" }, button("System graph", { type: "graph" }), button("Find", { type: "find" }), button("Extract again", { type: "extract" })),
+      h(
+        "div",
+        { class: "actions" },
+        fixable > 0 && button(`Apply ${plural(fixable, "fix", "fixes")}`, { type: "fixAll" }, true),
+        button("System graph", { type: "graph" }),
+        button("Find", { type: "find" }),
+        button("Extract again", { type: "extract" }),
+      ),
     ),
     layersStrip(summary.layers),
-    h("div", { class: "split" }, findings.length ? findingGroups(findings) : h("p", {}, "No finding."), ledger(summary)),
+    findings.length ? findingGroups(findings) : null,
+    holds(summary),
   );
 }
 

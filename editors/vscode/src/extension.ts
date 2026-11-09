@@ -22,6 +22,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
   const output = vscode.window.createOutputChannel("rosio");
   const server = new Server(output, context.extensionPath);
   const findings = new FindingsView(server);
+  const findingsTree = vscode.window.createTreeView("rosio.findings", { treeDataProvider: findings });
   const system = new SystemView(server);
   const unresolved = new UnresolvedView(server);
   const launch = new LaunchView(server);
@@ -50,6 +51,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
       robot.update(true),
     ]);
     const summary = await server.summary();
+    const fixable = (await server.findings()).filter((finding) => finding.fixable).length;
+    void vscode.commands.executeCommand("setContext", "rosio.fixable", fixable > 0);
+    const urgent = summary?.loaded ? summary.findings.error + summary.findings.warn : 0;
+    findingsTree.badge = urgent ? { value: urgent, tooltip: `${urgent} errors and warnings` } : undefined;
     if (!summary?.loaded) {
       status.text = "$(circle-outline) rosio";
       status.tooltip = "No atlas yet. Click to open the atlas panel.";
@@ -58,14 +63,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
       const profile = summary.profiles[0] ? `${summary.profiles[0].replace(/^profile:/, "")} · ` : "";
       const problems = error ? `$(error) ${error}` : warn ? `$(warning) ${warn}` : "$(check)";
       status.text = `rosio · ${profile}${problems}`;
-      status.tooltip = new vscode.MarkdownString(
+      const tooltip = new vscode.MarkdownString(
         [
           `**${error} errors, ${warn} warnings**`,
           `Layers: ${summary.layers.join(", ") || "none"}`,
           `Atlas: ${await atlasAge(summary.atlasPath)}`,
-          "Click to open the atlas.",
+          [fixable ? `[Apply ${fixable} ${fixable === 1 ? "fix" : "fixes"}](command:rosio.fixAll)` : "", "[Extract again](command:rosio.extract)", "[Find](command:rosio.find)"]
+            .filter(Boolean)
+            .join(" · "),
         ].join("\n\n"),
       );
+      tooltip.isTrusted = { enabledCommands: ["rosio.fixAll", "rosio.extract", "rosio.find"] };
+      status.tooltip = tooltip;
     }
     status.show();
   };
@@ -100,7 +109,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
     graph,
     robot,
     status,
-    vscode.window.registerTreeDataProvider("rosio.findings", findings),
+    findingsTree,
     vscode.window.registerTreeDataProvider("rosio.unresolved", unresolved),
     vscode.window.registerTreeDataProvider("rosio.system", system),
     vscode.window.registerTreeDataProvider("rosio.launch", launch),
@@ -108,6 +117,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
     vscode.window.registerTreeDataProvider("rosio.params", params),
     vscode.commands.registerCommand("rosio.findParameter", () => findParameter(params)),
     vscode.commands.registerCommand("rosio.fixFinding", (finding: Finding) => fixFinding(finding)),
+    vscode.commands.registerCommand("rosio.fixAll", () => fixAll(server)),
+    vscode.commands.registerCommand("rosio.copyFinding", (finding: Finding) => vscode.env.clipboard.writeText(findingText(finding))),
+    vscode.commands.registerCommand("rosio.copyFindings", async () =>
+      vscode.env.clipboard.writeText((await server.findings()).map(findingText).join("\n\n")),
+    ),
     server.onDidChange(() => void refresh()),
     vscode.commands.registerCommand("rosio.openAtlas", () => panel.showAtlas()),
     vscode.commands.registerCommand("rosio.showGraph", (focus?: unknown) => graph.show(graphFocus(focus))),
@@ -125,19 +139,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
 }
 
 /** Applies the replacement the language server offers for a finding at the line it cites. */
-async function fixFinding(finding: Finding): Promise<void> {
+async function applyFix(finding: Finding): Promise<vscode.TextDocument | undefined> {
   const at = finding.locations[0];
-  if (!at) return;
+  if (!at) return undefined;
   const uri = vscode.Uri.parse(at.uri);
-  const line = (await vscode.workspace.openTextDocument(uri)).lineAt(at.line).range;
+  const document = await vscode.workspace.openTextDocument(uri);
+  const line = document.lineAt(at.line).range;
   const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>("vscode.executeCodeActionProvider", uri, line);
   const fix = actions?.find((action) => action.isPreferred && action.edit);
-  if (!fix?.edit) {
-    void vscode.window.showWarningMessage("The cited line changed since the atlas was built, so rosio did not edit it.");
+  return fix?.edit && (await vscode.workspace.applyEdit(fix.edit)) ? document : undefined;
+}
+
+const LINE_MOVED = "The cited line changed since the atlas was built, so rosio did not edit it.";
+
+async function fixFinding(finding: Finding): Promise<void> {
+  const document = await applyFix(finding);
+  if (!document) {
+    void vscode.window.showWarningMessage(LINE_MOVED);
     return;
   }
-  await vscode.workspace.applyEdit(fix.edit);
-  await vscode.window.showTextDocument(uri, { selection: line });
+  const line = finding.locations[0].line;
+  await vscode.window.showTextDocument(document, { selection: new vscode.Range(line, 0, line, 0) });
+}
+
+/** Every exact fix in one step: edit, save the files it touched, extract again. */
+async function fixAll(server: Server): Promise<void> {
+  const fixable = (await server.findings()).filter((finding) => finding.fixable);
+  const edited = new Set<vscode.TextDocument>();
+  for (const finding of fixable) {
+    const document = await applyFix(finding);
+    if (document) edited.add(document);
+    else void vscode.window.showWarningMessage(`${finding.title}: ${LINE_MOVED}`);
+  }
+  if (!edited.size) return;
+  await Promise.all([...edited].map((document) => document.save()));
+  await extract(server);
+}
+
+/** A finding as text a person or an assistant can act on without the editor. */
+function findingText(finding: Finding): string {
+  const at = finding.locations[0];
+  const where = at ? `${vscode.workspace.asRelativePath(vscode.Uri.parse(at.uri))}:${at.line + 1}` : "";
+  return [`${finding.severity}: ${finding.title} (${finding.rule})`, finding.say, `Fix: ${finding.fix}`, where].filter(Boolean).join("\n");
 }
 
 /** How old the atlas on disk is, the way a person says it. */

@@ -174,10 +174,6 @@ body.vscode-high-contrast-light {
 [data-layer="observed"] { --layer: var(--observed); }
 [data-layer="recorded"] { --layer: var(--recorded); }
 
-.layer.present {
-  box-shadow: inset 0 3px 0 var(--layer);
-}
-
 .layer-head::before {
   content: "";
   display: inline-block;
@@ -189,61 +185,81 @@ body.vscode-high-contrast-light {
 }
 
 .layers {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 2px;
-  margin-bottom: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 28px;
+  margin-bottom: 26px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 
-.layer {
-  background: var(--step);
-  padding: 10px 12px;
-  min-height: 58px;
+.layer .name::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 7px;
+  background: var(--layer);
 }
 
-.layer .name {
+.layer.present .name {
   font-weight: 600;
 }
 
-.layer.absent {
-  background: transparent;
-  outline: 1px dashed var(--line);
-  outline-offset: -1px;
-}
-
+/* a layer the atlas lacks is an empty mark and the one step that fills it */
 .layer.absent .name {
   color: var(--muted);
-  font-weight: 400;
+}
+
+.layer.absent .name::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--muted);
 }
 
 .layer .note {
   color: var(--muted);
-  margin-top: 2px;
+  margin-left: 8px;
 }
 
-.layer.present .note {
-  color: var(--ink);
-}
-
-/* two columns: findings carry the question, the ledger beside them answers what was read */
-
-.split {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
-  gap: 32px;
-  align-items: start;
+.holds {
+  color: var(--muted);
+  margin-top: 30px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 
 @media (max-width: 760px) {
-  .split {
-    grid-template-columns: 1fr;
-  }
-  .layers {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .title {
     flex-direction: column;
   }
+}
+
+.fold > summary {
+  list-style: none;
+}
+
+.fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.fold > summary .sev::after {
+  content: " \25B8";
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.fold[open] > summary .sev::after {
+  content: " \25BE";
+}
+
+.fold[open] {
+  margin-bottom: 6px;
+}
+
+/* a finding and its line stay within one glance of each other */
+.group {
+  max-width: 920px;
 }
 
 .group + .group {
@@ -307,9 +323,22 @@ h2 .count {
   display: block;
 }
 
-.row .say .fix {
-  margin-left: 8px;
-  padding: 1px 8px;
+.row .end {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+/* the one click fix shows where the hand already is, on the row under the pointer */
+.row .fix {
+  padding: 0 8px;
+  visibility: hidden;
+}
+
+.row:hover .fix,
+.row:focus-within .fix {
+  visibility: visible;
 }
 
 .row .where {

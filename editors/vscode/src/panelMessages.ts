@@ -9,6 +9,8 @@ export type ToHost =
   | { type: "ready" }
   | { type: "open"; uri: string; line: number }
   | { type: "fix"; finding: Finding }
+  | { type: "fixAll" }
+  | { type: "unresolved" }
   | { type: "extract" }
   | { type: "find" }
   | { type: "atlas" }
