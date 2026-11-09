@@ -12,11 +12,13 @@ purpose: every line is a mistake that shipped in a real robot stack.
    wrong result. A fix you never saw fail is a guess.
 3. Search for every other path that reaches the same defect (`rg` the function, the field,
    the pattern) and fix them together, in the shared function when there is one.
-4. Make the smallest change, then check it with the failing case and the build. Undo the fix
-   once and run the test again: a test that still passes tests something else.
-5. Report what you ran and the result its output printed, not the one you expected; a build
-   that failed is reported as failed. Name what you could not run and why, and any other
-   defect you saw but did not fix.
+4. Make the smallest change, then check it with the failing case and the build. When the test
+   runs here, undo the fix once and run it again: a test that still passes tests something
+   else.
+5. Report only what a command printed in this session: a build that failed is reported as
+   failed, and a step you did not run is written as not run. "Not run" costs nothing; a
+   claim the diff or the log contradicts gets the whole fix rejected. Name any other defect
+   you saw but did not fix.
 
 ## Before you type
 
@@ -215,11 +217,12 @@ monitor, velodyne, socketcan) and average code does not:
   function, a `launch_testing` test for a launch file or a node interaction. When the check
   sits in a private callback or needs hardware, move the decision into a small function that
   takes plain values (the goal, the joint names) and test that; it is the better design too.
-  Never change a public header, signature or class interface only to make a test possible:
-  that is scope a reviewer rejects. When no test fits without it, leave the test out and
-  say in your report how it could be tested. A race, a hang or a missed callback is the
-  same: a test that never runs the two threads or the late completion that caused it proves
-  nothing, so leave it out and name the interleaving in the report.
+  A fix with no test is the exception, and there are two: the only test would need a public
+  header, signature or class interface changed for it (that is scope a reviewer rejects), or
+  the bug is a race or a hang and the test would never run the two threads or the late
+  completion that caused it. Then say in your report which of the two it is and how it could
+  be tested. Anything else gets its test: a wrong value, a missing check, a bad index, an
+  order of calls.
   A test calls only public functions, never a private or protected member, and is added to
   the package's CMake or setup the way its neighbours are. Where neighbouring tests do read
   members, find how (`FRIEND_TEST`, a friend class) and give the new test the same access, or

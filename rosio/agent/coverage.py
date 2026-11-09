@@ -103,14 +103,13 @@ def _run() -> None:
                 "hits this same defect is fixed, and another defect you found is named in the "
                 "report rather than fixed here; a small deterministic test, no sleeps or timing, "
                 "that runs the fixed line and fails without the change, every name it calls "
-                "checked with rg and its build lines copied from a neighbouring test, and no public "
-                "header or signature changed only for the test (leave the test out instead); "
-                "comments of one line "
-                "that say why and none that restate the code; nothing unrelated touched; and the package built or the test run when "
-                "a toolchain is here, the test seen failing once with the fix undone. Fix what falls "
-                "short, then finish. In the report state what you built or ran with the result "
-                "its output printed, what you could not, and nothing the diff does not "
-                "show; do not recite this list."
+                "checked with rg and its build lines copied from a neighbouring test (no test "
+                "only when it would need a public header or signature changed, or the bug is a "
+                "race it cannot reach); comments of one line that say why and none that restate "
+                "the code; nothing unrelated touched; and the package built and the test run "
+                "when a toolchain is here. Fix what falls short, then finish. In the report "
+                "write only what a command printed in this session, and not run for every step "
+                "you did not run: a false claim is worse than not run. Do not recite this list."
             )}))
         return
     seen = touched(data["transcript_path"])
