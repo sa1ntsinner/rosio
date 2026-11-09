@@ -99,10 +99,11 @@ def _run() -> None:
         if REVIEW not in text:
             print(json.dumps({"decision": "block", "reason": (
                 f"{REVIEW} {', '.join(changed[:10])}. Before you finish, read "
-                ".claude/skills/rosio/coding.md and check the diff against it: the same fix on "
-                "every caller and sibling path, a test beside the package's tests that fails "
-                "without the change, comments of one line that say why and none that restate "
-                "the code, nothing unrelated touched, and the package built or the test run when "
+                ".claude/skills/rosio/coding.md and check the diff against it: every path that "
+                "hits this same defect is fixed, and another defect you found is named in the "
+                "report rather than fixed here; a small deterministic test, no sleeps or timing, "
+                "that runs the fixed line and fails without the change; comments of one line "
+                "that say why and none that restate the code; nothing unrelated touched; and the package built or the test run when "
                 "a toolchain is here. Fix what falls short, then finish. In the report state "
                 "what you built or ran and what you could not, and nothing the diff does not "
                 "show; do not recite this list."

@@ -186,7 +186,10 @@ monitor, velodyne, socketcan) and average code does not:
 ## Writing the change
 
 * Fix the root cause in the smallest diff that makes every caller right. Do not refactor,
-  rename or reformat code you were not asked to touch.
+  rename or reformat code you were not asked to touch. A second defect you notice goes in
+  your report, not in this diff.
+* A test is deterministic: no `sleep`, no timing window, no thread race it hopes to lose. It
+  drives the line you changed and checks the result that was wrong.
 * A new parameter only when a user needs to tune it; a constant otherwise, named.
 * Comments say why, never what. One line, next to the surprising code: the unit, the
   reference frame, the hardware quirk, the reason a check exists. No comment that restates
