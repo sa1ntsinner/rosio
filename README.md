@@ -23,10 +23,10 @@ it, no network call and no API key, and two runs over the same inputs write the 
 
 ```mermaid
 flowchart LR
-  D["declared<br/>launch, yaml, urdf, plugins"] --> A
-  C["coded<br/>C++ and Python sources"] --> A
-  O["observed<br/>a live probe"] --> A
-  R["recorded<br/>rosbag2"] --> A
+  D["config<br/>launch, yaml, urdf, plugins"] --> A
+  C["code<br/>C++ and Python sources"] --> A
+  O["live<br/>a probe of the running system"] --> A
+  R["bag<br/>rosbag2 recordings"] --> A
   A[("atlas.json")] --> F["drift findings<br/>file and line to edit"]
   F --> CLI[command line and CI]
   F --> ED[VS Code and Zed]
