@@ -1727,6 +1727,14 @@ without a winner is no longer `effective`. A repository holding `package.xml` at
 its own src root, its `src` being that package's sources. A python launch file named
 `-launch.py` is a launch file.
 
+Inside `1.34`, with no new key, a first run over public repositories moved one reading. A
+declare wrapper that takes the name as `const char *` is a wrapper, and a function like macro
+of one line whose body calls a declare wrapper with one of its own arguments as the name
+(`#define LOAD(member, name) loadParameter(node, name, config.member)`) is a wrapper of its
+file, so each use declares the name it passes. Such a node had every key of its parameters
+file reported by `param.set_undeclared`; those findings are gone and the parameters are
+`effective`.
+
 A reader pinned to `1.0` still loads a `1.34` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

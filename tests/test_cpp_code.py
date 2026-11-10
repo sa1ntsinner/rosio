@@ -506,6 +506,21 @@ def test_a_constructor_that_takes_a_name_is_not_a_declare_wrapper(units) -> None
     assert len(unit.params) == 4
 
 
+@needs_cpp
+def test_a_macro_over_a_declare_wrapper_declares_the_name_each_use_passes() -> None:
+    unit = cpp.parse_text(
+        "template<typename T> void load(rclcpp::Node & node, const char * name, T & value)"
+        "{ value = node.declare_parameter<T>(name, value); }\n"
+        "void read(rclcpp::Node & node) {\n"
+        "#define LOAD(member, name) load(node, name, config.member)\n"
+        '  LOAD(gain_, "gain");\n  LOAD(frame_, "frame");\n'
+        "#undef LOAD\n}\n",
+        path="config.cpp",
+    )
+    cpp.analyse([unit])
+    assert {row["name"] for row in cpp.file_report(unit)["parameters"]} == {"gain", "frame"}
+
+
 # ---------------------------------------------------------------------------
 # QoS is what the source states
 

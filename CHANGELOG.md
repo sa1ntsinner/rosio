@@ -44,6 +44,8 @@ file loads a `1.34` file.
 * rclcpp and rclpy calls that were not read: sub nodes, `get_parameters_by_prefix`, QoS
   overrides from a parameters file, generic clients and services, the `_full` and `_async`
   transform reads.
+* A parameter declared through a macro over a helper function, or through a helper that
+  takes the name as `const char *`, is read as declared.
 * A node that sets its own parameter is a candidate of that parameter (`code_set`).
 * Plugin instances: several plugin classes in one file, suffix reads, defaults of a selected
   instance.

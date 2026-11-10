@@ -289,6 +289,10 @@ _ROS_CALL = re.compile(
 macro inside a string or a visibility macro before a function hides nothing."""
 
 _DEFINE = re.compile(r'^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)[ \t]+"((?:[^"\\]|\\.)*)"', re.M)
+_MACRO_CALL = re.compile(
+    rb"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)\(([^)\n]*)\)[ \t]+([\w:]+)\(([^\n]*)\)[ \t]*$",
+    re.M,
+)
 
 _TRANSITIONS = (
     "on_configure",
@@ -3173,10 +3177,12 @@ def _wrappers(root: Any, src: bytes, *, lambdas: bool = True) -> dict[str, tuple
             [item for item in parameters.named_children if item.type == "parameter_declaration"]
         ):
             type_node = _child(child, "type")
-            if type_node is None or _flat(type_node, src) not in name_types:
-                continue
             inner_name = _child(child, "declarator")
-            if inner_name is None:
+            if type_node is None or inner_name is None:
+                continue
+            # `const char * name` names a parameter as a string does
+            c_string = inner_name.type == "pointer_declarator" and _flat(type_node, src) == "char"
+            if _flat(type_node, src) not in name_types and not c_string:
                 continue
             # The declare call must be handed this very parameter as the name. Without that
             # test a constructor that takes a node name and declares parameters of its own
@@ -3198,6 +3204,22 @@ def _wrappers(root: Any, src: bytes, *, lambdas: bool = True) -> dict[str, tuple
             given = _declared_default(body, src, declared[index])
             default = declared.index(given) if given in declared else len(declared)
         out[name] = (index, default)
+    if lambdas:
+        # `#define LOAD(member, name) loadParameter(node, name, config.member)` is a wrapper
+        # of its own file: each use declares the name it passes.
+        tails = {symbol.rpartition("::")[2]: shape for symbol, shape in out.items()}
+        for macro, params, callee, args in _MACRO_CALL.findall(src):
+            shape = tails.get(callee.decode().rpartition("::")[2])
+            names = [item.strip() for item in params.split(b",")]
+            # ponytail: a plain comma split, a nested call among the arguments is not followed
+            given = [item.strip() for item in args.split(b",")]
+            if shape is None or shape[0] >= len(given) or given[shape[0]] not in names:
+                continue
+            default = given[shape[1]] if shape[1] < len(given) else b""
+            out[macro.decode()] = (
+                names.index(given[shape[0]]),
+                names.index(default) if default in names else len(names),
+            )
     return out
 
 
