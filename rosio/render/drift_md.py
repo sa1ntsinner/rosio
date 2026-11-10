@@ -167,12 +167,6 @@ def _header(atlas: Atlas, gates: Sequence[dict[str, str]]) -> list[str]:
             "kept out is the second table from the end of this file, which counts rows and "
             "not rules."
         )
-    lines.append("")
-    lines.append(
-        "Each entry below carries the sentence to quote, the file and line to edit, why the "
-        "statement is true and what to change. A finding id is the waiver key, so a rename of a "
-        "rule never silently un waives anything."
-    )
     by_rule: dict[str, list[Finding]] = {}
     for item in items:
         by_rule.setdefault(item.rule, []).append(item)
@@ -222,8 +216,6 @@ def _families(atlas: Atlas) -> list[str]:
         lines.append("")
         lines.append(heading(2, f"{FAMILY_NAMES.get(family, family)}, {len(here)}"))
         lines.append("")
-        spread = plural(len({item.rule for item in here}), "rule")
-        lines.append(f"{_summary(_severity_counts(here))}, over {spread}.")
         # Info findings of one rule about one file are one section, so a launch file with
         # forty unresolved remaps does not bury the rest of the report.
         bundles: dict[tuple[str, str], list[Finding]] = {}
