@@ -173,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract = _sub(
         subparsers,
         "extract",
-        "read a workspace and write the declared and coded layers",
+        "read a workspace and write the config and code layers",
         "Parse launch files, yaml parameter profiles, urdf and xacro, interface definitions "
         "and pluginlib manifests, then read the C++ and Python sources for what the code "
         "actually publishes, subscribes, declares and broadcasts. The drift rules run over "
@@ -230,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--bag",
         action="append",
         metavar="PATH",
-        help="rosbag2 directory to read for the recorded layer, repeatable, "
+        help="rosbag2 directory to read for the bag layer, repeatable, "
         "a directory of recordings reads every recording under it",
     )
     extract.add_argument(
@@ -247,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     probe = _sub(
         subparsers,
         "probe",
-        "attach to a live system and add the observed layer to an atlas",
+        "attach to a live system and add the live layer to an atlas",
         "Run a short rclpy probe: node names, endpoints with their QoS, effective parameter "
         "values, the TF tree, publication rates and lifecycle state, plus the argv of every "
         "running ROS process. Needs a sourced ROS 2 environment. The result is written into "
@@ -318,7 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument(
         "--atlas",
         metavar="FILE",
-        help="atlas to add the observed layer to, a directory holding one, "
+        help="atlas to add the live layer to, a directory holding one, "
         "default is <out>/atlas.json and a new atlas when there is none",
     )
 
@@ -1197,7 +1197,7 @@ def _observed_dropped(target):
         return None
     if old is not None and carries_layer(old, Layer.OBSERVED.value):
         print(
-            f"{PROG} extract: {target} carried the observed layer, which this run replaces; "
+            f"{PROG} extract: {target} carried the live layer, which this run replaces; "
             f"run {PROG} probe again after it to keep it",
             file=sys.stderr,
         )
@@ -1926,7 +1926,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
         _stale_note(target, written)
     if not status.present:
         print(
-            f"{PROG}: the observed layer is empty ({status.reason or 'nothing was reported'})",
+            f"{PROG}: the live layer is empty ({status.reason or 'nothing was reported'})",
             file=sys.stderr,
         )
         return EXIT_COLLECTOR
@@ -1967,7 +1967,7 @@ def _existing_atlas(source):
     atlas = Atlas.loads(source.read_text(encoding="utf-8"))
     if carries_layer(atlas, Layer.OBSERVED.value):
         raise UsageError(
-            f"{source} already carries the observed layer, and a fact slot is written by one "
+            f"{source} already carries the live layer, and a fact slot is written by one "
             "run. probe a fresh atlas instead: name it with --atlas and write the result "
             "somewhere else with --out"
         )

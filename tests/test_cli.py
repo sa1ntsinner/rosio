@@ -964,7 +964,7 @@ def test_probe_refuses_to_write_a_second_observed_layer(
 
     assert main(["probe", str(WS), "--atlas", str(target)]) == EXIT_USAGE
     err = capsys.readouterr().err
-    assert "already carries the observed layer" in err
+    assert "already carries the live layer" in err
     assert "--out" in err
 
 
@@ -976,7 +976,7 @@ def test_a_probe_that_reached_nothing_says_so_and_still_writes_the_run(
 
     out = tmp_path / "out"
     assert main(["probe", str(WS), "--out", str(out), "--quiet"]) == EXIT_COLLECTOR
-    assert "the observed layer is empty" in capsys.readouterr().err
+    assert "the live layer is empty" in capsys.readouterr().err
 
     atlas = Atlas.loads((out / "atlas.json").read_text(encoding="utf-8"))
     assert atlas.layers["observed"].present is False
