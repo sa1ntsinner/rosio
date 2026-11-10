@@ -184,7 +184,7 @@ def _completeness(atlas: Atlas) -> list[str]:
 def _coverage(atlas: Atlas) -> list[str]:
     nodes = _nodes(atlas)
     read = [node for node in nodes if _read(node)]
-    lines = _section("Coverage, read this before the counts")
+    lines = _section("Coverage")
     for paragraph in _completeness(atlas):
         lines.extend([paragraph, ""])
     if not nodes:
@@ -242,11 +242,6 @@ def _node_coverage(atlas: Atlas, nodes: list, read: list) -> list[str]:
 
 def _profiles(atlas: Atlas) -> list[str]:
     lines = _section("Profiles and the entry points that build them")
-    lines.append(
-        "A profile is one running system, named by the ordered commands that start it. A union "
-        "of launch files is not a profile, because it describes a system nobody runs."
-    )
-    lines.append("")
     if not _profile_ids(atlas):
         lines.extend(
             [
@@ -285,11 +280,6 @@ def _profiles(atlas: Atlas) -> list[str]:
 def _inventory(atlas: Atlas) -> list[str]:
     nodes = _nodes(atlas)
     lines = _section("Node inventory")
-    lines.append(
-        "One row per node, with the profiles that launch it and whether its source was read. "
-        "`name source` says where the runtime name comes from, and a randomised name is a node "
-        "that cannot be addressed by name at all."
-    )
     rows = []
     for node in nodes:
         pkg = _value(node, "pkg") or ids.parse_node(node.id).package or ""
@@ -303,7 +293,6 @@ def _inventory(atlas: Atlas) -> list[str]:
                 node.name_source or "unknown",
             ]
         )
-    lines.append("")
     lines.extend(
         _table(
             ["node", "package and executable", "profiles", "source read", "name source"],
@@ -342,11 +331,6 @@ def _busiest(atlas: Atlas) -> list[str]:
         for key, count in table_of.items():
             totals[key] = totals.get(key, 0) + count
     lines = _section("Busiest nodes and topics")
-    lines.append(
-        "Counted over the endpoints the source layer states, so a node whose package is outside "
-        "the workspace sits at zero and is not quiet. A node row counts its own call sites and a "
-        "topic row counts the nodes on the other end."
-    )
     rows = [
         [
             query.label(node_id),
@@ -356,7 +340,6 @@ def _busiest(atlas: Atlas) -> list[str]:
         ]
         for node_id, _count in _rank(totals)
     ]
-    lines.append("")
     lines.extend(
         _table(
             ["node", "publishes", "subscribes", "services and actions"],
@@ -436,13 +419,6 @@ def _parameters(atlas: Atlas) -> list[str]:
             row[1] += 1 if candidate.wins else 0
             if candidate.shadow_kind:
                 shadows[candidate.shadow_kind] = shadows.get(candidate.shadow_kind, 0) + 1
-    lines.append("")
-    lines.append(
-        "Every value that was written anywhere is a candidate, and one candidate per profile "
-        "wins. The mechanisms below are how a value reaches a node, in the order a reader would "
-        "not expect: a python launcher and an inline launch dict both outrank the yaml file that "
-        "spells the same key."
-    )
     lines.append("")
     lines.extend(
         _table(
@@ -553,11 +529,6 @@ def _plugins(atlas: Atlas) -> list[str]:
     for edge in _edges_of_kind(atlas, "instantiates"):
         selected.setdefault(edge.dst, []).append(edge.src)
     lines = _section("Plugins")
-    lines.append(
-        "A plugin is in play when a profile selects it by lookup name. The instances column "
-        "carries the node and the block that selects it, which is what decides whether the "
-        "parameters under that block are live."
-    )
     rows = []
     for entity in plugins:
         parsed = ids.parse_plugin(entity.id)
@@ -574,7 +545,6 @@ def _plugins(atlas: Atlas) -> list[str]:
                 joined((_slug(item) for item in entity.profiles), "none"),
             ]
         )
-    lines.append("")
     lines.extend(
         _table(
             ["lookup name", "base class", "exported by", "selected by", "profiles"],
@@ -694,10 +664,6 @@ def _example(entry, atlas: Atlas) -> str:
 
 def _crossings(atlas: Atlas) -> list[str]:
     lines = _section("What no single layer states")
-    lines.append(
-        "Each statement below needs two sources at once. No launch file, no yaml file and no "
-        "source file carries any of them on its own, which is the reason this atlas exists."
-    )
     for block in (
         _crossing_overridden(atlas),
         _crossing_remapped(atlas),
@@ -707,7 +673,8 @@ def _crossings(atlas: Atlas) -> list[str]:
         _crossing_unnamed(atlas),
     ):
         if block:
-            lines.append("")
+            if lines[-1]:
+                lines.append("")
             lines.extend(block)
     return lines
 
