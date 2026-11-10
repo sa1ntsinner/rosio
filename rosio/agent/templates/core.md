@@ -20,8 +20,8 @@ To fix a finding:
 
 1. Run `rosio explain <file>:<line>` on the line you mean to edit. It says whether each
    value there wins or which line outbids it.
-2. `edit <file>:<line>: replace 'a' with 'b'` under a finding is an exact fix: replace that
-   word on that line only.
+2. `edit <file>:<line>: replace 'a' with 'b'` under a finding is an exact fix, and
+   `rosio drift --fix` writes every one of them.
 3. Run `rosio extract` again. It lists the findings that went and the ones that arrived.
    The fix is done when its finding is gone and nothing new arrived.
 
