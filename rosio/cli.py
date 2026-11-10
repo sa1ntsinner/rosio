@@ -1368,7 +1368,9 @@ def _print_summary(report: dict, elapsed: float, atlas=None) -> None:
     if report["unresolved"]:
         print(f"  unresolved {report['unresolved']}: {_counts(report['unresolved_by_want'])}")
         print(f"    {PROG} unresolved lists each one with its line")
-    print(f"  resolution rate {report['resolution_rate']:.3f} over {report['resolved']} resolved")
+        # a rate of one is nothing to act on, and --json carries it either way
+        rate = f"{report['resolution_rate']:.3f} over {report['resolved']} resolved"
+        print(f"  resolution rate {rate}")
     findings = {name: count for name, count in report["findings"].items() if count}
     if findings:
         order = {"error": 0, "warn": 1, "info": 2}
@@ -1388,7 +1390,7 @@ def _print_summary(report: dict, elapsed: float, atlas=None) -> None:
         if len(shown) > 5:
             hidden = sum(count for _, count in shown[5:])
             print(f"    and {hidden} more, {PROG} extract --json lists every one under exceptions")
-    print(f"  wall time {elapsed:.1f}s, measured outside the atlas")
+    print(f"  took {elapsed:.1f}s")
 
 
 OPAQUE = r"OpaqueFunction\(fn[0-9a-f]+\)"

@@ -1381,7 +1381,7 @@ def test_cli_extract_writes_the_atlas_and_prints_the_counts(tmp_path: Path, caps
     assert main(["extract", str(WS), "--out", str(tmp_path / "out")]) == 0
     printed = capsys.readouterr().out
     assert "profiles" in printed
-    assert "wall time" in printed
+    assert "took" in printed
     assert (tmp_path / "out" / "atlas.json").is_file()
 
 
