@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from rosio.model import dumps_line
+
 SKIP = {".git", "rosio-out", "test", "tests", "build", "install"}
 SRC = {".cpp", ".hpp", ".h", ".cc", ".py"}
 MARK = "rosio: this session opened"
@@ -20,15 +22,19 @@ EDITS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 def sources(root: Path) -> list[Path]:
     return sorted(
-        path for path in root.rglob("*")
-        if path.is_file() and path.suffix in SRC and path.name != "setup.py"
+        path
+        for path in root.rglob("*")
+        if path.is_file()
+        and path.suffix in SRC
+        and path.name != "setup.py"
         and not SKIP.intersection(path.relative_to(root).parts)
     )
 
 
 def packages(root: Path) -> list[Path]:
     return sorted(
-        xml.parent for xml in root.rglob("package.xml")
+        xml.parent
+        for xml in root.rglob("package.xml")
         if not SKIP.intersection(xml.relative_to(root).parts) and sources(xml.parent)
     )
 
@@ -64,9 +70,13 @@ def edited(transcript: str, root: Path) -> list[str]:
             continue
         for rel in out.splitlines():
             parts = Path(rel).parts
-            if (parts and parts[0] not in (".claude", "rosio-out") and Path(rel).suffix != ".md"
-                    and Path(rel).name not in ("CLAUDE.md", ".mcp.json", "rosio.yaml")
-                    and Path(rel).name in seen):
+            if (
+                parts
+                and parts[0] not in (".claude", "rosio-out")
+                and Path(rel).suffix != ".md"
+                and Path(rel).name not in ("CLAUDE.md", ".mcp.json", "rosio.yaml")
+                and Path(rel).name in seen
+            ):
                 paths.add(Path(rel).as_posix())
     return sorted(paths)
 
@@ -83,7 +93,7 @@ def touched(transcript: str) -> str:
                 continue
             for content in message.get("message", {}).get("content", []):
                 if content.get("type") == "tool_use":
-                    text.append(json.dumps(content.get("input", {})))
+                    text.append(dumps_line(content.get("input", {})))
     return "\n".join(text)
 
 
@@ -99,7 +109,7 @@ def _run() -> None:
     changed = edited(data["transcript_path"], root)
     if changed:
         if REVIEW not in text:
-            print(json.dumps({"decision": "block", "reason": (
+            reason = (
                 f"{REVIEW} {', '.join(changed[:10])}. Before you finish, read "
                 ".claude/skills/rosio/coding.md and check the diff against it: every path that "
                 "hits this same defect is fixed, and another defect you found is named in the "
@@ -112,7 +122,8 @@ def _run() -> None:
                 "when a toolchain is here. Fix what falls short, then finish. In the report "
                 "write only what a command printed in this session, and not run for every step "
                 "you did not run: a false claim is worse than not run. Do not recite this list."
-            )}))
+            )
+            print(dumps_line({"decision": "block", "reason": reason}))
         return
     seen = touched(data["transcript_path"])
     rows, unread, total, read = [], [], 0, 0
@@ -132,15 +143,16 @@ def _run() -> None:
         mine = [path for path in unread if path.parent == package]
         big += sorted(mine, key=lambda path: (-path.stat().st_size, path.as_posix()))[:3]
     big = sorted(big, key=lambda path: (-path.stat().st_size, path.as_posix()))[:30]
-    print(json.dumps({"decision": "block", "reason": (
+    names = ", ".join(path.relative_to(root).as_posix() for path in big)
+    reason = (
         f"{MARK} {read} of the {total} source files in this repository "
         f"(reminder {nudges + 1} of {NUDGES}). Per package, files opened of files held: "
-        f"{'; '.join(rows[:40])}. Large files not opened: "
-        f"{', '.join(path.relative_to(root).as_posix() for path in big)}. If this is a bug hunt "
+        f"{'; '.join(rows[:40])}. Large files not opened: {names}. If this is a bug hunt "
         "or a review, it is not finished: read these files end to end the way "
         ".claude/skills/rosio/review.md asks, handing groups of packages to subagents when you "
         "can start them, and add each bug you confirm to the report. Otherwise finish now."
-    )}))
+    )
+    print(dumps_line({"decision": "block", "reason": reason}))
 
 
 def main() -> int:

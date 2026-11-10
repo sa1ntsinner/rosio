@@ -1197,7 +1197,11 @@ def test_install_writes_the_files_and_uninstall_takes_them_back(tmp_path: Path, 
     assert main(["install", "codex", "--root", str(root)]) == EXIT_OK
     assert "created" in capsys.readouterr().out
     written = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
-    assert written == [".agents/skills/rosio/coding.md", ".agents/skills/rosio/review.md", "AGENTS.md"]
+    assert written == [
+        ".agents/skills/rosio/coding.md",
+        ".agents/skills/rosio/review.md",
+        "AGENTS.md",
+    ]
 
     assert main(["uninstall", "codex", "--root", str(root)]) == EXIT_OK
     assert "removed" in capsys.readouterr().out
@@ -1499,7 +1503,9 @@ def test_a_stored_install_line_is_shown_as_this_machine_runs_it():
 def test_fix_replaces_only_a_line_that_holds_the_word_once():
     from rosio.cli import replace_once
 
-    assert replace_once("  stop_distnce: 0.35", "stop_distnce", "stop_distance") == "  stop_distance: 0.35"
+    assert (
+        replace_once("  stop_distnce: 0.35", "stop_distnce", "stop_distance")
+        == "  stop_distance: 0.35"
+    )
     assert replace_once("  stop_distnce_max: 1", "stop_distnce", "stop_distance") is None
     assert replace_once("a: x, b: x", "x", "y") is None
-

@@ -156,6 +156,7 @@ install fails on a machine that never wanted the server.
 | `rosio/agent/__init__.py` | the agent package surface, which resolves `serve` lazily so an install never pulls in `mcp` |
 | `rosio/agent/platforms.py` | the table of assistants, one row per file, with the verified flag |
 | `rosio/agent/install.py` | the install and uninstall writers, idempotent, with no silent overwrite |
+| `rosio/agent/coverage.py` | the Claude Code Stop hook: a diff review against coding.md, or a nudge toward unopened source files |
 | `rosio/serve/__init__.py` | the serve package surface |
 | `rosio/serve/tools.py` | the thirteen tools as plain functions, eleven over a loaded atlas, `migrate` over the sources and `check`, which extracts the served workspace again, no mcp involved, every answer capped and every refusal capped with it |
 | `rosio/serve/server.py` | the mcp server, both transports, the key check, and the one place each optional range is written |

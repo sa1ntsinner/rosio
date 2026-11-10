@@ -55,8 +55,9 @@ def test_a_session_that_changed_code_reviews_its_diff_once(tmp_path, monkeypatch
     (tmp_path / "node.py").write_text("source", encoding="utf-8")
     transcript = tmp_path / "session.jsonl"
     edit = {"type": "tool_use", "name": "Edit", "input": {"file_path": str(tmp_path / "node.py")}}
-    transcript.write_text(json.dumps({"type": "assistant", "message": {"content": [edit]}}) + "\n",
-                          encoding="utf-8")
+    transcript.write_text(
+        json.dumps({"type": "assistant", "message": {"content": [edit]}}) + "\n", encoding="utf-8"
+    )
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     data = json.dumps({"cwd": str(tmp_path), "transcript_path": str(transcript)})
     monkeypatch.setattr(sys, "stdin", io.StringIO(data))
@@ -78,14 +79,15 @@ def test_a_file_changed_through_the_shell_counts_as_changed(tmp_path, monkeypatc
     (tmp_path / "package.xml").write_text("<package/>", encoding="utf-8")
     (tmp_path / "node.py").write_text("a = 1\n", encoding="utf-8")
     git = ["git", "-C", str(tmp_path), "-c", "user.email=t@t", "-c", "user.name=t"]
-    subprocess.run(git + ["init", "-q"], check=True)
-    subprocess.run(git + ["add", "-A"], check=True)
-    subprocess.run(git + ["commit", "-qm", "base"], check=True)
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "base"], check=True)
     (tmp_path / "node.py").write_text("a = 2\n", encoding="utf-8")
     transcript = tmp_path / "session.jsonl"
     bash = {"type": "tool_use", "name": "Bash", "input": {"command": "sed -i s/1/2/ node.py"}}
-    transcript.write_text(json.dumps({"type": "assistant", "message": {"content": [bash]}}) + "\n",
-                          encoding="utf-8")
+    transcript.write_text(
+        json.dumps({"type": "assistant", "message": {"content": [bash]}}) + "\n", encoding="utf-8"
+    )
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     data = json.dumps({"cwd": str(tmp_path), "transcript_path": str(transcript)})
     monkeypatch.setattr(sys, "stdin", io.StringIO(data))
@@ -104,12 +106,17 @@ def test_coverage_hook_nudges_once_for_unopened_sources(tmp_path, monkeypatch, c
     (skipped / "generated.py").write_text("ignored", encoding="utf-8")
     transcript = tmp_path / "session.jsonl"
     transcript.write_text(
-        json.dumps({
-            "type": "assistant",
-            "message": {"content": [
-                {"type": "tool_use", "input": {"file_path": str(tmp_path / "node.py")}},
-            ]},
-        }) + "\n",
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "input": {"file_path": str(tmp_path / "node.py")}},
+                    ]
+                },
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
@@ -130,7 +137,9 @@ def test_coverage_hook_nudges_once_for_unopened_sources(tmp_path, monkeypatch, c
     assert cli.main(["hook", "coverage"]) == 0
     assert "reminder 2 of 3" in capsys.readouterr().out
     with transcript.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps({"feedback": result["reason"].replace("reminder 1", "reminder 3")}) + "\n")
+        stream.write(
+            json.dumps({"feedback": result["reason"].replace("reminder 1", "reminder 3")}) + "\n"
+        )
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(data)))
     assert cli.main(["hook", "coverage"]) == 0
     assert capsys.readouterr().out == ""

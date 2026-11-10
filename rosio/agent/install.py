@@ -486,7 +486,8 @@ def _coverage_hook(target: plat.Target, path: Path, report: Report, *, remove: b
             wanted.append(entry)
             continue
         kept = [
-            hook for hook in hooks
+            hook
+            for hook in hooks
             if not (isinstance(hook, dict) and hook.get("command") == COVERAGE_COMMAND)
         ]
         if len(kept) == len(hooks):

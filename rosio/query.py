@@ -1313,9 +1313,7 @@ def query(atlas: Atlas, question: str, *, limit: int = DEFAULT_LIMIT) -> Answer:
             "was searched and the relations below carry the answer"
         )
     for row in data["matched"]:
-        lines.append(
-            f"  {row['kind']} {row['label']}   from {said(row['layers'])}"
-        )
+        lines.append(f"  {row['kind']} {row['label']}   from {said(row['layers'])}")
     _more(lines, hidden, "entities")
     if edge_rows:
         lines.append("  relations")
