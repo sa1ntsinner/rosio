@@ -1733,7 +1733,9 @@ of one line whose body calls a declare wrapper with one of its own arguments as 
 (`#define LOAD(member, name) loadParameter(node, name, config.member)`) is a wrapper of its
 file, so each use declares the name it passes. Such a node had every key of its parameters
 file reported by `param.set_undeclared`; those findings are gone and the parameters are
-`effective`.
+`effective`. `param.orphan_block` is `info` in a profile that starts an unnamed process whose
+code was not read, because such a node takes the name its source gives it and the block may
+be its own; its sentence about unnamed processes changed, which moved those fingerprints.
 
 A reader pinned to `1.0` still loads a `1.34` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re

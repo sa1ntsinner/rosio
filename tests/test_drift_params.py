@@ -1267,6 +1267,7 @@ def _block_atlas(
     state: str,
     keys: int = 2,
     unnamed: bool = False,
+    name_source: str = model.NameSource.UNKNOWN.value,
     block_line: int | None = 38,
 ):
     """One block of `keys` keys that no node owns.
@@ -1279,7 +1280,7 @@ def _block_atlas(
     if unnamed:
         builder.node(
             ids.build_node_synthetic("demo_pkg", "helper.py", "/", "a1b2c3d4"),
-            name_source=model.NameSource.UNKNOWN.value,
+            name_source=name_source,
         )
         builder.fact(
             ids.build_node_synthetic("demo_pkg", "helper.py", "/", "a1b2c3d4"),
@@ -1389,8 +1390,20 @@ def test_param_orphan_block_drops_to_info_when_a_process_could_not_be_named():
     found = _run(atlas, "param.orphan_block")
     assert len(found) == 1
     assert found[0].severity == model.Severity.INFO.value
-    assert "carry no name" in found[0].say
+    assert "carries no name" in found[0].say
     assert ids.SYNTHETIC not in found[0].say
+
+
+def test_param_orphan_block_is_info_beside_an_unnamed_process_whose_code_was_not_read():
+    """`rplidar_composition` runs a node its source calls `rplidar_node`, so the block of that
+    name in the file the process is handed is not proven dead."""
+    atlas = _block_atlas(
+        "velocity_smoother",
+        state=model.ParamState.OWNER_NAME_MISMATCH.value,
+        unnamed=True,
+        name_source=model.NameSource.EXECUTABLE_DEFAULT.value,
+    )
+    assert _run(atlas, "param.orphan_block")[0].severity == model.Severity.INFO.value
 
 
 def test_param_orphan_block_cites_the_block_key_and_not_the_first_key_in_it():

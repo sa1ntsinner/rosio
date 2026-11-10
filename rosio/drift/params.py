@@ -1105,6 +1105,21 @@ def _unnamed(atlas: model.Atlas, profile: str) -> int:
     )
 
 
+def _unread_unnamed(atlas: model.Atlas, profile: str) -> int:
+    """Processes launch leaves unnamed whose code nobody read: the node takes the name its
+    source gives it (`rplidar_composition` runs `rplidar_node`), so a block keyed on a name
+    no launched node has may be its own."""
+    return sum(
+        1
+        for entity in atlas.entities.values()
+        if entity.kind == model.NodeKind.NODE.value
+        and profile in entity.profiles
+        and ids.is_synthetic(entity.id)
+        and entity.name_source == "executable_default"
+        and CODED not in entity.layers
+    )
+
+
 def _near_names(atlas: model.Atlas, profile: str, selector: str) -> list[str]:
     """Launched nodes whose name is the block key plus or minus a suffix, or, for a key that
     names no namespace, the node of that name in a namespace: rcl reads `planner:` as
@@ -1477,17 +1492,24 @@ def orphan_block(atlas: model.Atlas) -> list[model.Finding]:
             # Another profile reads the block from the same file, which is how nav2 shares one
             # parameters file between its launch files: the block is live configuration.
             continue
-        unproven = [block for block in blocks if not block.proven]
+        unproven = [
+            block for block in blocks if not block.proven or _unread_unnamed(atlas, block.profile)
+        ]
         variant = "unproven" if len(unproven) == len(blocks) else ""
         severity = rules.severity_of("param.orphan_block", variant)
         caveat = ""
         if unproven:
-            blind = sum(_unnamed(atlas, block.profile) for block in unproven)
+            blind = sum(
+                _unread_unnamed(atlas, block.profile) or _unnamed(atlas, block.profile)
+                for block in unproven
+            )
             where = _and([rules.slug_of(block.profile) for block in unproven])
             caveat = (
-                f" {blind} processes of {'profiles' if len(unproven) > 1 else 'profile'} "
-                f"{where} carry no name rosio could form, so the block is dead there unless "
-                "one of them answers to it."
+                f" {blind} {'process' if blind == 1 else 'processes'} of "
+                f"{'profiles' if len(unproven) > 1 else 'profile'} {where} "
+                f"{'carries' if blind == 1 else 'carry'} no name rosio could form, so the "
+                f"block is dead there unless {'it' if blind == 1 else 'one of them'} answers "
+                "to it."
             )
         keys = _keys(len(set().union(*(block.keys for block in blocks))))
         out.append(
