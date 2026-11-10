@@ -20,7 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from rosio import here, ids
+from rosio import LAYER_WORDS, here, ids
 from rosio.drift import params as drift_params
 from rosio.errors import ContractError, UsageError
 from rosio.model import (
@@ -62,6 +62,11 @@ class Answer:
 
 # ---------------------------------------------------------------------------
 # names, sites and other shared shaping
+
+
+def said(layers: Sequence[str]) -> str:
+    """Layers as a person says them, by what each is read from. Data keeps the atlas names."""
+    return ", ".join(LAYER_WORDS.get(name, name) for name in layers) or "nothing"
 
 
 def label(entity_id: str) -> str:
@@ -455,7 +460,7 @@ def explain(atlas: Atlas, selector: str, *, limit: int = DEFAULT_LIMIT) -> Answe
     if how == "substring":
         lines.append(substring_note(text, label(entity_id)))
     lines.append(
-        f"  layers {', '.join(node.layers) or 'none'}"
+        f"  from {said(node.layers)}"
         f"   profiles {_profiles(node.profiles)}"
         f"   agreement {node.agreement}"
     )
@@ -465,7 +470,7 @@ def explain(atlas: Atlas, selector: str, *, limit: int = DEFAULT_LIMIT) -> Answe
         lines.append(f"  layers disagree about: {', '.join(node.conflicts)}")
     for row in data["facts"]:
         lines.append(
-            f"  {row['layer']} in {profile_name(row['profile'])} ({row['confidence']}): "
+            f"  {said([row['layer']])} in {profile_name(row['profile'])} ({row['confidence']}): "
             f"{row['values']}"
         )
         for where in row["where"]:
@@ -633,7 +638,7 @@ def _explain_line(atlas: Atlas, path: str, line: int, limit: int) -> Answer:
         lines.append("  what the layers state from it")
         kept, hidden = _cap(sorted(stated.items()), limit)
         for name, layers in kept:
-            lines.append(f"    {name} ({', '.join(sorted(layers))})")
+            lines.append(f"    {name} ({said(sorted(layers))})")
         _more(lines, hidden, "statements")
     for entry in blind[:limit]:
         lines.append(f"  unresolved {entry.want}: {entry.expr} ({entry.reason})")
@@ -1309,7 +1314,7 @@ def query(atlas: Atlas, question: str, *, limit: int = DEFAULT_LIMIT) -> Answer:
         )
     for row in data["matched"]:
         lines.append(
-            f"  {row['kind']} {row['label']}   layers {', '.join(row['layers']) or 'none'}"
+            f"  {row['kind']} {row['label']}   from {said(row['layers'])}"
         )
     _more(lines, hidden, "entities")
     if edge_rows:
@@ -2426,6 +2431,9 @@ def drift(
         lines.append(f"         explain {row['fingerprint']}")
     lines.append("")
     _more(lines, hidden, "findings, --limit shows more")
+    exact = sum(1 for item in rows if item.extra.get("edits"))
+    if exact:
+        lines.append(f"  rosio drift --fix applies {plural(exact, 'exact fix', 'exact fixes')}")
     lines.append("  explain takes a fingerprint above, a finding id or a rule id")
     return Answer(verb="drift", data=data, lines=lines)
 
