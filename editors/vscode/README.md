@@ -16,6 +16,10 @@ sits in the Problems view and on the line itself, with the sentence that says wh
 Above every `create_publisher` and `create_subscription` is the node on the other end of the
 topic, and whether the QoS lets them connect.
 
+A finding whose fix is an exact replacement, such as a misspelled parameter key or frame name,
+carries Apply fix. `Ctrl+Alt+.` applies every one of them, saves the files and extracts again.
+Right click a finding to copy it as text for a ticket or an assistant.
+
 ## Where every parameter value comes from
 
 The Parameters view lists what each profile sets, node by node, with the value the node ends up
