@@ -6,6 +6,10 @@ ATLAS_SCHEMA_VERSION = "1"
 
 LAYERS = ("declared", "coded", "observed", "recorded")
 
+LAYER_WORDS = {"declared": "config", "coded": "code", "observed": "live", "recorded": "bag"}
+"""What a person calls each layer, by what it is read from. The atlas, the ids and the
+contract keep the names in LAYERS; these are for a screen."""
+
 
 def extra_line(extra: str) -> str:
     """How to add an optional extra, the same on every machine, because the sentence can

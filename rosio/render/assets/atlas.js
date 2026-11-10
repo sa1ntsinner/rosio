@@ -55,6 +55,9 @@ function start(indexText, detailText) {
     unresolved_owner: "its node could not be followed",
     other: "no value wins"
   };
+  // what a person calls each layer: the thing it is read from
+  var LAYER = { declared: "config", coded: "code", observed: "live", recorded: "bag" };
+  function lname(layer) { return LAYER[layer] || layer; }
   // how a value got where it is, in words
   var MECHANISM = {
     launch_rewritten_yaml: "yaml rewritten by the launch file",
@@ -478,7 +481,7 @@ function start(indexText, detailText) {
     var out = [];
     var mask = E.layers[index];
     for (var l = 0; l < IX.layer_names.length; l++) {
-      if (bit(mask, l)) out.push('<span class="tag layer">' + IX.layer_names[l] + "</span>");
+      if (bit(mask, l)) out.push('<span class="tag layer">' + lname(IX.layer_names[l]) + "</span>");
     }
     var agreement = IX.agreements[E.agreement[index]];
     if (agreement === "agree") out.push('<span class="tag agree">layers agree</span>');
@@ -539,7 +542,7 @@ function start(indexText, detailText) {
           var entry = effective[profile][key];
           out.push('<div class="value">' + esc(key) + " = " +
             esc(shownValue(entry.value, entry.value_type)) + "</div>");
-          out.push('<div class="meta">' + entry.layer + (entry.value_type ? ", " + entry.value_type : "") +
+          out.push('<div class="meta">' + lname(entry.layer) + (entry.value_type ? ", " + entry.value_type : "") +
             (entry.source ? " &middot; " + source(entry.source) : "") + "</div>");
         });
         out.push("</div>");
@@ -552,7 +555,7 @@ function start(indexText, detailText) {
     if (list.length) {
       out.push("<h3>facts</h3>");
       list.forEach(function (fact) {
-        out.push('<div class="card"><div class="meta">' + esc(fact.layer) + " &middot; " +
+        out.push('<div class="card"><div class="meta">' + esc(lname(fact.layer)) + " &middot; " +
           esc(profileName(fact.profile)) + " &middot; " + esc(fact.confidence) + "</div>");
         out.push(kvTable(fact.values));
         (fact.evidence || []).forEach(function (row) {
@@ -780,7 +783,7 @@ function start(indexText, detailText) {
     }).join("");
     el("f-layers").innerHTML = IX.layer_names.map(function (layer) {
       return '<label class="check"><input type="checkbox" checked data-layer="' + layer + '">' +
-        "<span>" + esc(layer) + "</span></label>";
+        "<span>" + esc(lname(layer)) + "</span></label>";
     }).join("");
     el("f-profiles").innerHTML = ['<label class="check"><input type="radio" name="prof" value="*" checked><span>every profile</span></label>']
       .concat(IX.profiles.map(function (profile) {
@@ -888,7 +891,7 @@ function start(indexText, detailText) {
 
   // ---------------------------------------------------------------- start
   el("counts").textContent = IX.profiles.map(function (profile) { return shortName(profile.id); })
-    .concat(IX.layer_names.length ? [IX.layer_names.join(", ")] : []).join(" \u00b7 ");
+    .concat(IX.layer_names.length ? [IX.layer_names.map(lname).join(", ")] : []).join(" \u00b7 ");
   el("findcount").textContent = IX.findings.length || "";
   buildFilters();
   recompute();

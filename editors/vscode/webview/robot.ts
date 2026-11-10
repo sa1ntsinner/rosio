@@ -1,6 +1,6 @@
 // The robot model. Links sit where the joint origins put them, exactly as the model states them.
 // Text from the workspace is set with textContent only, never parsed as markup.
-import type { GraphSite, MeshData, RobotModel, UrdfShape } from "../src/protocol";
+import { layerName, type GraphSite, type MeshData, type RobotModel, type UrdfShape } from "../src/protocol";
 import type { ToRobot, ToRobotHost } from "../src/robotMessages";
 import { apply, degrees, meshCorners, outline, place, project, quaternion, relative, rotate, rpyOf, VIEWS, type Pose, type Vec, type View } from "./robotModel";
 
@@ -423,7 +423,7 @@ function inspector(robot: RobotModel, poses: Map<string, Pose>): HTMLElement {
     render();
   });
   panel.append(close, h("h2", {}, link.label));
-  panel.append(h("p", { class: "muted" }, ["link", ...link.layers].join(" · ")));
+  panel.append(h("p", { class: "muted" }, ["link", ...link.layers.map(layerName)].join(" · ")));
   if (link.misnamed) {
     const names = link.misnamed.join(" and ");
     panel.append(h("div", { class: "finding warn" }, h("p", {}, `Code looks this link up as ${names}, which no robot model declares. The quick fix on that line renames it to ${link.label}.`)));

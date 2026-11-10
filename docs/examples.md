@@ -114,7 +114,7 @@ configuration rather than drift.
 first, every entry point is marked unloadable with the fix named, and every rule that would
 otherwise draw a conclusion from a tree it never read is suppressed.
 
-**Rules that cannot speak stay quiet.** A rule that needs the running system waits for the observed layer, because
+**Rules that cannot speak stay quiet.** A rule that needs the running system waits for the live layer, because
 with only part of the sources read a missing subscriber usually means a file was not parsed.
 
 **Every fact cites a file and a line**, inline, so a slice of the atlas is self sufficient and a

@@ -3,6 +3,7 @@
 import * as vscode from "vscode";
 import {
   SEVERITY_ORDER,
+  layerWords,
   type Finding,
   type FrameRow,
   type LaunchEntity,
@@ -76,11 +77,11 @@ export class FindingsView implements vscode.TreeDataProvider<FindingNode> {
       if (node.uri) item.tooltip = vscode.workspace.asRelativePath(vscode.Uri.parse(node.uri));
       return item;
     }
-    const item = new vscode.TreeItem(node.title, vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(layerWords(node.title), vscode.TreeItemCollapsibleState.None);
     const first = node.locations[0];
     item.description = first ? `line ${first.line + 1}` : "";
     item.iconPath = SEVERITY_ICON[node.severity];
-    item.tooltip = new vscode.MarkdownString(`${node.say}\n\n**Fix:** ${node.fix}\n\n\`${node.rule}\``);
+    item.tooltip = new vscode.MarkdownString(layerWords(`${node.say}\n\n**Fix:** ${node.fix}\n\n\`${node.rule}\``));
     item.contextValue = node.fixable ? "finding.fixable" : "finding";
     if (first) item.command = openAt(first);
     return item;

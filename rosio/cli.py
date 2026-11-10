@@ -22,7 +22,7 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 
-from rosio import __version__
+from rosio import LAYER_WORDS, LAYERS, __version__
 from rosio.errors import EXIT_OK, EXIT_USAGE, RosioError, UsageError, exit_code_for
 from rosio.render import plural
 
@@ -189,8 +189,10 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument(
         "--layer",
         action="append",
-        choices=["declared", "coded"],
-        help="restrict extraction to one layer, repeatable",
+        choices=["config", "code", "declared", "coded"],
+        metavar="{config,code}",
+        help="restrict extraction to one layer, repeatable; declared and coded, the names "
+        "the atlas stores, are taken too",
     )
     extract.add_argument(
         "--launch-sandbox",
@@ -1098,7 +1100,8 @@ def cmd_extract(args: argparse.Namespace) -> int:
     bags = _bag_paths(args)
     if bags and args.no_runtime:
         raise UsageError("--no-runtime and --bag ask for opposite things, pass one of them")
-    layers = sorted(set(args.layer or ["coded", "declared"]))
+    stored = {word: name for name, word in LAYER_WORDS.items()}
+    layers = sorted({stored.get(name, name) for name in args.layer or ["coded", "declared"]})
 
     workspace = Path(args.workspace).expanduser()
     if not workspace.is_dir():
@@ -1359,7 +1362,8 @@ def _print_summary(report: dict, elapsed: float, atlas=None) -> None:
     if len(profiles) > PROFILES_SHOWN:
         shown += f" and {len(profiles) - PROFILES_SHOWN} more, rosio extract --json lists all"
     print(f"  profiles {len(profiles)}: {shown}")
-    print(f"  layers: {', '.join(report['layers']) or 'none'}")
+    shown = [LAYER_WORDS.get(name, name) for name in LAYERS if name in report["layers"]]
+    print(f"  read from: {', '.join(shown) or 'nothing'}")
     # entity and edge counts by kind stay in --json: nobody acts on them at a prompt
     if report["unresolved"]:
         print(f"  unresolved {report['unresolved']}: {_counts(report['unresolved_by_want'])}")

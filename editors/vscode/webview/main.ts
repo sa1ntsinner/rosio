@@ -1,6 +1,6 @@
 // The atlas panel. It renders what the extension posts and posts back what the user chose.
 // Text from the workspace is set with textContent only, never parsed as markup.
-import { LAYERS, SEVERITY_ORDER } from "../src/protocol";
+import { LAYERS, SEVERITY_ORDER, layerName, layerWords } from "../src/protocol";
 import type { Candidate, Entity, Fact, Finding, Layer, Location, Relation, Severity, Summary } from "../src/protocol";
 import type { ToHost, ToPanel } from "../src/panelMessages";
 import { kindOf, labelOf, segments } from "../src/ids";
@@ -94,7 +94,7 @@ function layersStrip(present: Layer[], entity?: Entity): HTMLElement {
       return h(
         "div",
         { class: `layer ${has ? "present" : "absent"}`, "data-layer": layer, role: "listitem", title: has ? LAYER_WHAT[layer].present : "" },
-        h("span", { class: "name" }, layer),
+        h("span", { class: "name" }, layerName(layer)),
         !has && h("span", { class: "note" }, note),
       );
     }),
@@ -110,14 +110,14 @@ function findingRow(finding: Finding): HTMLElement {
     h(
       "div",
       { class: "what" },
-      h("span", {}, finding.title),
+      h("span", {}, layerWords(finding.title)),
       h("span", { class: "rule" }, finding.rule),
       h(
         "p",
         { class: "say" },
-        finding.say,
+        layerWords(finding.say),
         " ",
-        h("span", {}, `Fix: ${finding.fix}`),
+        h("span", {}, `Fix: ${layerWords(finding.fix)}`),
       ),
     ),
     h(
@@ -412,8 +412,8 @@ function lead(entity: Entity): string {
     if (described) return described;
   }
   if (entity.conflicts.length) return `The layers disagree on ${entity.conflicts.join(", ")}.`;
-  if (entity.layers.length > 1) return `${entity.layers.join(", ")} agree on it.`;
-  if (entity.layers.length === 1) return `Only the ${entity.layers[0]} layer states it.`;
+  if (entity.layers.length > 1) return `${entity.layers.map(layerName).join(", ")} agree on it.`;
+  if (entity.layers.length === 1) return `Only ${layerName(entity.layers[0])} states it.`;
   const relation = (entity.relations ?? []).find((r) => r.layers.length);
   if (relation) return `No layer states a fact about it. It is known by name, ${relationPhrase(relation)}.`;
   return "No layer states a fact about it, it is known by name only.";
@@ -513,7 +513,7 @@ function profileLedger(entity: Entity, profile: string, showProfile: boolean): H
   }));
   // Disagreements first and open; a ledger where the layers agree is reference, closed.
   fields.sort((a, b) => Number(conflicts.has(b)) - Number(conflicts.has(a)));
-  const title = showProfile ? `Layer by layer in ${profile.replace(/^profile:/, "")}` : layers.length > 1 ? "Layer by layer" : `What the ${layers[0]} layer says`;
+  const title = showProfile ? `Layer by layer in ${profile.replace(/^profile:/, "")}` : layers.length > 1 ? "Layer by layer" : `What ${layerName(layers[0])} says`;
   const props: Record<string, string> = conflicts.size ? { open: "" } : {};
   return h(
     "details",
@@ -522,7 +522,7 @@ function profileLedger(entity: Entity, profile: string, showProfile: boolean): H
     h(
       "table",
       {},
-      h("thead", {}, h("tr", {}, h("th", {}, ""), ...layers.map((layer) => h("th", { class: "layer-head", "data-layer": layer }, layer)))),
+      h("thead", {}, h("tr", {}, h("th", {}, ""), ...layers.map((layer) => h("th", { class: "layer-head", "data-layer": layer }, layerName(layer))))),
       h(
         "tbody",
         {},
@@ -636,7 +636,7 @@ function qosText(relation: Relation): string {
     const stated = ["reliability", "durability", "history", "depth"]
       .map((key) => (qos[key] === null || qos[key] === undefined ? "" : key === "depth" ? `depth ${qos[key]}` : String(qos[key])))
       .filter(Boolean);
-    if (stated.length) parts.add(`${stated.join(", ")} (${fact.layer})`);
+    if (stated.length) parts.add(`${stated.join(", ")} (${layerName(fact.layer)})`);
   }
   return [...parts].join("; ");
 }
@@ -714,12 +714,12 @@ function measured(entity: Entity): HTMLElement | null {
     h(
       "table",
       {},
-      h("thead", {}, h("tr", {}, h("th", {}, "layer"), h("th", {}, "what"), h("th", { class: "num" }, "value"))),
+      h("thead", {}, h("tr", {}, h("th", {}, "from"), h("th", {}, "what"), h("th", { class: "num" }, "value"))),
       h(
         "tbody",
         {},
         ...rows.slice(0, 40).map(([layer, field, value]) =>
-          h("tr", {}, h("td", {}, layer), h("td", {}, words(field)), h("td", { class: "num value" }, render(value))),
+          h("tr", {}, h("td", {}, layerName(layer)), h("td", {}, words(field)), h("td", { class: "num value" }, render(value))),
         ),
       ),
     ),

@@ -66,7 +66,7 @@ Developed and tested on ROS 2 jazzy with Fast DDS and `rmw_zenoh_cpp`; CI runs j
 
 ```
 rosio init [--force] [--print] [--package NAME] [--config FILE] [PATH]  # write rosio.yaml: roots, setup files, profiles to edit
-rosio extract [--layer {declared,coded}] [--launch-sandbox {auto,required,off}] [--install-tree DIR] [--profile NAME] [--config FILE] [--collector NAME] [--bag PATH] [--no-runtime] [--fail-on-violation] [PATH]
+rosio extract [--layer {config,code}] [--launch-sandbox {auto,required,off}] [--install-tree DIR] [--profile NAME] [--config FILE] [--collector NAME] [--bag PATH] [--no-runtime] [--fail-on-violation] [PATH]
 rosio stamps [--topics TOPIC] [--limit N] [--json-verdict] [--stats] [BAG]
 rosio probe [--stamps] [--duration SECONDS] [--settle SECONDS] [--domain-id N] [--localhost-only] [--rmw NAME] [--ros-setup FILE] [--profile NAME] [--config FILE] [--atlas FILE] [PATH]
 rosio drift [--fail-on {error,warn,info,never}] [--min-severity {error,warn,info}] [--only RULE] [--waivers FILE] [--config FILE] [--fix] [--atlas FILE] [--limit N]
@@ -116,7 +116,7 @@ atlas in history (to review it in a pull request or to run `rosio diff` against 
 one) builds it with `rosio extract` or `rosio hook run`, commits it with the sources it
 describes, and lets CI check it is current. A hook leaves a tracked atlas as committed, because
 rewriting it after a commit leaves the work tree dirty and stops the next `git checkout`. A
-rebuild is an extraction, so it holds no observed or recorded layer: a hook that replaces an
+rebuild is an extraction, so it holds no live or bag layer: a hook that replaces an
 atlas `rosio probe` extended says so on stderr, and `rosio probe` restates it.
 
 Configuration lives in `rosio.yaml`: the roots to read, and one profile per system you actually
@@ -216,7 +216,7 @@ launch file that needs an argument you did not supply is the common one, and pro
 under `env` of the profile, and a package no root holds is installed or added as a root.
 
 **The C++ collector refuses.** `pip install "$HOME/rosio[cpp]"`, from the checkout above.
-Without it the coded layer covers Python only, rosio records that rather than pretending
+Without it the code layer covers Python only, rosio records that rather than pretending
 otherwise, and the atlas carries one `extract.pass_incomplete` at error, so
 `rosio drift --fail-on error` exits 5.
 

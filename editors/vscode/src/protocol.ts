@@ -5,6 +5,19 @@ export type Severity = "error" | "warn" | "info";
 export const LAYERS = ["declared", "coded", "observed", "recorded"] as const;
 export type Layer = (typeof LAYERS)[number];
 
+/** What a person calls each layer: the thing it is read from. The atlas keeps its own names. */
+export const LAYER_NAME: Record<Layer, string> = { declared: "config", coded: "code", observed: "live", recorded: "bag" };
+
+export function layerName(layer: string): string {
+  return LAYER_NAME[layer as Layer] ?? layer;
+}
+
+/** Prose the atlas wrote, with its layer names as a person says them. Only "the coded layer"
+ * is touched: "declared" alone is a verb in half the findings. */
+export function layerWords(text: string): string {
+  return text.replace(/\b(declared|coded|observed|recorded) layer\b/g, (_, name: Layer) => `${LAYER_NAME[name]} layer`);
+}
+
 export interface Summary {
   loaded: boolean;
   error?: string;

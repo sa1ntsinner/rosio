@@ -1,6 +1,6 @@
 // The system graph. It draws what the extension posts and posts back what the user chose.
 // Text from the workspace is set with textContent only, never parsed as markup.
-import type { GraphData, GraphSite } from "../src/protocol";
+import { layerWords, type GraphData, type GraphSite } from "../src/protocol";
 import type { ToGraph, ToGraphHost } from "../src/graphMessages";
 import { layout, type Placed } from "./graphLayout";
 import { flow, matches, qosText, shown, VERB, type Link } from "./graphModel";
@@ -342,7 +342,7 @@ function inspector(rows: Map<string, Row>, row: Row, links: Link[]): HTMLElement
   const kind = row.kind === "node" ? "node" : [row.kind, shortType(row.type)].filter(Boolean).join(" · ");
   panel.append(h("p", { class: "muted" }, kind));
   for (const finding of current?.findings[row.id] ?? []) {
-    const note = h("div", { class: `finding ${finding.severity}` }, h("p", {}, finding.say || finding.title));
+    const note = h("div", { class: `finding ${finding.severity}` }, h("p", {}, layerWords(finding.say || finding.title)));
     const where = finding.locations[0];
     if (where) note.append(siteLink({ uri: where.uri, line: where.line, approximate: false }));
     panel.append(note);

@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { MigrationView, openMigrationChange, applyMigration, verifyMigration } from "./migration";
 import { RELEASES, targetReleases } from "./migrationModel";
 import { labelOf } from "./ids";
-import type { Finding, Summary } from "./protocol";
+import { layerName, layerWords, type Finding, type Summary } from "./protocol";
 import { GraphPanel } from "./graph";
 import { RobotPanel } from "./robot";
 import { AtlasPanel } from "./panel";
@@ -81,7 +81,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
       const tooltip = new vscode.MarkdownString(
         [
           `**${error} errors, ${warn} warnings**`,
-          `Layers: ${summary.layers.join(", ") || "none"}`,
+          `Read from: ${summary.layers.map(layerName).join(", ") || "nothing yet"}`,
           `Atlas: ${await atlasAge(summary.atlasPath)}`,
           [fixable ? `[Apply ${fixable} ${fixable === 1 ? "fix" : "fixes"}](command:rosio.fixAll)` : "", "[Extract again](command:rosio.extract)", "[Find](command:rosio.find)"]
             .filter(Boolean)
@@ -196,7 +196,7 @@ async function fixAll(server: Server): Promise<void> {
 function findingText(finding: Finding): string {
   const at = finding.locations[0];
   const where = at ? `${vscode.workspace.asRelativePath(vscode.Uri.parse(at.uri))}:${at.line + 1}` : "";
-  return [`${finding.severity}: ${finding.title} (${finding.rule})`, finding.say, `Fix: ${finding.fix}`, where].filter(Boolean).join("\n");
+  return [`${finding.severity}: ${finding.title} (${finding.rule})`, finding.say, `Fix: ${finding.fix}`, where].filter(Boolean).map(layerWords).join("\n");
 }
 
 /** How old the atlas on disk is, the way a person says it. */
@@ -254,7 +254,7 @@ async function find(server: Server, panel: AtlasPanel): Promise<void> {
       id: hit.id,
       label: labelOf(hit.id),
       description: hit.kind,
-      detail: hit.layers.length ? hit.layers.join(" · ") : "known by name only",
+      detail: hit.layers.length ? hit.layers.map(layerName).join(" · ") : "known by name only",
     }));
     pick.busy = false;
   });
