@@ -2390,4 +2390,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    code = main()
+    sys.stderr.flush()
+    # launch_ros starts an rclpy thread for some actions (SetUseSimTime among them) and only a
+    # running launch service stops it, so a plain exit waited on that thread until the timeout
+    os._exit(code)

@@ -53,6 +53,10 @@ file loads a `1.34` file.
   held in a member.
 * Autoware node registration and handoff idioms.
 * A repository holding `package.xml` at its top is read as one package.
+* A launch file that makes launch_ros start its node (`SetUseSimTime` among others) is read.
+  Its walk used to finish and then wait out the timeout, so the profile came back empty.
+* `param.orphan_block` is a note in a profile that starts an unnamed process whose code was
+  not read, since the block may belong to that process.
 
 ### Assistants
 
