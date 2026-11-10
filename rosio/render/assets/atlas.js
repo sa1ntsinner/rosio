@@ -38,13 +38,13 @@ function start(indexText, detailText) {
   }
 
   var COLOUR = {
-    agree: "#b39780",
-    differ: "#ec5a55",
-    declared: "#4a92ea",
-    coded: "#7a4eb8",
-    observed: "#2b8044",
-    recorded: "#d8609f",
-    none: "#3a3a3a"
+    agree: "#b8b8b8",
+    differ: "#c9746b",
+    declared: "#7d9cc6",
+    coded: "#a88bbf",
+    observed: "#8fae7d",
+    recorded: "#7aaeab",
+    none: "#4a4a4a"
   };
   // a parameter state in the words of the person who set it; an effective one needs none
   var STATE = {
@@ -392,7 +392,7 @@ function start(indexText, detailText) {
     var w = canvas.clientWidth, h = canvas.clientHeight;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#111111";
+    ctx.fillStyle = "#0a0a0a";
     ctx.fillRect(0, 0, w, h);
     var s = view.scale, ox = view.x, oy = view.y;
 
@@ -416,7 +416,7 @@ function start(indexText, detailText) {
     }
     ctx.stroke();
     if (linked.length) {
-      ctx.strokeStyle = "rgba(121,189,3,0.65)";
+      ctx.strokeStyle = "rgba(230,230,230,0.6)";
       ctx.beginPath();
       for (var k = 0; k < linked.length; k++) {
         var ea = edges[linked[k]], eb = edges[linked[k] + 1];
@@ -453,7 +453,7 @@ function start(indexText, detailText) {
 
     for (var f = 0; f < N; f++) {
       if (!vis[f] || findingOf[f] === 0) continue;
-      ctx.strokeStyle = findingOf[f] === 3 ? "#ec5a55" : (findingOf[f] === 2 ? "#e8a33d" : "#6e6e6e");
+      ctx.strokeStyle = findingOf[f] === 3 ? "#c9746b" : (findingOf[f] === 2 ? "#b8b8b8" : "#5c5c5c");
       ctx.lineWidth = findingOf[f] === 3 ? 1.8 : 1.1;
       ctx.beginPath();
       ctx.arc(E.x[f] * s + ox, E.y[f] * s + oy, 6, 0, 6.2832);
@@ -461,7 +461,7 @@ function start(indexText, detailText) {
     }
 
     if (highlight.length) {
-      ctx.strokeStyle = "#ec5a55";
+      ctx.strokeStyle = "#c9746b";
       ctx.lineWidth = 2;
       for (var g = 0; g < highlight.length; g++) {
         var hgt = highlight[g];
@@ -481,7 +481,7 @@ function start(indexText, detailText) {
     // A cluster is named once it is wide enough on screen to read, so zooming out
     // leaves the shape and zooming in fills in the names.
     ctx.font = "11px system-ui, sans-serif";
-    ctx.fillStyle = "#d9d9d9";
+    ctx.fillStyle = "#b8b8b8";
     // hubs are named first, and a name that would sit on one already drawn is left out
     var placed = [];
     var order = [];
