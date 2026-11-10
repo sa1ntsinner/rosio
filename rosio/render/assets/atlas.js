@@ -205,6 +205,113 @@ function start(indexText, detailText) {
     return true;
   }
 
+  // What is on screen is laid out left to right the way data moves: a publisher, its topic,
+  // the subscribers. Past FLOW_LIMIT marks the ownership layout the file carries stays,
+  // because columns of thousands read as noise.
+  var FLOW_LIMIT = 400, COLUMN = 190, ROW = 26, NAME = 170;
+  var HOME_X = E.x.slice(), HOME_Y = E.y.slice();
+  // Data arrives at the source of these edges, so they are followed backwards.
+  var ARRIVES = { subscribes: 1, serves: 1, listens_tf: 1, tf_parent: 1 };
+  var flow = false, shape = "";
+
+  function relayout() {
+    var ids = [];
+    for (var i = 0; i < N; i++) if (vis[i]) ids.push(i);
+    var key = ids.join(",") + "|" + state.profile;
+    if (key === shape) return;
+    shape = key;
+    flow = ids.length > 0 && ids.length <= FLOW_LIMIT;
+    if (!flow) {
+      for (var h = 0; h < N; h++) { E.x[h] = HOME_X[h]; E.y[h] = HOME_Y[h]; }
+    } else {
+      place(ids);
+    }
+    if (state.view === "graph") fit(); else fitted = false;
+  }
+
+  function place(ids) {
+    var out = {}, back = {}, edges = IX.edges, slot = profileSlot();
+    ids.forEach(function (id) { out[id] = []; });
+    for (var e = 0; e < edges.length; e += 4) {
+      var a = edges[e], b = edges[e + 1];
+      if (a === b || !vis[a] || !vis[b]) continue;
+      if (slot >= 0 && edges[e + 3] !== 0 && !bit(edges[e + 3], slot)) continue;
+      if (ARRIVES[IX.edge_kinds[edges[e + 2]]]) { var swap = a; a = b; b = swap; }
+      if (out[a].indexOf(b) < 0) out[a].push(b);
+    }
+    // A flow back to a mark still on the depth first stack closes a cycle and is turned round.
+    var seen = {};
+    ids.forEach(function (root) {
+      if (seen[root]) return;
+      var stack = [[root, 0]];
+      seen[root] = 1;
+      while (stack.length) {
+        var top = stack[stack.length - 1], next = out[top[0]][top[1]++];
+        if (next === undefined) { seen[top[0]] = 2; stack.pop(); continue; }
+        if (seen[next] === 1) back[top[0] + ">" + next] = 1;
+        else if (!seen[next]) { seen[next] = 1; stack.push([next, 0]); }
+      }
+    });
+    var after = {}, before = {}, waiting = {}, rank = {};
+    ids.forEach(function (id) { after[id] = []; before[id] = []; waiting[id] = 0; rank[id] = 0; });
+    ids.forEach(function (a) {
+      out[a].forEach(function (b) {
+        var from = back[a + ">" + b] ? b : a, to = from === a ? b : a;
+        if (after[from].indexOf(to) >= 0) return;
+        after[from].push(to); before[to].push(from); waiting[to]++;
+      });
+    });
+    var ready = ids.filter(function (id) { return waiting[id] === 0; });
+    while (ready.length) {
+      var id = ready.shift();
+      after[id].forEach(function (to) {
+        rank[to] = Math.max(rank[to], rank[id] + 1);
+        if (--waiting[to] === 0) ready.push(to);
+      });
+    }
+    var layers = [], alone = [];
+    ids.forEach(function (id) {
+      if (!after[id].length && !before[id].length) alone.push(id);
+      else (layers[rank[id]] || (layers[rank[id]] = [])).push(id);
+    });
+    for (var r = 0; r < layers.length; r++) layers[r] = layers[r] || [];
+    var spot = {};
+    function remember() {
+      layers.forEach(function (layer) {
+        layer.forEach(function (id, at) { spot[id] = at / Math.max(1, layer.length - 1); });
+      });
+    }
+    function sweep(layer, near) {
+      var key = {}, was = {};
+      layer.forEach(function (id, at) {
+        var sum = 0;
+        near[id].forEach(function (other) { sum += spot[other]; });
+        key[id] = near[id].length ? sum / near[id].length : spot[id];
+        was[id] = at;
+      });
+      layer.sort(function (a, b) { return key[a] - key[b] || was[a] - was[b]; });
+    }
+    remember();
+    for (var pass = 0; pass < 4; pass++) {
+      for (var d = 1; d < layers.length; d++) { sweep(layers[d], before); remember(); }
+      for (var u = layers.length - 2; u >= 0; u--) { sweep(layers[u], after); remember(); }
+    }
+    // Marks nothing connects to fill columns of their own instead of one tall one.
+    var rows = 8;
+    layers.forEach(function (layer) { rows = Math.max(rows, layer.length); });
+    for (var c = 0; c < alone.length; c += rows) layers.push(alone.slice(c, c + rows));
+    // Rows open up until the drawing has the shape of the pane, so a long chain of short
+    // columns is not a thin strip of names on top of each other.
+    var tall = canvas.clientWidth ? canvas.clientHeight / canvas.clientWidth : 0.6;
+    var row = Math.max(ROW, Math.min(90, (layers.length * COLUMN + NAME) * tall / rows));
+    layers.forEach(function (layer, column) {
+      layer.forEach(function (id, at) {
+        E.x[id] = column * COLUMN;
+        E.y[id] = (at - (layer.length - 1) / 2) * row;
+      });
+    });
+  }
+
   function recompute() {
     var query = state.query.toLowerCase();
     var shown = 0;
@@ -216,6 +323,7 @@ function start(indexText, detailText) {
       shown += ok;
     }
     shownCount = shown;
+    relayout();
     el("shown").textContent = query ? plural(countHits(), "match", "matches") : "";
     draw();
   }
@@ -269,7 +377,10 @@ function start(indexText, detailText) {
     if (!isFinite(minx)) { minx = miny = 0; maxx = maxy = 1; }
     var w = canvas.clientWidth || 1;
     var h = canvas.clientHeight || 1;
+    // A flow column carries its names to the right of the marks, so the last one needs the room.
+    if (flow) maxx += NAME;
     var scale = Math.min(w / (maxx - minx + 80), h / (maxy - miny + 80));
+    if (flow) scale = Math.min(scale, 1.5);
     view.scale = scale;
     view.x = w / 2 - ((minx + maxx) / 2) * scale;
     view.y = h / 2 - ((miny + maxy) / 2) * scale;
@@ -291,7 +402,7 @@ function start(indexText, detailText) {
       if (IX.profiles[p].id === state.profile) pslot = p;
     }
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(150,170,175,0.10)";
+    ctx.strokeStyle = flow ? "rgba(150,170,175,0.30)" : "rgba(150,170,175,0.10)";
     ctx.beginPath();
     var focus = state.selected;
     var linked = [];
@@ -376,7 +487,7 @@ function start(indexText, detailText) {
     var order = [];
     for (var t = 0; t < N; t++) {
       if (!vis[t]) continue;
-      var named = E.radius[t] * s > 22 || shownCount <= 60;
+      var named = flow || E.radius[t] * s > 22;
       if (!named && t !== state.selected && !hit[t]) continue;
       if (dim && !hit[t] && t !== state.selected) continue;
       order.push(t);
@@ -385,7 +496,7 @@ function start(indexText, detailText) {
       return (b === state.selected) - (a === state.selected) || isHub(b) - isHub(a) || a - b;
     });
     order.forEach(function (t) {
-      var text = cut(E.label[t], 34);
+      var text = cut(E.label[t], flow ? 26 : 34);
       var x = E.x[t] * s + ox + 8, y = E.y[t] * s + oy + 3;
       var wide = ctx.measureText(text).width;
       for (var q = 0; q < placed.length; q++) {
