@@ -82,7 +82,7 @@ line they cite. Hover over a parameter, a topic or a frame to see every layer th
 Go to definition jumps from a topic name in C++ to the remap that renames it. The atlas panel
 answers what the system is and what to look at first.
 
-![The atlas panel on nav2_bringup](https://raw.githubusercontent.com/sa1ntsinner/rosio/main/docs/media/atlas-panel.jpg)
+![The atlas panel and the findings tree on the rover example](https://raw.githubusercontent.com/sa1ntsinner/rosio/main/docs/media/atlas-panel.jpg)
 
 Every node gets a card with its parameters and the value each one ends up with. Every parameter
 gets the chain that decided it, winner first, each value one click from the line that set it.

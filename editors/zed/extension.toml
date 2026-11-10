@@ -1,6 +1,6 @@
 id = "rosio"
 name = "rosio"
-version = "0.1.0"
+version = "0.2.0"
 schema_version = 1
 authors = ["Elmir Mirzayev"]
 description = "ROS 2 atlas diagnostics and navigation through the rosio language server and MCP server."

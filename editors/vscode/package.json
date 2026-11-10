@@ -2,7 +2,7 @@
   "name": "rosio",
   "displayName": "rosio: ROS 2 system atlas",
   "description": "What your ROS 2 system really is, written, coded, running and recorded, where those disagree and which line to edit.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "sa1ntsinner",
   "license": "Apache-2.0",
   "icon": "media/icon.png",

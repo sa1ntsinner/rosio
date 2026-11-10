@@ -42,6 +42,7 @@ cd ~/ros2_ws
 rosio init        # writes rosio.yaml, one profile per launch file
 rosio extract     # reads the workspace into rosio-out/atlas.json
 rosio drift       # what is wrong, worst first
+rosio drift --fix # writes the fixes that are one exact replacement
 ```
 
 On `examples/rover_ws`, a small rover with five faults planted on purpose:
@@ -60,10 +61,12 @@ $ rosio drift
          stop_distnce is set for /safety_stop and never declared  (param.set_undeclared)
   warn   rover_bringup/config/rover.yaml:4
          max_range at rover_bringup/config/rover.yaml:4 is overridden  (param.shadowed)
+
+  rosio drift --fix applies 2 exact fixes
 ```
 
-Each finding also carries why it is true, the line to edit, a fix and a sentence an assistant
-can quote. `rosio param`, `rosio path` and `rosio explain` answer one question each, and
+The output above is cut to one line per finding. Each finding also carries why it is true, the
+line to edit, a fix and a sentence an assistant can quote. `rosio param`, `rosio path` and `rosio explain` answer one question each, and
 `rosio render` writes a report and a single file graph. Profiles, roots and every other key
 are in [docs/configuration.md](https://github.com/sa1ntsinner/rosio/blob/main/docs/configuration.md); installing from a checkout and the
 full command list are in [docs/commands.md](https://github.com/sa1ntsinner/rosio/blob/main/docs/commands.md).
@@ -84,8 +87,9 @@ full command list are in [docs/commands.md](https://github.com/sa1ntsinner/rosio
 
 The VS Code extension in `editors/vscode` puts findings on the line they cite, hovers show
 every layer that states a topic, parameter or frame, and code lenses name the other end of each
-publisher and subscription. The editor side is `rosio-lsp`, a Rust language server any LSP
-editor can use; `editors/zed` wires it into Zed. More screenshots are in
+publisher and subscription. A finding whose fix is one exact replacement carries Apply fix, and
+`Ctrl+Alt+.` applies all of them, saves and extracts again. The editor side is `rosio-lsp`, a
+Rust language server any LSP editor can use; `editors/zed` wires it into Zed. More screenshots are in
 [docs/examples.md](https://github.com/sa1ntsinner/rosio/blob/main/docs/examples.md).
 
 ## With your assistant
@@ -109,4 +113,6 @@ list and the privacy model are in [docs/assistants.md](https://github.com/sa1nts
 
 Developed on ROS 2 jazzy with Fast DDS and `rmw_zenoh_cpp`; CI runs jazzy and humble on
 Python 3.10 and newer. The most useful report is a workspace or a recording rosio reads wrongly.
-Apache-2.0.
+
+rosio is free and open source under Apache-2.0. Companies who want support or custom terms can
+get in touch through [GitHub](https://github.com/sa1ntsinner).

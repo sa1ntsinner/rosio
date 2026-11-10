@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>rosio_monitor</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>Live header stamp and time source monitor for ROS 2, part of rosio</description>
   <maintainer email="77459575+sa1ntsinner@users.noreply.github.com">Elmir</maintainer>
   <license>Apache-2.0</license>

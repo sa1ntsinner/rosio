@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 Atlas schema `1.34` (`0.1.0` wrote `1.32`). Both steps are additive: a reader of a `1.32`
 file loads a `1.34` file.
