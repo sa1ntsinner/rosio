@@ -102,8 +102,8 @@ function start(indexText, detailText) {
         text.indexOf(".") < 0 && text.indexOf("e") < 0) text += ".0";
     return text;
   }
-  function plural(count, word) {
-    return count + " " + word + (count === 1 ? "" : "s");
+  function plural(count, word, many) {
+    return count + " " + (count === 1 ? word : (many || word + "s"));
   }
   function profileSlot() {
     for (var p = 0; p < IX.profiles.length; p++) {
@@ -115,7 +115,8 @@ function start(indexText, detailText) {
   function source(row) {
     if (!row) return "";
     var line = row.line_hint === undefined ? row.line : row.line_hint;
-    var out = '<span class="src"><b>' + esc(fpath(row.file || "")) + "</b>";
+    var at = fpath(row.file || "") + (line !== null && line !== undefined ? ":" + line : "");
+    var out = '<span class="src" data-copy="' + esc(at) + '" title="Copy ' + esc(at) + '"><b>' + esc(fpath(row.file || "")) + "</b>";
     if (line !== null && line !== undefined) out += '<span class="ln">:' + line + "</span>";
     if (row.locator) out += " " + esc(row.locator);
     return out + "</span>";
@@ -123,7 +124,7 @@ function start(indexText, detailText) {
 
   // ---------------------------------------------------------------- state
   var state = {
-    view: "graph",
+    view: "",
     layers: {},
     kinds: {},
     profile: "*",
@@ -137,17 +138,20 @@ function start(indexText, detailText) {
     rule: ""
   };
   var vis = new Uint8Array(N);
+  var shownCount = 0;
   var hit = new Uint8Array(N);
 
   IX.layer_names.forEach(function (name) { state.layers[name] = true; });
-  // a run is bookkeeping of the extraction, shown only when asked for
-  IX.kinds.forEach(function (name) { state.kinds[name] = name !== "run"; });
+  // The graph opens on what runs and what it says. Files, symbols, parameters and the
+  // bookkeeping of the extraction are one tick away in the kind list.
+  var GRAPH_KINDS = ["node", "topic", "service", "action", "frame", "bag", "bagtopic"];
+  IX.kinds.forEach(function (name) { state.kinds[name] = GRAPH_KINDS.indexOf(name) >= 0; });
 
   var findingOf = new Int8Array(N);
   for (var i = 0; i < N; i++) findingOf[i] = E.finding[i];
 
-  function passes(index) {
-    if (!state.kinds[IX.kinds[E.kind[index]]]) return false;
+  function passes(index, anyKind) {
+    if (!anyKind && !state.kinds[IX.kinds[E.kind[index]]]) return false;
     var mask = E.layers[index];
     var any = mask === 0;
     for (var l = 0; l < IX.layer_names.length && !any; l++) {
@@ -179,8 +183,8 @@ function start(indexText, detailText) {
         E.id[i].toLowerCase().indexOf(query) >= 0) ? 1 : 0;
       shown += ok;
     }
-    el("shown").textContent = shown + " of " + N + " entities" +
-      (query ? ", " + countHits() + " match the search" : "");
+    shownCount = shown;
+    el("shown").textContent = query ? plural(countHits(), "match", "matches") : "";
     draw();
   }
   function countHits() {
@@ -224,6 +228,7 @@ function start(indexText, detailText) {
   function fit() {
     var minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
     for (var i = 0; i < N; i++) {
+      if (!vis[i]) continue;
       if (E.x[i] < minx) minx = E.x[i];
       if (E.y[i] < miny) miny = E.y[i];
       if (E.x[i] > maxx) maxx = E.x[i];
@@ -334,16 +339,34 @@ function start(indexText, detailText) {
     // leaves the shape and zooming in fills in the names.
     ctx.font = "11px system-ui, sans-serif";
     ctx.fillStyle = "#d9d9d9";
+    // hubs are named first, and a name that would sit on one already drawn is left out
+    var placed = [];
+    var order = [];
     for (var t = 0; t < N; t++) {
       if (!vis[t]) continue;
-      var named = E.radius[t] * s > 22;
+      var named = E.radius[t] * s > 22 || shownCount <= 60;
       if (!named && t !== state.selected && !hit[t]) continue;
       if (dim && !hit[t] && t !== state.selected) continue;
-      ctx.fillText(cut(E.label[t], 34), E.x[t] * s + ox + 8, E.y[t] * s + oy + 3);
+      order.push(t);
     }
+    order.sort(function (a, b) {
+      return (b === state.selected) - (a === state.selected) || isHub(b) - isHub(a) || a - b;
+    });
+    order.forEach(function (t) {
+      var text = cut(E.label[t], 34);
+      var x = E.x[t] * s + ox + 8, y = E.y[t] * s + oy + 3;
+      var wide = ctx.measureText(text).width;
+      for (var q = 0; q < placed.length; q++) {
+        var box = placed[q];
+        if (x < box[0] + box[2] + 4 && x + wide + 4 > box[0] && Math.abs(y - box[1]) < 13) return;
+      }
+      placed.push([x, y, wide]);
+      ctx.fillText(text, x, y);
+    });
   }
 
   var highlight = [];
+  var fitted = false;
 
   function nearest(px, py) {
     var best = -1, bestDistance = 18 * 18;
@@ -410,6 +433,13 @@ function start(indexText, detailText) {
 
   // ---------------------------------------------------------------- panel
   function select(index) {
+    var kind = IX.kinds[E.kind[index]];
+    if (!state.kinds[kind]) {
+      // a thing picked from a list is shown in the graph even when its kind was off
+      state.kinds[kind] = true;
+      buildFilters();
+      recompute();
+    }
     state.selected = index;
     renderPanel(index);
     draw();
@@ -615,7 +645,7 @@ function start(indexText, detailText) {
     var count = 0;
     for (var i = 0; i < paramIndexes.length && count < 400; i++) {
       var index = paramIndexes[i];
-      if (!vis[index]) continue;
+      if (!passes(index, true)) continue;
       if (query && E.id[index].toLowerCase().indexOf(query) < 0) continue;
       if (state.chip === "shadowed" && !shadowed(index, slot)) continue;
       if (state.chip === "finding" && E.finding[index] === 0) continue;
@@ -647,13 +677,13 @@ function start(indexText, detailText) {
       out.push('<div class="frow' + (state.finding_index === position ? " on" : "") +
         '" data-finding="' + position + '"><div class="head">' +
         '<span class="sev ' + finding.severity + '">' + finding.severity + "</span>" +
-        '<span class="rule">' + esc(finding.rule) + "</span>" +
-        "<span>" + esc(finding.title) + "</span></div>" +
-        '<div class="say">' + esc(finding.say || finding.detail) + "</div>" +
-        (finding.fix ? '<div class="fix">fix: ' + esc(finding.fix) + "</div>" : "") +
-        (finding.where.length ? '<div class="fix">' + finding.where.map(function (row) {
-          return source({ file: row.file, line: row.line, locator: row.locator });
-        }).join("<br>") + "</div>" : "") + "</div>");
+        '<span class="ttl">' + esc(finding.title) + "</span>" +
+        '<span class="rule">' + esc(finding.rule) + "</span></div>" +
+        '<div class="body"><div class="say">' + esc(finding.say || finding.detail) + "</div>" +
+        (finding.fix ? '<div class="fix">' + esc(finding.fix) + "</div>" : "") +
+        (finding.where.length ? '<div class="where">' + finding.where.map(function (row) {
+          return source({ file: row.file, line: row.line });
+        }).join("") + "</div>" : "") + "</div></div>");
     });
     if (!out.length) out.push('<p class="empty">no findings at this severity</p>');
     el("frows").innerHTML = out.join("");
@@ -682,6 +712,7 @@ function start(indexText, detailText) {
   // ---------------------------------------------------------------- views
   function showView(name) {
     state.view = name;
+    document.body.setAttribute("data-view", name);
     ["graph", "params", "findings"].forEach(function (item) {
       el("view-" + item).classList.toggle("on", item === name);
     });
@@ -690,7 +721,11 @@ function start(indexText, detailText) {
     });
     if (name === "params") renderParams();
     if (name === "findings") renderFindings();
-    if (name === "graph") { resize(); }
+    if (name === "graph") {
+      resize();
+      // the canvas has no size until it is first shown
+      if (!fitted) { fitted = true; fit(); }
+    }
   }
 
   // ---------------------------------------------------------------- filters
@@ -735,9 +770,15 @@ function start(indexText, detailText) {
 
   // ---------------------------------------------------------------- wiring
   document.addEventListener("click", function (event) {
-    var selector = "[data-go],[data-finding],[data-param],[data-chain],[data-view],[data-chip],[data-sev],[data-rule]";
+    var selector = "[data-copy],[data-go],[data-finding],[data-param],[data-chain],[data-view],[data-chip],[data-sev],[data-rule]";
     var target = event.target.closest ? event.target.closest(selector) : null;
     if (!target) return;
+    if (target.hasAttribute("data-copy")) {
+      if (navigator.clipboard) navigator.clipboard.writeText(target.getAttribute("data-copy"));
+      target.classList.add("copied");
+      setTimeout(function () { target.classList.remove("copied"); }, 900);
+      return;
+    }
     if (target.hasAttribute("data-view")) { showView(target.getAttribute("data-view")); return; }
     if (target.hasAttribute("data-go")) {
       var index = parseInt(target.getAttribute("data-go"), 10);
@@ -807,47 +848,14 @@ function start(indexText, detailText) {
     if (event.key === "Escape") { state.selected = -1; highlight = []; draw(); }
   });
 
-  function overview() {
-    var byRule = {};
-    IX.findings.forEach(function (finding) {
-      var slot = byRule[finding.rule] || (byRule[finding.rule] = { n: 0, severity: finding.severity });
-      slot.n += 1;
-    });
-    var rules = Object.keys(byRule).sort(function (a, b) { return byRule[b].n - byRule[a].n; });
-    var out = ['<h1 class="title">' + (N === 1 ? "1 entity" : N + " entities") +
-      ", " + plural(IX.layer_names.length, "layer") + "</h1>"];
-    out.push('<p class="eyebrow">' + esc((IX.generator.name || "rosio") + " " +
-      (IX.generator.version || "") + ", schema " + IX.schema_version) + "</p>");
-    out.push("<h3>layers present</h3><div class=\"tags\">" + IX.layer_names.map(function (name) {
-      return '<span class="tag layer">' + esc(name) + "</span>";
-    }).join("") + "</div>");
-    out.push("<h3>profiles</h3><div class=\"tags\">" + IX.profiles.map(function (profile) {
-      return '<span class="tag">' + esc(shortName(profile.id)) + "</span>";
-    }).join("") + "</div>");
-    if (rules.length) {
-      out.push("<h3>findings by rule</h3>");
-      rules.forEach(function (rule) {
-        out.push('<div class="frow" data-rule="' + esc(rule) + '"><div class="head">' +
-          '<span class="sev ' + byRule[rule].severity + '">' + byRule[rule].n + "</span>" +
-          '<span class="rule">' + esc(rule) + "</span></div></div>");
-      });
-    }
-    out.push("<h3>where to start</h3><p class=\"say\">Parameters, then a row: the candidate chain " +
-      "shows the winner, every shadowed write and the line to edit.</p>");
-    el("panelbody").innerHTML = out.join("");
-  }
-
   // ---------------------------------------------------------------- start
-  var counters = IX.counters || {};
-  var findings = counters.findings || {};
-  el("counts").innerHTML = "<b>" + N + "</b> entities &middot; <b>" + (IX.edges.length / 4) +
-    "</b> edges &middot; " + plural(IX.layer_names.length, "layer") + " &middot; " +
-    plural(IX.profiles.length, "profile") +
-    (findings.error ? ' &middot; <span class="err"><b>' + findings.error + "</b> error</span>" : "");
-  el("findcount").textContent = IX.findings.length;
-  overview();
+  el("counts").textContent = IX.profiles.map(function (profile) { return shortName(profile.id); })
+    .concat(IX.layer_names.length ? [IX.layer_names.join(", ")] : []).join(" \u00b7 ");
+  el("findcount").textContent = IX.findings.length || "";
   buildFilters();
   recompute();
-  resize();
-  fit();
+  // what is wrong comes first; a clean atlas opens on the graph
+  // and a link can name the view: atlas.html#graph
+  var asked = location.hash.slice(1);
+  showView(["graph", "params", "findings"].indexOf(asked) >= 0 ? asked : (IX.findings.length ? "findings" : "graph"));
 }
