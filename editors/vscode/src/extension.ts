@@ -38,7 +38,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
   status.command = "rosio.openAtlas";
   status.name = "rosio";
 
+  /** Files whose text the atlas is read from. */
+  const READ = /\.(py|cpp|cc|hpp|h|ya?ml|xml|urdf|xacro|sdf|msg|srv|action|txt)$/;
+  // After a save the findings on screen describe the file as it was. Extraction can take
+  // seconds, so it stays a decision: the status bar says so and one click runs it.
+  const markStale = (document: vscode.TextDocument) => {
+    const config = vscode.workspace.getConfiguration("rosio");
+    if (config.get<boolean>("extractOnSave", false) || !READ.test(document.fileName)) return;
+    if (document.fileName.includes("rosio-out") || status.command === "rosio.extract") return;
+    if (!status.text.startsWith("rosio ·")) return;
+    status.text += " $(history)";
+    status.tooltip = "A file was saved after this atlas was extracted. Click to extract again.";
+    status.command = "rosio.extract";
+  };
+
   const refresh = async () => {
+    status.command = "rosio.openAtlas";
     await Promise.all([
       findings.refresh(),
       unresolved.refresh(),
@@ -123,6 +138,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
       vscode.env.clipboard.writeText((await server.findings()).map(findingText).join("\n\n")),
     ),
     server.onDidChange(() => void refresh()),
+    vscode.workspace.onDidSaveTextDocument(markStale),
     vscode.commands.registerCommand("rosio.openAtlas", () => panel.showAtlas()),
     vscode.commands.registerCommand("rosio.showGraph", (focus?: unknown) => graph.show(graphFocus(focus))),
     vscode.commands.registerCommand("rosio.showRobot", (from?: unknown) => robot.show(robotFocus(from))),
