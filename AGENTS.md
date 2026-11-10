@@ -1628,7 +1628,8 @@ a node class hands its node to (`build_processors(node_ptr, names)`) hands it on
 classes it builds, and is a `classes` row named `<function>()` holding only `node_handoffs`,
 so the declarations of those classes reach the node. A node handed on through
 `std::dynamic_pointer_cast<Self>(shared_from_this())` is still the node, and `node_ptr` is a
-name a node handle goes by. No release had shipped, so no stored id or waiver existed.
+name a node handle goes by. `0.1.0` had shipped with the old readings, so a waiver keyed on
+an id that moved here stops matching, and `CHANGELOG.md` says so.
 
 * in `1.33`, the record key `parameter_writes` and the candidate mechanism `code_set` (section
   7), and the blind spot reason `set_in_code`.
@@ -1649,7 +1650,8 @@ them. C++ `waitForTransform` and python `lookup_transform_full`, `can_transform_
 the `_async` forms are transform reads, the `_full` forms taking the source from the third
 argument. C++ `create_generic_client` is a service client whose type is the string second
 argument. `create_generic_service`, which kilted added, is the server of the same
-shape. No release had shipped, so no stored id or waiver existed.
+shape. `0.1.0` had shipped with the old readings, so a waiver keyed on an id that moved here
+stops matching, and `CHANGELOG.md` says so. The same holds for every change below.
 
 Inside `1.33`, with no new key, two python reads moved after a generated workspace ran on
 jazzy and its live graph disagreed with the atlas. An f-string that starts with a parameter
@@ -1712,7 +1714,7 @@ robot_state_publisher loads with a `frame_prefix` is read as the urdf pass reads
 went through xacro and the file entity refused the second strategy, which lost both robot
 models. `frame.orphan_root` takes one model a profile loads under two prefixes for two robots.
 `param.orphan_block` is silent on a block another profile reads from the same file, where it
-was a note. No release had shipped, so no stored id or waiver existed.
+was a note.
 
 Inside `1.34`, with no new key, extracting thirty public ROS 2 repositories moved several
 readings. A C++ function that returns a reference (`rclcpp::Logger& get()`) keeps its name,
@@ -1723,7 +1725,7 @@ source defines and no wrapper row states may declare any name, so `param.set_und
 silent on the keys of such a node. A parameter whose every winning profile is rewritten
 without a winner is no longer `effective`. A repository holding `package.xml` at its top is
 its own src root, its `src` being that package's sources. A python launch file named
-`-launch.py` is a launch file. No release had shipped, so no stored id or waiver existed.
+`-launch.py` is a launch file.
 
 A reader pinned to `1.0` still loads a `1.34` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
