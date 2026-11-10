@@ -35,7 +35,7 @@ def packages(root: Path) -> list[Path]:
 
 def edited(transcript: str, root: Path) -> list[str]:
     paths = set()
-    with open(transcript, encoding="utf-8") as stream:
+    with Path(transcript).open(encoding="utf-8") as stream:
         for line in stream:
             try:
                 message = json.loads(line)
@@ -50,12 +50,14 @@ def edited(transcript: str, root: Path) -> list[str]:
                         rel = path.resolve().relative_to(root.resolve())
                     except ValueError:
                         continue
-                    if rel.parts and rel.parts[0] not in (".claude", "rosio-out") and rel.suffix != ".md":
+                    own = rel.parts and rel.parts[0] not in (".claude", "rosio-out")
+                    if own and rel.suffix != ".md":
                         paths.add(rel.as_posix())
     # agents also edit through the shell, so a changed file the session named counts too
     seen = touched(transcript)
     git = ["git", "-C", str(root)]
-    for cmd in (["diff", "--name-only", "--relative", "HEAD"], ["ls-files", "--others", "--exclude-standard"]):
+    changed = ["diff", "--name-only", "--relative", "HEAD"]
+    for cmd in (changed, ["ls-files", "--others", "--exclude-standard"]):
         try:
             out = subprocess.run(git + cmd, capture_output=True, text=True, timeout=20).stdout
         except (OSError, subprocess.SubprocessError):
@@ -71,7 +73,7 @@ def edited(transcript: str, root: Path) -> list[str]:
 
 def touched(transcript: str) -> str:
     text = []
-    with open(transcript, encoding="utf-8") as stream:
+    with Path(transcript).open(encoding="utf-8") as stream:
         for line in stream:
             try:
                 message = json.loads(line)

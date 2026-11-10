@@ -518,7 +518,8 @@ def _coverage_hook(target: plat.Target, path: Path, report: Report, *, remove: b
             _write(path, dumps(doc))
         else:
             _remove(path)
-    report.actions.append(Action(path, target.mechanism, status, "hooks.Stop coverage command", undo))
+    note = "hooks.Stop coverage command"
+    report.actions.append(Action(path, target.mechanism, status, note, undo))
 
 
 def _drop_empty(doc: dict, container: str) -> None:
