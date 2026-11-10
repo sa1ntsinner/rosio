@@ -22,6 +22,16 @@ pub(crate) fn is_engine_missing(message: &str) -> bool {
     message.contains(INSTALL)
 }
 
+/// The line a failed command ends on, which is where python and the cli state the cause.
+fn last_line(output: &str) -> &str {
+    output
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("no output")
+}
+
 /// The spawn error as the install sentence when the program or the python module is missing.
 pub(crate) fn spawn_error(program: &str, error: &std::io::Error) -> String {
     if error.kind() == std::io::ErrorKind::NotFound {
@@ -126,13 +136,16 @@ impl Extraction {
             Ok(stderr) if !stderr.is_empty() => log(sender, 3, &stderr),
             Err(error) => {
                 log(sender, 1, &error);
-                if is_engine_missing(&error) {
-                    notify(
-                        sender,
-                        "window/showMessage",
-                        json!({"type":1,"message":error}),
-                    );
-                }
+                let message = if is_engine_missing(&error) {
+                    error
+                } else {
+                    format!("rosio extract failed: {}", last_line(&error))
+                };
+                notify(
+                    sender,
+                    "window/showMessage",
+                    json!({"type":1,"message":message}),
+                );
             }
             _ => {}
         }

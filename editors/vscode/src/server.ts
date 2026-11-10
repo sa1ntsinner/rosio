@@ -79,6 +79,7 @@ export class Server implements vscode.Disposable {
       this.migrationChanged.fire();
     });
     this.client.onNotification(ATLAS_CHANGED, (_change: AtlasChanged) => this.scheduleChange());
+    this.client.onNotification("window/showMessage", (said: { type: number; message: string }) => this.say(said.type, said.message));
     try {
       this.startError = undefined;
       await this.client.start();
@@ -95,6 +96,28 @@ export class Server implements vscode.Disposable {
           }
         });
     }
+  }
+
+  /** A server message with the one thing to do about it as a button. */
+  private say(type: number, message: string): void {
+    const action = message.includes("pipx install rosio")
+      ? "Install in a terminal"
+      : type === 1
+        ? "Show output"
+        : message.includes("rosio extract")
+          ? "Extract"
+          : undefined;
+    const show = type === 1 ? vscode.window.showErrorMessage : type === 2 ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
+    void show(message.replace(/`/g, ""), ...(action ? [action] : [])).then((pick) => {
+      if (pick === "Show output") this.output.show();
+      if (pick === "Extract") void vscode.commands.executeCommand("rosio.extract");
+      if (pick === "Install in a terminal") {
+        const terminal = vscode.window.createTerminal({ name: "rosio install" });
+        terminal.show();
+        // Typed and not run: pipx or pip is the person's choice.
+        terminal.sendText("pipx install rosio", false);
+      }
+    });
   }
 
   private pending: NodeJS.Timeout | undefined;
