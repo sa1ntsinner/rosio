@@ -1353,16 +1353,19 @@ def _print_summary(report: dict, elapsed: float, atlas=None) -> None:
         shown += f" and {len(profiles) - PROFILES_SHOWN} more, rosio extract --json lists all"
     print(f"  profiles {len(profiles)}: {shown}")
     print(f"  layers: {', '.join(report['layers']) or 'none'}")
-    print(f"  entities {report['entities']}: {_counts(report['entities_by_kind'])}")
-    print(f"  edges {report['edges']}: {_counts(report['edges_by_kind'])}")
-    print(f"  unresolved {report['unresolved']}: {_counts(report['unresolved_by_want'])}")
+    # entity and edge counts by kind stay in --json: nobody acts on them at a prompt
+    if report["unresolved"]:
+        print(f"  unresolved {report['unresolved']}: {_counts(report['unresolved_by_want'])}")
+        print(f"    {PROG} unresolved lists each one with its line")
     print(f"  resolution rate {report['resolution_rate']:.3f} over {report['resolved']} resolved")
-    findings = report["findings"]
-    print("  findings: " + ", ".join(f"{count} {name}" for name, count in sorted(findings.items())))
-    top = sorted(report["findings_by_rule"].items(), key=lambda item: (-item[1], item[0]))[:5]
-    if top:
-        print("    most: " + ", ".join(f"{name} {count}" for name, count in top))
+    findings = {name: count for name, count in report["findings"].items() if count}
+    if findings:
+        order = {"error": 0, "warn": 1, "info": 2}
+        ranked = sorted(findings.items(), key=lambda item: order.get(item[0], 3))
+        print("  findings: " + ", ".join(f"{count} {name}" for name, count in ranked))
         print(f"    {PROG} drift prints each one with the line to edit")
+    else:
+        print("  findings: none")
     if report["rules_failed"]:
         print(f"    rules that could not be trusted: {', '.join(report['rules_failed'])}")
     problems = report["exceptions"]

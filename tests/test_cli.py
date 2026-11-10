@@ -1197,7 +1197,7 @@ def test_install_writes_the_files_and_uninstall_takes_them_back(tmp_path: Path, 
     assert main(["install", "codex", "--root", str(root)]) == EXIT_OK
     assert "created" in capsys.readouterr().out
     written = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
-    assert written == [".agents/skills/rosio/review.md", "AGENTS.md"]
+    assert written == [".agents/skills/rosio/coding.md", ".agents/skills/rosio/review.md", "AGENTS.md"]
 
     assert main(["uninstall", "codex", "--root", str(root)]) == EXIT_OK
     assert "removed" in capsys.readouterr().out
