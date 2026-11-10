@@ -82,6 +82,9 @@ export class AtlasPanel implements vscode.Disposable {
       case "fix":
         await vscode.commands.executeCommand("rosio.fixFinding", message.finding);
         break;
+      case "probe":
+        await vscode.commands.executeCommand("rosio.probe");
+        break;
       case "fixAll":
         await vscode.commands.executeCommand("rosio.fixAll");
         break;

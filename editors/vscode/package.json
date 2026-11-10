@@ -228,6 +228,11 @@
         "command": "rosio.copyFindings",
         "title": "Copy all findings",
         "category": "rosio"
+      },
+      {
+        "command": "rosio.probe",
+        "title": "Probe the running system",
+        "category": "rosio"
       }
     ],
     "keybindings": [

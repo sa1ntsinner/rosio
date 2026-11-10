@@ -42,7 +42,7 @@ const SEVERITY_TITLE: Record<Severity, string> = { error: "Errors", warn: "Warni
 const LAYER_WHAT: Record<Layer, { present: string; absent: string }> = {
   declared: { present: "launch, yaml, urdf, interfaces", absent: "no launch profile read" },
   coded: { present: "C++ and Python sources", absent: "no sources read" },
-  observed: { present: "a live probe of the graph", absent: "run rosio probe on a running system" },
+  observed: { present: "a live probe of the graph", absent: "probe the running system" },
   recorded: { present: "rosbag2 recordings", absent: "add a bag root to rosio.yaml" },
 };
 
@@ -90,12 +90,15 @@ function layersStrip(present: Layer[], entity?: Entity): HTMLElement {
     { class: "layers", role: "list", "aria-label": "Layers in this atlas" },
     ...LAYERS.map((layer) => {
       const has = present.includes(layer);
-      const note = entity && atlasLayers.includes(layer) ? namedBy(entity, layer) : LAYER_WHAT[layer].absent;
+      const silent = entity && atlasLayers.includes(layer);
+      const note = silent ? namedBy(entity, layer) : LAYER_WHAT[layer].absent;
+      // the live layer is one command away, so its hint is the command
+      const probe = layer === "observed" && !silent;
       return h(
         "div",
         { class: `layer ${has ? "present" : "absent"}`, "data-layer": layer, role: "listitem", title: has ? LAYER_WHAT[layer].present : "" },
         h("span", { class: "name" }, layerName(layer)),
-        !has && h("span", { class: "note" }, note),
+        !has && h("span", { class: "note" }, probe ? link(note, { type: "probe" }, "Runs rosio probe in a terminal") : note),
       );
     }),
   );

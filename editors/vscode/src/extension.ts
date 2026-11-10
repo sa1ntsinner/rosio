@@ -147,6 +147,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RosioA
     vscode.commands.registerCommand("rosio.find", () => find(server, panel)),
     vscode.commands.registerCommand("rosio.restartServer", () => server.restart()),
     vscode.commands.registerCommand("rosio.checkStamps", (uri?: vscode.Uri) => checkStamps(uri)),
+    vscode.commands.registerCommand("rosio.probe", () => runInTerminal("rosio probe", ["probe"])),
   );
 
   await server.start();
@@ -280,10 +281,15 @@ async function checkStamps(uri?: vscode.Uri): Promise<void> {
     )?.[0];
   if (!target) return;
   const bag = target.fsPath.endsWith("metadata.yaml") ? vscode.Uri.joinPath(target, "..").fsPath : target.fsPath;
+  runInTerminal("rosio stamps", ["stamps", bag, "--stats"]);
+}
+
+/** A verb whose output a person reads as it runs, in a terminal of their own shell. */
+function runInTerminal(name: string, args: string[]): void {
   const command = vscode.workspace.getConfiguration("rosio").get<string[]>("command", ["rosio"]);
-  const terminal = vscode.window.createTerminal({ name: "rosio stamps" });
+  const terminal = vscode.window.createTerminal({ name });
   terminal.show();
-  terminal.sendText([...command, "stamps", bag, "--stats"].map(quote).join(" "));
+  terminal.sendText([...command, ...args].map(quote).join(" "));
 }
 
 function quote(argument: string): string {
