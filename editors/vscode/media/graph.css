@@ -340,8 +340,23 @@ svg.lit .edge.near {
 
 .links {
   list-style: none;
-  margin: 0;
+  margin: 14px 0 0;
   padding: 0;
+}
+
+a.site {
+  color: var(--link);
+  cursor: pointer;
+  font-family: var(--code);
+  font-size: 12px;
+}
+
+a.site:hover {
+  text-decoration: underline;
+}
+
+.links a.site {
+  margin-left: auto;
 }
 
 .links li {

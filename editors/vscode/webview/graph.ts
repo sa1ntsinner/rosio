@@ -344,7 +344,7 @@ function inspector(rows: Map<string, Row>, row: Row, links: Link[]): HTMLElement
   for (const finding of current?.findings[row.id] ?? []) {
     const note = h("div", { class: `finding ${finding.severity}` }, h("p", {}, finding.say || finding.title));
     const where = finding.locations[0];
-    if (where) note.append(openButton("Go to line", { uri: where.uri, line: where.line, approximate: false }, "small"));
+    if (where) note.append(siteLink({ uri: where.uri, line: where.line, approximate: false }));
     panel.append(note);
   }
 
@@ -377,12 +377,22 @@ function inspector(rows: Map<string, Row>, row: Row, links: Link[]): HTMLElement
       const why = link.problem ? current?.findings[other]?.find((finding) => finding.severity === link.problem) : undefined;
       if (why) item.append(h("span", { class: "why" }, why.title));
       if (link.conflicts.length) item.append(h("span", { class: "qos" }, `layers disagree on ${link.conflicts.join(", ")}`));
-      if (link.at) item.append(openButton("Go to line", link.at, "small"));
+      if (link.at) item.append(siteLink(link.at));
       list.append(item);
     }
-    panel.append(h("h3", {}, "Endpoints"), list);
+    panel.append(list);
   }
   return panel;
+}
+
+/** The line itself is the link, so the row says where it goes before the click. */
+function siteLink(at: GraphSite): HTMLElement {
+  const name = decodeURIComponent(at.uri.slice(at.uri.lastIndexOf("/") + 1));
+  const anchor = h("a", { class: "site", tabindex: "0", title: "Open the line" }, `${name}:${at.line + 1}`);
+  const go = () => post({ type: "open", uri: at.uri, line: at.line });
+  anchor.addEventListener("click", go);
+  anchor.addEventListener("keydown", (event) => event.key === "Enter" && go());
+  return anchor;
 }
 
 function openButton(text: string, at: GraphSite, cls = ""): HTMLElement {
