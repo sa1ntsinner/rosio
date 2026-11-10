@@ -40,10 +40,10 @@ function start(indexText, detailText) {
   var COLOUR = {
     agree: "#b8b8b8",
     differ: "#c9746b",
-    declared: "#7d9cc6",
-    coded: "#a88bbf",
-    observed: "#8fae7d",
-    recorded: "#7aaeab",
+    declared: "#5b8fdc",
+    coded: "#7a55b0",
+    observed: "#3f8a4f",
+    recorded: "#c9749f",
     none: "#4a4a4a"
   };
   // a parameter state in the words of the person who set it; an effective one needs none
@@ -440,7 +440,13 @@ function start(indexText, detailText) {
         var index = list[j];
         if (dim && !hit[index]) continue;
         var size = isHub(index) ? 7 : 4;
-        ctx.fillRect(E.x[index] * s + ox - size / 2, E.y[index] * s + oy - size / 2, size, size);
+        var x = E.x[index] * s + ox, y = E.y[index] * s + oy;
+        if (colour !== COLOUR.differ) { ctx.fillRect(x - size / 2, y - size / 2, size, size); continue; }
+        // A diamond, so a disagreement does not rest on telling red from green.
+        var r = size * 0.85;
+        ctx.beginPath();
+        ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y);
+        ctx.fill();
       }
     });
     if (dim) {

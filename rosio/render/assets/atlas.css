@@ -9,10 +9,10 @@
   --drift: #e6e6e6;
   --error: #c9746b;
   --warn: #d6d6d6;
-  --declared: #7d9cc6;
-  --coded: #a88bbf;
-  --observed: #8fae7d;
-  --recorded: #7aaeab;
+  --declared: #5b8fdc;
+  --coded: #7a55b0;
+  --observed: #3f8a4f;
+  --recorded: #c9749f;
   --mono: "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
 }
 
@@ -94,7 +94,7 @@ label.check .n { margin-left: auto; color: var(--faint); font-variant-numeric: t
 .legend li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
 .sw { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
 .sw.agree { background: #b8b8b8; }
-.sw.differ { background: var(--error); }
+.sw.differ { background: var(--error); transform: rotate(45deg) scale(0.8); }
 .sw.declared { background: var(--declared); }
 .sw.coded { background: var(--coded); }
 .sw.observed { background: var(--observed); }

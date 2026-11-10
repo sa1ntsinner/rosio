@@ -23,10 +23,10 @@
   --code: var(--vscode-editor-font-family);
   --size: var(--vscode-font-size, 13px);
   /* the four layer colours of the rosio brand kit, one set per kind of theme */
-  --declared: #4a92ea;
-  --coded: #7a4eb8;
-  --observed: #2b8044;
-  --recorded: #d8609f;
+  --declared: #5b8fdc;
+  --coded: #7a55b0;
+  --observed: #3f8a4f;
+  --recorded: #c9749f;
   --gutter: 24px;
 }
 
