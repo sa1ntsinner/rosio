@@ -152,7 +152,12 @@ label.check .n { margin-left: auto; color: var(--faint); font-variant-numeric: t
 .rows .row .nm { font-family: var(--mono); font-size: 12px; }
 .rows .row .sub { color: var(--faint); font-size: 11px; display: flex; gap: 8px; }
 .rows .row .val { color: var(--drift); font-family: var(--mono); font-size: 11px; }
-.rows .row.shadow .val { color: var(--error); }
+.rows .row.shadow .val { color: var(--warn); }
+
+/* the parameters view carries its own detail column, so the side panel would say it twice */
+body[data-view="params"] main { grid-template-columns: 232px minmax(0, 1fr); }
+body[data-view="params"] #panel { display: none; }
+.chain { max-width: 900px; }
 .rows .more { color: var(--faint); padding: 8px; font-size: 12px; }
 
 /* a finding is a row, not a card: the word, what is wrong, then what to do and where */
@@ -202,7 +207,7 @@ table.kv td.v { font-family: var(--mono); word-break: break-word; }
 .card.win { border-left: 3px solid var(--drift); }
 .card.lost { border-left: 3px solid var(--error); }
 .card .why { color: var(--error); font-size: 12px; margin-top: 4px; }
-.card .win-mark { color: var(--drift); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.card .win-mark { color: var(--drift); font-weight: 600; }
 .card .value { font-family: var(--mono); font-size: 13px; word-break: break-word; }
 .card .meta { color: var(--faint); font-size: 11px; }
 

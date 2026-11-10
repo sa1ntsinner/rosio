@@ -10,9 +10,15 @@ function unpack(id) {
   return new Response(stream).text();
 }
 
-Promise.all([unpack("rosio-index"), unpack("rosio-detail")]).then(function (texts) {
-  start(texts[0], texts[1]);
-});
+// The detail block sits after this script in the page, so nothing is read before the
+// document is whole: read at once, the block is not there yet and every card is empty.
+function boot() {
+  Promise.all([unpack("rosio-index"), unpack("rosio-detail")]).then(function (texts) {
+    start(texts[0], texts[1]);
+  });
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+else boot();
 
 function start(indexText, detailText) {
   var IX = JSON.parse(indexText);
@@ -39,6 +45,29 @@ function start(indexText, detailText) {
     observed: "#2b8044",
     recorded: "#d8609f",
     none: "#3a3a3a"
+  };
+  // a parameter state in the words of the person who set it; an effective one needs none
+  var STATE = {
+    inert_by_design: "its plugin is not selected",
+    undeclared: "set and never declared",
+    declared_unread: "declared and never read",
+    owner_name_mismatch: "no node of this name runs",
+    unresolved_owner: "its node could not be followed",
+    other: "no value wins"
+  };
+  // how a value got where it is, in words
+  var MECHANISM = {
+    launch_rewritten_yaml: "yaml rewritten by the launch file",
+    launch_inline_dict: "inline parameters of the launch file",
+    launch_set_parameter: "SetParameter for the whole launch group",
+    launch_params_file: "parameters file passed by the launch file",
+    launch_yaml: "parameters file passed by the launch file",
+    yaml: "parameters file",
+    code_default: "default in the source",
+    code_set: "set by the node itself",
+    ros_args: "command line argument",
+    python_override: "rewritten by a launcher script",
+    param_set_runtime: "ros2 param set after start"
   };
   var WHY = {
     value_changed: "a later write set a different value",
@@ -452,14 +481,15 @@ function start(indexText, detailText) {
       if (bit(mask, l)) out.push('<span class="tag layer">' + IX.layer_names[l] + "</span>");
     }
     var agreement = IX.agreements[E.agreement[index]];
-    out.push('<span class="tag ' + (agreement === "agree" ? "agree" : (agreement === "differ" ? "differ" : "")) +
-      '">' + agreement + "</span>");
+    if (agreement === "agree") out.push('<span class="tag agree">layers agree</span>');
+    if (agreement === "differ") out.push('<span class="tag differ">layers differ</span>');
     for (var p = 0; p < IX.profiles.length; p++) {
       if (bit(E.profiles[index], p)) {
         out.push('<span class="tag">' + esc(shortName(IX.profiles[p].id)) + "</span>");
       }
     }
-    if (E.state[index] >= 0) out.push('<span class="tag">' + IX.states[E.state[index]] + "</span>");
+    var stated = E.state[index] >= 0 ? STATE[IX.states[E.state[index]]] : "";
+    if (stated) out.push('<span class="tag differ">' + stated + "</span>");
     return '<div class="tags">' + out.join("") + "</div>";
   }
 
@@ -473,11 +503,17 @@ function start(indexText, detailText) {
   }
 
   function renderPanel(index) {
+    el("panelbody").innerHTML = panelHtml(index, true);
+  }
+
+  function panelHtml(index, head) {
     var data = facts(index);
     var out = [];
-    out.push('<h1 class="title">' + esc(E.label[index]) + "</h1>");
-    out.push('<p class="eyebrow">' + esc(IX.kinds[E.kind[index]]) + "  " + esc(E.id[index]) + "</p>");
-    out.push(chips(index));
+    if (head) {
+      out.push('<h1 class="title">' + esc(E.label[index]) + "</h1>");
+      out.push('<p class="eyebrow">' + esc(IX.kinds[E.kind[index]]) + "  " + esc(E.id[index]) + "</p>");
+      out.push(chips(index));
+    }
 
     var conflicts = data.conflicts || [];
     if (conflicts.length) {
@@ -568,7 +604,7 @@ function start(indexText, detailText) {
       }).join("") + "</div>");
     }
 
-    el("panelbody").innerHTML = out.join("");
+    return out.join("");
   }
 
   // ---------------------------------------------------------------- chain
@@ -577,12 +613,14 @@ function start(indexText, detailText) {
     var data = facts(index);
     var candidates = (data.candidates || []).slice();
     var out = [];
+    var owner = E.id[index].slice(E.id[index].indexOf(":") + 1);
+    owner = decodeURIComponent(owner.slice(0, owner.lastIndexOf("|")));
     out.push("<h2>" + esc(E.label[index]) + "</h2>");
-    out.push('<p class="eyebrow">' + esc(E.id[index]) + "</p>");
+    out.push('<p class="eyebrow">' + esc(owner.charAt(0) === "~" ? "an unnamed node" : owner) + "</p>");
     out.push(chips(index));
     if (!candidates.length) {
-      out.push('<p class="empty">This entity carries no candidate chain. Its values are in the panel on the right.</p>');
-      el("chain").innerHTML = out.join("");
+      // no chain to show, so the column holds what the layers state about it
+      el("chain").innerHTML = out.join("") + panelHtml(index, false);
       return;
     }
     var byProfile = {};
@@ -604,7 +642,7 @@ function start(indexText, detailText) {
             esc(shownValue(over.value, over.value_type));
         }
         out.push('<div class="card ' + (lost ? "lost" : "win") + '">');
-        out.push('<div class="meta">rank ' + row.rank + " &middot; " + esc(row.mechanism) +
+        out.push('<div class="meta">' + esc(MECHANISM[row.mechanism] || String(row.mechanism).replace(/_/g, " ")) +
           (row.wins ? ' &middot; <span class="win-mark">wins</span>' : "") + "</div>");
         out.push('<div class="value">' + esc(shownValue(row.value, row.value_type)) +
           ' <span class="meta">' + esc(row.value_type) + "</span></div>");

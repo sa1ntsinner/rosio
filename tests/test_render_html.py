@@ -426,6 +426,8 @@ def test_profiles_and_states_are_named_once_and_referenced_by_slot(atlas: Atlas)
 def test_the_page_survives_an_empty_atlas() -> None:
     page = html.render(Atlas())
     assert "<canvas" in page
+    # the detail block follows the script, so the script must wait for the whole document
+    assert page.index("DOMContentLoaded") < page.index('id="rosio-detail"')
     index = _index_payload(page)
     assert index["entities"]["id"] == []
     assert index["edges"] == []
