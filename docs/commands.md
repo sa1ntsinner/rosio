@@ -69,7 +69,7 @@ rosio init [--force] [--print] [--package NAME] [--config FILE] [PATH]  # write 
 rosio extract [--layer {declared,coded}] [--launch-sandbox {auto,required,off}] [--install-tree DIR] [--profile NAME] [--config FILE] [--collector NAME] [--bag PATH] [--no-runtime] [--fail-on-violation] [PATH]
 rosio stamps [--topics TOPIC] [--limit N] [--json-verdict] [--stats] [BAG]
 rosio probe [--stamps] [--duration SECONDS] [--settle SECONDS] [--domain-id N] [--localhost-only] [--rmw NAME] [--ros-setup FILE] [--profile NAME] [--config FILE] [--atlas FILE] [PATH]
-rosio drift [--fail-on {error,warn,info,never}] [--min-severity {error,warn,info}] [--only RULE] [--waivers FILE] [--config FILE] [--atlas FILE] [--limit N]
+rosio drift [--fail-on {error,warn,info,never}] [--min-severity {error,warn,info}] [--only RULE] [--waivers FILE] [--config FILE] [--fix] [--atlas FILE] [--limit N]
 rosio param [--profile NAME] [--atlas FILE] [--limit N] [SELECTOR ...]
 rosio explain [--atlas FILE] [--limit N] [SELECTOR]
 rosio query [--atlas FILE] [--limit N] [WORDS ...]
@@ -144,6 +144,21 @@ profiles:
 
 `ignore` keeps the headers, vendored libraries and python modules of the prefix out of the index,
 which rosio reads nothing from.
+
+## Applying the fixes a finding states
+
+Some findings state their fix as an exact replacement: a parameter key one slip from a declared
+name, a frame the model spells another way, a remap source with a near twin. `rosio drift --fix`
+writes those into the workspace files and says what it changed:
+
+```bash
+rosio drift --fix
+rosio extract .
+```
+
+A line is edited only where it still holds the old text once as a whole word, the rule the
+editor's quick fix follows, so a line that moved since the atlas was built is left alone and
+named. The atlas is stale after an edit, so `--fix` grades no gate: extract again.
 
 ## Waiving a finding you have already decided about
 

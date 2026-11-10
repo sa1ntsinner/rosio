@@ -1494,3 +1494,12 @@ def test_a_stored_install_line_is_shown_as_this_machine_runs_it():
     stored = f"Install the extra: {extra_line('cpp')}, which pins tree-sitter"
     assert here(stored) == f"Install the extra: {extra_command('cpp')}, which pins tree-sitter"
     assert here("nothing to replace") == "nothing to replace"
+
+
+def test_fix_replaces_only_a_line_that_holds_the_word_once():
+    from rosio.cli import replace_once
+
+    assert replace_once("  stop_distnce: 0.35", "stop_distnce", "stop_distance") == "  stop_distance: 0.35"
+    assert replace_once("  stop_distnce_max: 1", "stop_distnce", "stop_distance") is None
+    assert replace_once("a: x, b: x", "x", "y") is None
+

@@ -364,6 +364,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"configuration file to read the {WAIVERS_KEY} key from, "
         "default is rosio.yaml here or one directory up",
     )
+    drift.add_argument(
+        "--fix",
+        action="store_true",
+        help="write the exact replacements the findings state into the workspace files, "
+        "each only where its line still holds the old text once, then say what changed. "
+        "the atlas is stale afterwards, so the gate is not graded: extract again",
+    )
     _add_atlas_flags(drift)
 
     explain = _sub(
@@ -1512,6 +1519,59 @@ def _words(values) -> str:
     return " ".join(str(item) for item in values or ()).strip()
 
 
+def replace_once(line: str, find: str, replace: str) -> str | None:
+    """The line with `find` replaced, when it holds `find` exactly once as a whole word. The
+    language server offers its quick fix under the same rule, so both edit the same lines."""
+    import re
+
+    hits = list(re.finditer(rf"(?<![\w]){re.escape(find)}(?![\w])", line)) if find else []
+    if len(hits) != 1:
+        return None
+    return line[: hits[0].start()] + replace + line[hits[0].end() :]
+
+
+def _apply_fixes(args: argparse.Namespace, findings: Sequence) -> list[str]:
+    """Writes every exact replacement the findings state and returns what to print."""
+    from pathlib import Path
+
+    from rosio.config import load_config
+    from rosio.errors import ContractError
+    from rosio.query import site
+    from rosio.workspace import Workspace
+
+    rows = [row for item in findings for row in item.extra.get("edits") or []]
+    if not rows:
+        return ["no finding in this atlas states an exact replacement"]
+    base = _atlas_path(args).resolve().parent.parent
+    cfg = load_config(getattr(args, "config", None), workspace=str(base))
+    ws = Workspace.discover(cfg.roots, cfg.ignore)
+    lines, done = [], 0
+    for row in rows:
+        where = site(row)
+        try:
+            target = Path(ws.abspath(str(row.get("file"))))
+            text = target.read_text(encoding="utf-8")
+        except (ContractError, OSError, UnicodeDecodeError):
+            lines.append(f"  left alone  {where}: the file is not in this workspace")
+            continue
+        body = text.splitlines(keepends=True)
+        at = int(row.get("line_hint") or 0) - 1
+        new = None
+        if 0 <= at < len(body):
+            new = replace_once(body[at], str(row.get("find")), str(row.get("replace")))
+        if new is None:
+            lines.append(f"  left alone  {where}: the line changed since the atlas was built")
+            continue
+        body[at] = new
+        with target.open("w", encoding="utf-8", newline="") as stream:
+            stream.write("".join(body))
+        done += 1
+        lines.append(f"  fixed       {where}: {row.get('find')} is now {row.get('replace')}")
+    if done:
+        lines.append(f"{plural(done, 'line')} edited, {PROG} extract again to see what is left")
+    return lines
+
+
 def cmd_drift(args: argparse.Namespace) -> int:
     """The findings the atlas carries, filtered for printing and graded for the gate.
 
@@ -1549,6 +1609,10 @@ def cmd_drift(args: argparse.Namespace) -> int:
         atlas.findings = [item for item in atlas.findings if item.rule in set(wanted)]
     waivers = _waivers(args)
     graded, matched = engine.waive(atlas.findings, [item.key for item in waivers])
+    if args.fix:
+        for line in _apply_fixes(args, graded):
+            print(line)
+        return EXIT_OK
     answer = query.drift(atlas, min_severity=args.min_severity, limit=args.limit, waived=matched)
     _report_waivers(answer, waivers, matched, args.limit)
     # A rule that raised while the atlas was built left nothing behind it but its name.
