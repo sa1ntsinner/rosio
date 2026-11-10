@@ -19,6 +19,13 @@ purpose: every line is a mistake that shipped in a real robot stack.
    failed, and a step you did not run is written as not run. "Not run" costs nothing; a
    claim the diff or the log contradicts gets the whole fix rejected. Name any other defect
    you saw but did not fix.
+6. Keep the report short: the cause, what changed, what ran and what it printed, what did not
+   run. Its first line claims no more than the weakest check below it: "fixed and tested" is
+   false when the test was never built here. A sentence about code you did not change ("no
+   other caller", "the other path is not affected", "no such literal is left") is a claim the
+   reviewer checks, so give the command that showed it or leave the sentence out. Read the
+   diff once against the report before you send it: a comment that promises what the report
+   denies, or a search result the new test itself breaks, is a contradiction.
 
 ## Before you type
 
