@@ -69,7 +69,7 @@ rosio init [--force] [--print] [--package NAME] [--config FILE] [PATH]  # write 
 rosio extract [--layer {config,code}] [--launch-sandbox {auto,required,off}] [--install-tree DIR] [--profile NAME] [--config FILE] [--collector NAME] [--bag PATH] [--no-runtime] [--fail-on-violation] [PATH]
 rosio stamps [--topics TOPIC] [--limit N] [--json-verdict] [--stats] [BAG]
 rosio probe [--stamps] [--duration SECONDS] [--settle SECONDS] [--domain-id N] [--localhost-only] [--rmw NAME] [--ros-setup FILE] [--profile NAME] [--config FILE] [--atlas FILE] [PATH]
-rosio drift [--fail-on {error,warn,info,never}] [--min-severity {error,warn,info}] [--only RULE] [--waivers FILE] [--config FILE] [--fix] [--atlas FILE] [--limit N]
+rosio drift [--fail-on {error,warn,info,never}] [--min-severity {error,warn,info}] [--only RULE] [--waivers FILE] [--config FILE] [--fix] [--format {text,json,github,sarif}] [--baseline FILE] [--atlas FILE] [--limit N]
 rosio param [--profile NAME] [--atlas FILE] [--limit N] [SELECTOR ...]
 rosio explain [--atlas FILE] [--limit N] [SELECTOR]
 rosio query [--atlas FILE] [--limit N] [WORDS ...]

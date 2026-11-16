@@ -1,0 +1,70 @@
+name: rosio
+description: Extract a ROS 2 workspace, annotate the pull request with each finding and grade the gate.
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  path:
+    description: workspace to extract, relative to the repository
+    default: "."
+  fail-on:
+    description: lowest severity that fails the step, error, warn, info or never
+    default: error
+  version:
+    description: rosio version to install from PyPI, or latest
+    default: latest
+  sarif:
+    description: upload the findings to code scanning as SARIF, true or false
+    default: "true"
+  args:
+    description: extra arguments for rosio extract
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: install rosio
+      shell: bash
+      env:
+        ROSIO_VERSION: ${{ inputs.version }}
+      run: |
+        spec="rosio[cpp]"
+        if [ "$ROSIO_VERSION" != "latest" ]; then spec="rosio[cpp]==$ROSIO_VERSION"; fi
+        python -m pip install --quiet "$spec"
+
+    - name: rosio extract
+      shell: bash
+      env:
+        ROSIO_PATH: ${{ inputs.path }}
+        ROSIO_ARGS: ${{ inputs.args }}
+      run: |
+        # ROSIO_ARGS is split on spaces on purpose, it holds several arguments
+        rosio extract "$ROSIO_PATH" --out "$RUNNER_TEMP/rosio-out" $ROSIO_ARGS
+        # the waivers key of the workspace configuration, when there is one
+        if [ -f "$ROSIO_PATH/rosio.yaml" ]; then
+          echo "ROSIO_DRIFT_CONFIG=--config=$ROSIO_PATH/rosio.yaml" >> "$GITHUB_ENV"
+        fi
+
+    - name: rosio drift, sarif
+      if: inputs.sarif == 'true'
+      shell: bash
+      run: |
+        rosio drift --atlas "$RUNNER_TEMP/rosio-out/atlas.json" $ROSIO_DRIFT_CONFIG --format sarif > "$RUNNER_TEMP/rosio.sarif"
+
+    - if: inputs.sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ runner.temp }}/rosio.sarif
+        category: rosio
+
+    - name: rosio drift
+      shell: bash
+      env:
+        ROSIO_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        rosio drift --atlas "$RUNNER_TEMP/rosio-out/atlas.json" $ROSIO_DRIFT_CONFIG --format github --fail-on "$ROSIO_FAIL_ON"

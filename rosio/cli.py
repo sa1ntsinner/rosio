@@ -373,6 +373,19 @@ def build_parser() -> argparse.ArgumentParser:
         "each only where its line still holds the old text once, then say what changed. "
         "the atlas is stale afterwards, so the gate is not graded: extract again",
     )
+    drift.add_argument(
+        "--format",
+        choices=("text", "json", "github", "sarif"),
+        default="text",
+        help="text, json (as --json), github workflow commands that annotate the pull request, "
+        "or SARIF 2.1.0 for code scanning, default text",
+    )
+    drift.add_argument(
+        "--baseline",
+        metavar="FILE",
+        help="an atlas, of the target branch say, whose findings are left out: only findings "
+        "whose id it does not hold are printed and graded",
+    )
     _add_atlas_flags(drift)
 
     explain = _sub(
@@ -1592,6 +1605,7 @@ def cmd_drift(args: argparse.Namespace) -> int:
     from rosio import query
     from rosio.drift import engine, rules
     from rosio.errors import EXIT_DRIFT
+    from rosio.model import dumps
 
     atlas = load_atlas(args)
     if DRIFT_CAPABILITY not in atlas.capabilities:
@@ -1613,6 +1627,9 @@ def cmd_drift(args: argparse.Namespace) -> int:
         )
     if wanted:
         atlas.findings = [item for item in atlas.findings if item.rule in set(wanted)]
+    held = _hold_baseline(args, atlas)
+    if args.format == "json":
+        args.json = True
     waivers = _waivers(args)
     graded, matched = engine.waive(atlas.findings, [item.key for item in waivers])
     if args.fix:
@@ -1620,6 +1637,11 @@ def cmd_drift(args: argparse.Namespace) -> int:
             print(line)
         return EXIT_OK
     answer = query.drift(atlas, min_severity=args.min_severity, limit=args.limit, waived=matched)
+    if held:
+        answer.data["baseline_held"] = held
+        answer.lines.append(
+            f"  {plural(held, 'finding')} the baseline holds, not printed or graded"
+        )
     _report_waivers(answer, waivers, matched, args.limit)
     # A rule that raised while the atlas was built left nothing behind it but its name.
     failed = [
@@ -1632,7 +1654,18 @@ def cmd_drift(args: argparse.Namespace) -> int:
         answer.lines.append(
             f"  rules that could not be trusted, so their findings are missing: {', '.join(failed)}"
         )
-    code = _answer(args, answer)
+    shown = [item for item in atlas.findings if _at_or_above(item.severity, args.min_severity)]
+    if args.format == "github":
+        for line in query.drift_github(atlas, [item for item in shown if item.id not in matched]):
+            print(line)
+        code = EXIT_OK
+    elif args.format == "sarif":
+        reasons = {item.key: item.reason for item in waivers}
+        waived = {finding: reasons[key] for finding, key in matched.items()}
+        print(dumps(query.drift_sarif(atlas, shown, waived)), end="")
+        code = EXIT_OK
+    else:
+        code = _answer(args, answer)
     failures = [
         engine.RuleFailure(rule=name, kind="raised", exc_type="", message="") for name in failed
     ]
@@ -1655,6 +1688,16 @@ def cmd_drift(args: argparse.Namespace) -> int:
             )
         return EXIT_DRIFT
     return code
+
+
+def _hold_baseline(args: argparse.Namespace, atlas) -> int:
+    """Drop the findings a baseline atlas already holds, by id, and say how many went."""
+    if not args.baseline:
+        return 0
+    known = {item.id for item in load_atlas(args, args.baseline).findings}
+    before = len(atlas.findings)
+    atlas.findings = [item for item in atlas.findings if item.id not in known]
+    return before - len(atlas.findings)
 
 
 def _waivers(args: argparse.Namespace):

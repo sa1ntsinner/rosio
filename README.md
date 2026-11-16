@@ -108,6 +108,8 @@ list and the privacy model are in [docs/assistants.md](https://github.com/sa1nts
   what the move asks of your packages, and `verify` builds them in the target.
 - [Handing a problem over](https://github.com/sa1ntsinner/rosio/blob/main/docs/bundle.md): `rosio bundle create` packs the atlas and the cited
   files so someone else sees the same findings.
+- [rosio in CI](https://github.com/sa1ntsinner/rosio/blob/main/docs/ci.md): a GitHub Action and
+  `rosio drift --format github` or `sarif` put each finding on the line of the pull request.
 - [Timestamp faults](https://github.com/sa1ntsinner/rosio/blob/main/docs/stamps-failure-zoo.md): what `rosio stamps` detects in a recording.
 - `AGENTS.md` is the contract, `ARCHITECTURE.md` the map, `CONTEXT.md` the vocabulary.
 

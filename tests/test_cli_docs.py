@@ -51,6 +51,7 @@ USER_DOCS = (
     "docs/migrate.md",
     "docs/bundle.md",
     "docs/examples.md",
+    "docs/ci.md",
 )
 """The pages the README sends a reader to."""
 

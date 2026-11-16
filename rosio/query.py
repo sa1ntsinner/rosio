@@ -147,6 +147,31 @@ def site(source: Source | Mapping[str, Any] | None, *, locator: bool = False, ta
     return text
 
 
+def checkout_site(atlas: Atlas, finding: Finding) -> tuple[str | None, int | None]:
+    """The first cited file as a path in the checkout, and its line, for a CI annotation.
+
+    `site` names a file by its package, which pins nothing on a pull request. The roots and
+    packages the atlas states give the path relative to the checkout; a file outside it, or
+    rosio's own table, has none.
+    """
+    if not finding.where:
+        return None, None
+    source = finding.where[0]
+    if source.file == NAME_TABLE:
+        return None, None
+    package, relpath = ids.parse_file(source.file)
+    if package == ids.REPO_PKG:
+        return relpath, source.line_hint
+    generated = atlas.generated or {}
+    places = (generated.get("packages") or {}).get(package) or {}
+    for root in generated.get("roots") or ():
+        inside = places.get(str(root.get("label")))
+        if root.get("kind") == (source.root or "src") and root.get("path") and inside:
+            path = "/".join(part for part in (root["path"], inside, relpath) if part != ".")
+            return path, source.line_hint
+    return None, None
+
+
 def tree_tag(atlas: Atlas, source: Source | None) -> str:
     """Which tree a cited value runs from, when the cited file alone would mislead.
 
@@ -2451,11 +2476,77 @@ def _finding_row(item: Finding) -> dict[str, Any]:
     }
 
 
+_SARIF_LEVEL = {"error": "error", "warn": "warning", "info": "note"}
+_GITHUB_COMMAND = {"error": "error", "warn": "warning", "info": "notice"}
+
+
+def _ci_message(item: Finding) -> str:
+    return f"{item.spoken}\nfix: {here(item.fix)}" if item.fix else item.spoken
+
+
+def _escape(text: str, prop: bool = False) -> str:
+    text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return text.replace(":", "%3A").replace(",", "%2C") if prop else text
+
+
+def drift_github(atlas: Atlas, findings: Sequence[Finding]) -> list[str]:
+    """One GitHub workflow command per finding, pinned to the cited line of the diff."""
+    lines = []
+    for item in sorted(findings, key=Finding.sort_key):
+        path, line = checkout_site(atlas, item)
+        props = [f"file={_escape(path, True)}"] if path else []
+        if path and line is not None:
+            props.append(f"line={line}")
+        props.append(f"title={_escape(item.rule, True)}")
+        lines.append(
+            f"::{_GITHUB_COMMAND[item.severity]} {','.join(props)}::{_escape(_ci_message(item))}"
+        )
+    return lines
+
+
+def drift_sarif(atlas: Atlas, findings: Sequence[Finding], waived: Mapping[str, str]) -> dict:
+    """SARIF 2.1.0 for code scanning. `waived` maps a finding id to its waiver reason, which
+    becomes an external suppression rather than a missing result."""
+    from rosio import __version__
+
+    results = []
+    for item in sorted(findings, key=Finding.sort_key):
+        path, line = checkout_site(atlas, item)
+        result: dict[str, Any] = {
+            "ruleId": item.rule,
+            "level": _SARIF_LEVEL[item.severity],
+            "message": {"text": _ci_message(item)},
+            "partialFingerprints": {"rosio/v1": item.fingerprint},
+        }
+        if path:
+            physical: dict[str, Any] = {"artifactLocation": {"uri": path}}
+            if line is not None:
+                physical["region"] = {"startLine": line}
+            result["locations"] = [{"physicalLocation": physical}]
+        if item.id in waived:
+            result["suppressions"] = [{"kind": "external", "justification": waived[item.id]}]
+        results.append(result)
+    rules = [{"id": rule} for rule in sorted({item.rule for item in findings})]
+    return {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "rosio", "version": __version__, "rules": rules}},
+                "results": results,
+            }
+        ],
+    }
+
+
 __all__ = [
     "DEFAULT_LIMIT",
     "Answer",
+    "checkout_site",
     "diff",
     "drift",
+    "drift_github",
+    "drift_sarif",
     "explain",
     "file_label",
     "label",

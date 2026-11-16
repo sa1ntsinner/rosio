@@ -620,6 +620,73 @@ def test_a_waiver_never_reaches_the_report_as_a_missing_finding(
     assert waived["data"]["waivers_matching_nothing"] == []
 
 
+def _located_atlas(tmp_path: Path) -> Path:
+    """The test atlas with the checkout layout extract states, and one sentence to escape."""
+    atlas = _atlas()
+    atlas.generated = {
+        "packages": {"lx_bringup": {"src": "lx_bringup"}},
+        "roots": [{"hash": "0", "kind": "src", "label": "src", "path": "ws/src"}],
+    }
+    atlas.findings[0].say = "100% at a:b,\nc"
+    target = tmp_path / "atlas.json"
+    target.write_text(model.dumps(atlas.to_json()), encoding="utf-8", newline="\n")
+    return target
+
+
+def test_the_github_format_pins_each_finding_to_its_line_and_escapes(tmp_path: Path, capsys):
+    target = _located_atlas(tmp_path)
+
+    code = main(["drift", "--atlas", str(target), "--format", "github", "--fail-on", "error"])
+    lines = capsys.readouterr().out.splitlines()
+
+    assert code == EXIT_DRIFT, "the format does not change the gate"
+    assert lines[0] == (
+        "::error file=ws/src/lx_bringup/config/nav2_overrides.yaml,line=154,"
+        "title=param.type_changed::100%25 at a:b,%0Ac%0Afix: write 1.0 in both files"
+    )
+    assert lines[1].startswith("::warning file=ws/src/lx_bringup/config/nav2_params.yaml,line=381,")
+
+
+def test_the_sarif_format_carries_fingerprints_and_waivers(tmp_path: Path, capsys):
+    target = _located_atlas(tmp_path)
+    error = _finding("param.type_changed")
+    waivers = _waiver_file(tmp_path, (error.id, "ticket 412"))
+
+    main(["drift", "--atlas", str(target), "--format", "sarif", "--waivers", str(waivers)])
+    run = json.loads(capsys.readouterr().out)["runs"][0]
+
+    assert run["tool"]["driver"]["name"] == "rosio"
+    assert [rule["id"] for rule in run["tool"]["driver"]["rules"]] == [
+        "param.shadowed",
+        "param.type_changed",
+    ]
+    first, second = run["results"]
+    assert first["ruleId"] == "param.type_changed" and first["level"] == "error"
+    location = first["locations"][0]["physicalLocation"]
+    assert location["artifactLocation"]["uri"] == "ws/src/lx_bringup/config/nav2_overrides.yaml"
+    assert location["region"]["startLine"] == 154
+    assert first["partialFingerprints"]["rosio/v1"] == error.fingerprint
+    assert first["suppressions"] == [{"kind": "external", "justification": "ticket 412"}]
+    assert second["level"] == "warning" and "suppressions" not in second
+
+
+def test_a_baseline_holds_back_the_findings_it_already_has(
+    atlas_file: Path, tmp_path: Path, capsys
+):
+    baseline = _atlas()
+    baseline.findings = [_finding("param.type_changed")]
+    target = tmp_path / "baseline.json"
+    target.write_text(model.dumps(baseline.to_json()), encoding="utf-8", newline="\n")
+
+    args = ["drift", "--atlas", str(atlas_file), "--baseline", str(target), "--fail-on", "error"]
+    code = main(args)
+    printed = capsys.readouterr().out
+
+    assert code == EXIT_OK, "only the warn finding is new"
+    assert "param.shadowed" in printed and "param.type_changed" not in printed
+    assert "1 finding the baseline holds, not printed or graded" in printed
+
+
 def test_an_atlas_the_rules_never_ran_over_is_refused_rather_than_called_clean(
     tmp_path: Path, capsys
 ):
