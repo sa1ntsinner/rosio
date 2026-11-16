@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
 
