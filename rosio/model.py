@@ -37,7 +37,8 @@ from rosio.errors import ContractError
 
 SCHEMA_MINOR = "35"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the refused file attribute `generated_by`; the finding key `edits`, the exact text replacements a fix makes; the
+stored id: the refused file attribute `generated_by`; the finding key `edits`, the exact
+text replacements a fix makes; the
 `publishes` and `subscribes` edge value `qos_overridden`, the record key
 `parameter_writes` and the `code_set` mechanism; the rules
 `topic.namespace_escape`, `param.read_undeclared`,
