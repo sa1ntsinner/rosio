@@ -2014,15 +2014,36 @@ def _mark_built_only(ctx: CollectContext, file_id: str) -> None:
     if package is None or not package.src_path or package.share_path:
         return
     elsewhere = same_name_in_package(ctx.ws, str(Path(package.src_path, parsed.relpath)))
+    generated = not elsewhere and _installed_from_build_dir(package.src_path, parsed.relpath)
     held = ctx.builder.atlas.entities.get(file_id)
-    if not elsewhere or (held is not None and held.attrs.get("refused_because")):
+    if not (elsewhere or generated) or (held is not None and held.attrs.get("refused_because")):
         return
-    ctx.builder.node(
-        file_id,
-        attrs={"loadable": False, "refused_because": BUILT_ONLY, "found_elsewhere": elsewhere},
-    )
+    attrs: dict[str, Any] = {"loadable": False, "refused_because": BUILT_ONLY}
+    if generated:
+        attrs["generated_by"] = ctx.ws.file_id(str(Path(package.src_path, "CMakeLists.txt")))
+    else:
+        attrs["found_elsewhere"] = elsewhere
+    ctx.builder.node(file_id, attrs=attrs)
     ctx.builder.node(ids.build_pkg(parsed.package))
     ctx.builder.edge(model.EdgeKind.CONTAINS.value, ids.build_pkg(parsed.package), file_id)
+
+
+def _installed_from_build_dir(src: str, relpath: str) -> bool:
+    """A file the package's CMake writes into the build directory and installs from there
+    (`install(FILES ${CMAKE_BINARY_DIR}/settings.yaml ...)`), so no source holds it."""
+    from rosio.migrate.cmake import commands
+
+    try:
+        text = Path(src, "CMakeLists.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    name = Path(relpath).name
+    return any(
+        "BINARY_DIR" in arg.text and arg.text.endswith("/" + name)
+        for call in commands(text)
+        if call.lower == "install"
+        for arg in call.args
+    )
 
 
 def _unrun(failure: records.WalkException) -> bool:

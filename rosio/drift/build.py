@@ -1014,6 +1014,9 @@ def _underlay_kind(node: model.Node) -> str:
 
 def _built_only(node: model.Node) -> str:
     relpath = ids.parse_file(node.id).relpath
+    generated = str(node.attrs.get("generated_by") or "")
+    if generated:
+        return f"{relpath} is written by {ids.parse_file(generated).relpath} during the build"
     held = " or ".join(node.attrs.get("found_elsewhere") or ["another directory"])
     needs = node.attrs.get("needs") or []
     if needs:

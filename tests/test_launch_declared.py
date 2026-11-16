@@ -500,6 +500,17 @@ def test_a_flattened_include_of_an_unbuilt_package_is_left_to_build_unbuilt(
     assert "flat_pkg" in unbuilt.say
 
 
+def test_a_file_cmake_installs_from_the_build_directory_is_generated(tmp_path: Path) -> None:
+    from rosio.collect.launch_declared import _installed_from_build_dir
+
+    (tmp_path / "CMakeLists.txt").write_text(
+        'file(WRITE "${CMAKE_BINARY_DIR}/settings.yaml" "a: 1")\n'
+        'install(FILES "${CMAKE_BINARY_DIR}/settings.yaml" DESTINATION share/x/config)\n'
+    )
+    assert _installed_from_build_dir(str(tmp_path), "config/settings.yaml")
+    assert not _installed_from_build_dir(str(tmp_path), "config/other.yaml")
+
+
 def test_a_required_argument_is_reported_not_skipped(ws: Workspace) -> None:
     """The walk stopped at a declaration with no default, and says so.
 
