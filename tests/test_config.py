@@ -229,6 +229,19 @@ def test_the_default_ignore_keeps_a_test_launch_file_a_profile_names(tmp_path: P
     assert ("bot", "test/launch/hil.launch.py") in _launch_index(ws)
 
 
+def test_a_fallback_launch_file_outside_every_package_is_found_by_the_walk(tmp_path: Path) -> None:
+    from rosio.collect.launch_declared import _launch_index, _locate
+    from rosio.config import _as_workspace
+
+    _write(tmp_path / "src" / "bot" / "package.xml", MANIFEST.format(name="bot"))
+    _write(tmp_path / "src" / "extra" / "sim.launch.py", "def generate_launch_description():\n")
+    _write(tmp_path / CONFIG_NAME, "roots:\n  - kind: src\n    path: src\n")
+    cfg = load_config(None, workspace=str(tmp_path))
+    ws = _as_workspace(str(tmp_path), roots=cfg.roots, ignore=cfg.ignore)
+    (entry,) = [item for profile in cfg.profiles for item in profile.entrypoints]
+    assert _locate(_launch_index(ws), entry.pkg, entry.target) is not None
+
+
 def test_a_bare_string_root_is_a_source_root(bench: Path) -> None:
     _write(bench / CONFIG_NAME, "roots:\n  - src\n")
     cfg = load_config(None, workspace=str(bench))

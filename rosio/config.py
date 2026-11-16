@@ -30,6 +30,7 @@ from typing import Any
 
 import yaml
 
+from rosio import ids
 from rosio.errors import UsageError
 from rosio.resolve import records
 from rosio.workspace import LAUNCH_SUFFIXES, SRC_SKIP_DIRS, Workspace
@@ -860,7 +861,8 @@ def _launch_profiles(ws: Workspace) -> list[tuple[str, str, Entrypoint]]:
         target = relative.split("/", 1)[1] if relative.startswith("launch/") else relative
         entry = Entrypoint(
             verb="launch",
-            pkg=package,
+            # The walk indexes a file outside every package under the repository package.
+            pkg=ws.rel(path)[0] or ids.REPO_PKG,
             target=target,
             origin=ws.site(path),
         )
