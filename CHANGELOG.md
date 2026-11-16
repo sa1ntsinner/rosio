@@ -12,8 +12,12 @@ Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
   suppression.
 * `rosio drift --baseline FILE` leaves out every finding whose id the baseline atlas holds, so
   the gate grades only what a change adds.
-* A GitHub Action at the repository root, `uses: sa1ntsinner/rosio@main`. See
-  [docs/ci.md](docs/ci.md).
+* `rosio drift --format markdown` writes a short summary for a pull request: the counts by
+  severity and one line per error and warn finding with the line to edit.
+* A GitHub Action at the repository root, `uses: sa1ntsinner/rosio@main`. It annotates the
+  pull request, writes the job summary, uploads SARIF, and with `base-ref` grades only the
+  findings the pull request adds. See [docs/ci.md](docs/ci.md).
+* The repository is a pre-commit hook source, hook `rosio-drift`.
 * Tested on ROS 2 Lyrical and Kilted and on Python 3.14.
 
 ### VS Code
