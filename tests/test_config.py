@@ -193,6 +193,20 @@ def test_the_fallback_leaves_out_ros1_and_test_launch_files(bench: Path) -> None
     assert load_config(str(stated), workspace=str(bench)).ignore == ()
 
 
+def test_the_fallback_leaves_out_a_launch_file_a_cmake_test_runs(bench: Path) -> None:
+    _write(
+        bench / "src" / "beta_pkg" / "src" / "system" / "check_launch.py",
+        "def generate_launch_description():\n    pass\n",
+    )
+    _write(
+        bench / "src" / "beta_pkg" / "src" / "system" / "CMakeLists.txt",
+        'pkg_add_test(check\n  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/check_launch.py"\n)\n',
+    )
+    _write(bench / CONFIG_NAME, "roots:\n  - kind: src\n    path: src\n")
+    slugs = [profile.slug for profile in load_config(None, workspace=str(bench)).profiles]
+    assert slugs == ["alpha_pkg.mapping", "beta_pkg.mapping", "nx_navigation"]
+
+
 def test_the_default_ignore_keeps_a_test_launch_file_a_profile_names(tmp_path: Path) -> None:
     """`ros2 launch bot test/launch/hil.launch.py` was skipped by the default ignore and
     reported as launch.unloadable with a launch_file_missing blind spot."""

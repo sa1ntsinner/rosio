@@ -875,9 +875,34 @@ def _not_a_profile(path: str) -> bool:
     target = Path(path)
     if TEST_DIRS & {target.parent.name, target.parent.parent.name}:
         return True
-    if fnmatch(target.name, TEST_NAME):
+    if fnmatch(target.name, TEST_NAME) or _run_by_cmake_test(target):
         return True
     return target.suffix != ".py" and is_ros1_launch(path)
+
+
+def _run_by_cmake_test(target: Path) -> bool:
+    """A launch file a test command of its package's CMake runs (`add_launch_test(x.py)`,
+    a project's own `foo_add_test(... COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/x.py)`), which
+    starts under the environment the test sets and no `ros2 launch` gives it."""
+    from rosio.migrate.cmake import commands
+
+    directory = target.parent
+    while True:
+        cmake = directory / "CMakeLists.txt"
+        if cmake.is_file():
+            try:
+                text = cmake.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+            for call in commands(text):
+                if "test" not in call.lower:
+                    continue
+                for arg in call.args:
+                    if arg.text == target.name or arg.text.endswith("/" + target.name):
+                        return True
+        if (directory / "package.xml").is_file() or directory.parent == directory:
+            return False
+        directory = directory.parent
 
 
 def _slug_candidates(package: str, relative: str) -> tuple[str, ...]:
