@@ -32,6 +32,19 @@ Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
   file other models include and not as a model of its own.
 * A file the package's CMake writes into the build directory and installs into its share is
   reported once by `build.unbuilt` instead of `launch.raised` per launch file.
+* A process a launch site starts inside an `OpaqueFunction` or an include keeps its own inline
+  launch values.
+* `param.set_undeclared` is silent on a key of a python dict several launch actions are handed
+  when another of those nodes declares the key or builds a name that could be it.
+* `launch.raised` names the command a launch file runs while its description is built and the
+  message a file exits with, asks for an argument whose empty default is no valid choice, and
+  asks for a code fix when the release rejects a call.
+* `extract.input_refused` over a missing parameters file cites the `DeclareLaunchArgument`
+  whose default spells only the file name.
+* A mesh under a directory the reader may not enter is a missing mesh and no longer ends the
+  robot model pass.
+* A fallback profile for a launch file outside every package loads.
+* `frame.orphan_root` is silent on two transform trees no profile runs together.
 * A C++ parameter whose default is a member initialized with an integer literal takes the
   type its class declares the member with, so a `double` member no longer reads as an integer
   parameter and `param.type_changed` stays silent on it.

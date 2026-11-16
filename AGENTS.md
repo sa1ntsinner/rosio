@@ -1751,6 +1751,20 @@ declares the member with, unless the call states its type, which moved the `type
 launch file a CMake command whose name contains `test` runs, so those profiles and run ids are
 gone.
 
+Inside `1.35`, with no new key, a third run over public repositories moved several readings.
+The join reads the last step of a launch trail as the action that starts a process, so a site
+inside an `OpaqueFunction` or an include keeps its inline launch rows, and a process filters
+rows only in the profiles it runs in; the parameter chains and states of such nodes moved.
+`param.set_undeclared` is silent on a key of one dict line several actions are handed when
+another of those nodes declares the name or has a blind spot that could build it.
+`launch.raised` over a refused process start states the command, program and plain leading
+words only, which is in the discriminator, so those finding ids moved once; its say and fix
+changed for an exit at import, an invalid empty choice and a TypeError, NameError or
+SyntaxError. `extract.input_refused` cites an argument default that spells only the file name
+of the missing path. `frame.orphan_root` compares two trees only when a profile runs both. A
+fallback profile for a launch file outside every package names `@repo`, where it named `repo`
+and never loaded.
+
 A reader pinned to `1.0` still loads a `1.35` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
