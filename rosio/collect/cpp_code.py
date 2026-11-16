@@ -1127,6 +1127,10 @@ class _Reader:
             if not values:
                 return None
             return (values[0], values[1] if len(values) > 1 else None, types, "")
+        if (self.sym, name) in self.assigned and name not in self.unit.lambda_wrappers:
+            # a local the function assigned (`auto getParam = handler->getParamGetter(ns)`)
+            # is not the wrapper of the same name
+            return None
         qualified = self._wrapper_symbol(name)
         if name in PLUGIN_DECLARE_CALLS and arguments and not qualified:
             return (arguments[0], arguments[1] if len(arguments) > 1 else None, types, "")
@@ -3632,7 +3636,8 @@ def _wrappers(root: Any, src: bytes, *, lambdas: bool = True) -> dict[str, tuple
         if parameters is None:
             continue
         name = lambda_name or _text(inner, src)
-        if not name.isidentifier():
+        # `void PidROS::declare_param(const std::string & name, ...)` defined outside its class
+        if not all(part.isidentifier() for part in name.split("::")):
             continue
         if not lambda_name:
             name = "::".join([*_namespaces_of(node, src), name])

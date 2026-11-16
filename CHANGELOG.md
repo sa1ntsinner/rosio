@@ -85,6 +85,9 @@ Atlas schema `1.36`, additive: a reader of a `1.35` file loads it.
 * A C++ parameter whose default is a member initialized with an integer literal takes the
   type its class declares the member with, so a `double` member no longer reads as an integer
   parameter and `param.type_changed` stays silent on it.
+* A C++ method that declares the parameter it is handed, defined outside its class, is read as
+  a declare wrapper, so its calls declare their names and `param.set_undeclared` no longer
+  abstains for every key of the node.
 
 ## 0.2.0
 

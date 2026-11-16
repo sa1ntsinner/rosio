@@ -49,6 +49,19 @@ def test_a_lambda_that_declares_its_argument_is_a_wrapper():
     assert [item for item in unit.params if item.name.status != cpp.LITERAL] == []
 
 
+def test_a_method_defined_outside_its_class_is_a_wrapper_and_a_local_is_not():
+    unit = cpp.parse_text(
+        """
+        void Pid::declare_param(const std::string & name, rclcpp::ParameterValue value) {
+          if (!params_->has_parameter(name)) { params_->declare_parameter(name, value); }
+        }
+        void Pid::init() { declare_param(prefix_ + "p", rclcpp::ParameterValue(1.0)); }
+        void Pid::other() { auto declare_param = factory(); declare_param("q", 2.0); }
+        """
+    )
+    assert [item.name.expr for item in unit.params] == ['prefix_ + "p"']
+
+
 def test_a_member_initializer_declares_its_name():
     unit = cpp.parse_text(
         'A::A() : rclcpp::Node("a"), gain_(declare_parameter<double>("gain")),'

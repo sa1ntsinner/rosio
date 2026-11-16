@@ -1795,6 +1795,14 @@ calling the package unbuilt and `extract.input_refused` treats it as the templat
 argument it is: silent unless a profile loads it with its defaults. The id of that blind spot
 moved with its expression.
 
+Inside `1.35`, with no new key, a pass over bug fixes of public repositories moved C++
+parameter readings. A declare wrapper that is a method defined outside its class
+(`void PidROS::declare_param(const std::string & name, ...)`) is a wrapper like a free
+function, so each call declares the name it passes and its body is no `param_name` blind spot
+that hid every key of the node; a local the calling function assigns (`auto getParam =
+handler->getParamGetter(ns)`) is not the wrapper of the same name. The parameter records,
+states and `param_name` rate of such nodes moved.
+
 A reader pinned to `1.0` still loads a `1.36` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
