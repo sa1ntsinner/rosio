@@ -2,7 +2,7 @@
 
 ## 0.2.1
 
-Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
+Atlas schema `1.36`, additive: a reader of a `1.35` file loads it.
 
 ### Continuous integration
 
@@ -43,6 +43,15 @@ Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
   files a Codex session patched from its rollout, and counts every file git reports changed
   when a session hands no transcript. Codex runs project hooks only in a trusted project once
   `/hooks` approves them.
+
+### Code
+
+* A rule reads one source file alone, with no launch file or live system to compare.
+  `callback.blocks_executor` reports a subscription, timer or service callback that waits on a
+  service or action client in the node's default callback group (`client.call()`,
+  `future.get()`, `spin_until_future_complete` on that future), which never returns under any
+  executor, and an rclcpp callback that spins its own node, which throws.
+  It stays silent wherever the file does not settle the case.
 
 ### Reading
 

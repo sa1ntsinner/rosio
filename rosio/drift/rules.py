@@ -82,6 +82,7 @@ COMMITTED = (
     "controller.undefined",
     "controller.joint_missing",
     "topic.namespace_escape",
+    "callback.blocks_executor",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -151,6 +152,7 @@ SEVERITY: dict[str, str] = {
     "controller.undefined": ERROR,
     "controller.joint_missing": ERROR,
     "topic.namespace_escape": WARN,
+    "callback.blocks_executor": ERROR,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {
@@ -186,6 +188,7 @@ FAMILIES = (
     "rosio.drift.frames",
     "rosio.drift.nodes",
     "rosio.drift.middleware",
+    "rosio.drift.misuse",
     "rosio.drift.params",
     "rosio.drift.plugins",
     "rosio.drift.topics",

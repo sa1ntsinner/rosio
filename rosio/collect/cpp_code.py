@@ -2901,6 +2901,252 @@ def stamped_frames(source: bytes) -> list[dict[str, Any]]:
     )
 
 
+def _descendants(node: Any, *, into_lambdas: bool = True) -> list[Any]:
+    out: list[Any] = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        out.append(current)
+        if current is not node and not into_lambdas and current.type == "lambda_expression":
+            continue
+        stack.extend(reversed(current.named_children))
+    return out
+
+
+_SELF_NODE = frozenset(
+    {
+        "this->get_node_base_interface()",
+        "get_node_base_interface()",
+        "this->shared_from_this()",
+        "shared_from_this()",
+    }
+)
+"""Spellings of the node a callback runs on, handed to a function that adds it to an executor."""
+
+_CPP_REGISTRATIONS = {
+    # call name: (callback position, the most arguments that leave the default callback group)
+    "create_subscription": (2, 3),
+    "create_wall_timer": (1, 2),
+    "create_timer": (1, 2),
+    "create_service": (1, 3),
+}
+
+
+def _receiver_is_self(node: Any, src: bytes) -> bool:
+    _name, receiver, _template = _call_parts(node, src)
+    if receiver is not None:
+        return _text(receiver, src) == "this"
+    function = _child(node, "function")
+    return function is not None and function.type != "qualified_identifier"
+
+
+def _member_name(node: Any, src: bytes) -> str:
+    text = _flat(node, src)
+    return text.removeprefix("this->")
+
+
+def _default_group_clients(nodes: Sequence[Any], src: bytes) -> dict[str, str]:
+    """Members and locals assigned a service or action client of this node made with no
+    callback group, so it shares the node's mutually exclusive default group. A name the file
+    assigns anything else is left out."""
+    seen: dict[str, set[str]] = {}
+    for node in nodes:
+        if node.type == "assignment_expression":
+            target, value = _child(node, "left"), _child(node, "right")
+        elif node.type == "init_declarator":
+            target, value = _child(node, "declarator"), _child(node, "value")
+        else:
+            continue
+        if target is None or value is None:
+            continue
+        kind, grouped = "", False
+        if value.type == "call_expression":
+            name, _receiver, _template = _call_parts(value, src)
+            arguments = _args(value)
+            if name == "create_client" and _scope_text(value, src) == "rclcpp_action":
+                handle = _flat(arguments[0], src) if arguments else ""
+                kind = "action" if handle in ("this", "shared_from_this()") else ""
+                grouped = len(arguments) > 2
+            elif name == "create_client" and _receiver_is_self(value, src):
+                kind, grouped = "client", len(arguments) > 2
+        seen.setdefault(_member_name(target, src), set()).add(kind if kind and not grouped else "")
+    return {
+        name: next(iter(kinds))
+        for name, kinds in seen.items()
+        if len(kinds) == 1 and "" not in kinds
+    }
+
+
+def _cpp_callbacks(
+    nodes: Sequence[Any], src: bytes
+) -> tuple[list[tuple[Any, str, int]], dict[str, tuple[str, int]]]:
+    """Callbacks this node registers on its default group: the lambdas themselves, and the
+    methods `std::bind(&Class::method, this, ...)` names, with the registration and its line."""
+    lambdas: list[tuple[Any, str, int]] = []
+    methods: dict[str, set[tuple[str, int]]] = {}
+    for node in nodes:
+        if node.type != "call_expression":
+            continue
+        name, _receiver, _template = _call_parts(node, src)
+        if name not in _CPP_REGISTRATIONS or not _receiver_is_self(node, src):
+            continue
+        position, most = _CPP_REGISTRATIONS[name]
+        arguments = _args(node)
+        if len(arguments) <= position or len(arguments) > most:
+            continue
+        callback = arguments[position]
+        if callback.type == "lambda_expression":
+            lambdas.append((callback, name, _line(node)))
+            continue
+        if callback.type != "call_expression":
+            continue
+        function, _r, _t = _call_parts(callback, src)
+        bound = _args(callback)
+        if function != "bind" or len(bound) < 2 or _flat(bound[1], src) != "this":
+            continue
+        method = _flat(bound[0], src)
+        if re.fullmatch(r"&[\w:]+", method):
+            methods.setdefault(method.rpartition("::")[2].lstrip("&"), set()).add(
+                (name, _line(node))
+            )
+    return lambdas, {name: min(rows) for name, rows in methods.items()}
+
+
+def _function_name(node: Any, src: bytes) -> str:
+    declarator = _child(node, "declarator")
+    while declarator is not None and declarator.type not in ("function_declarator",):
+        declarator = _child(declarator, "declarator")
+    if declarator is None:
+        return ""
+    name = _child(declarator, "declarator")
+    return _flat(name, src).rpartition("::")[2] if name is not None else ""
+
+
+def _cpp_executor_set_up(src: bytes) -> bool:
+    text = src.decode("utf-8", "replace")
+    return "MultiThreadedExecutor" in text and "CallbackGroup" in text
+
+
+def cpp_blocking_waits(root: Any, src: bytes) -> list[dict[str, Any]]:
+    """Waits inside a callback of this node that the executor running it can never end.
+
+    `rclcpp::spin_until_future_complete` and `rclcpp::spin_some` handed the node itself add it
+    to a second executor, which throws because the node already has one. `get()` and `wait()`
+    on the future of a client of this node in the default group wait for a reply the executor
+    cannot deliver while the callback holds that mutually exclusive group, whatever executor
+    spins the node."""
+    if root is None or _cpp_executor_set_up(src):
+        return []
+    nodes = _descendants(root)
+    clients = _default_group_clients(nodes, src)
+    lambdas, methods = _cpp_callbacks(nodes, src)
+    bodies: list[tuple[Any, str, str, int]] = [
+        (_child(item, "body"), "lambda", name, line) for item, name, line in lambdas
+    ]
+    definitions: dict[str, list[Any]] = {}
+    for node in nodes:
+        if node.type == "function_definition":
+            definitions.setdefault(_function_name(node, src), []).append(node)
+    for method, (registration, line) in sorted(methods.items()):
+        found = definitions.get(method, [])
+        if len(found) == 1:
+            bodies.append((_child(found[0], "body"), method, registration, line))
+    out: list[dict[str, Any]] = []
+    for body, callback, registration, line in bodies:
+        if body is None:
+            continue
+        reached = [(body, "")]
+        for node in _descendants(body, into_lambdas=False):
+            if node.type != "call_expression" or not _receiver_is_self(node, src):
+                continue
+            name, _receiver, _template = _call_parts(node, src)
+            found = definitions.get(name, [])
+            if len(found) == 1 and name != callback and _child(found[0], "body") is not None:
+                reached.append((_child(found[0], "body"), name))
+        for held, via in reached:
+            for row in _waits_in(held, src, clients):
+                row.update(callback=callback, registration=registration, registration_line=line)
+                if via:
+                    row["via"] = via
+                out.append(row)
+    unique = {(row["line_hint"], row["call"]): row for row in out}
+    return [unique[key] for key in sorted(unique)]
+
+
+def _waits_in(body: Any, src: bytes, clients: dict[str, str]) -> list[dict[str, Any]]:
+    own = _descendants(body, into_lambdas=False)
+    futures: dict[str, str] = {}
+
+    def requested(value: Any) -> str:
+        if value is None or value.type != "call_expression":
+            return ""
+        name, receiver, _template = _call_parts(value, src)
+        if receiver is None:
+            return ""
+        member = _member_name(receiver, src)
+        want = {"async_send_request": "client", "async_send_goal": "action"}.get(name)
+        return member if want and clients.get(member) == want else ""
+
+    for node in own:
+        if node.type == "init_declarator":
+            target, value = _child(node, "declarator"), _child(node, "value")
+        elif node.type == "assignment_expression":
+            target, value = _child(node, "left"), _child(node, "right")
+        else:
+            continue
+        member = requested(value)
+        if member and target is not None and target.type == "identifier":
+            futures[_text(target, src)] = member
+    out: list[dict[str, Any]] = []
+    for node in own:
+        if node.type != "call_expression":
+            continue
+        name, receiver, _template = _call_parts(node, src)
+        arguments = _args(node)
+        if (
+            name in ("spin_until_future_complete", "spin_some")
+            and _scope_text(node, src) == "rclcpp"
+        ):
+            if arguments and _flat(arguments[0], src) in _SELF_NODE:
+                out.append({"call": f"rclcpp::{name}()", "client": "", "line_hint": _line(node)})
+            continue
+        if name not in ("get", "wait") or arguments or receiver is None:
+            continue
+        held = _text(receiver, src)
+        if receiver.type == "identifier" and _waited_elsewhere(own, src, held, node):
+            continue
+        member = futures.get(held) if receiver.type == "identifier" else requested(receiver)
+        if member:
+            spelled = held if receiver.type == "identifier" else "the future"
+            out.append({"call": f"{spelled}.{name}()", "client": member, "line_hint": _line(node)})
+    return out
+
+
+def _waited_elsewhere(scope: Sequence[Any], src: bytes, future: str, site: Any) -> bool:
+    """Whether the scope hands the future to anything but this `get()` or `wait()`: a
+    `wait_for` with a timeout first, or a function that may spin for it."""
+    for node in scope:
+        if (
+            node.type != "identifier"
+            or _text(node, src) != future
+            or node.start_byte == site.start_byte
+        ):
+            continue
+        parent = node.parent
+        if parent is not None and parent.type == "field_expression":
+            call = parent.parent
+            if (
+                call is not None
+                and call.type == "call_expression"
+                and _call_parts(call, src)[0] in ("get", "wait")
+            ):
+                continue
+        if parent is not None and parent.type in ("init_declarator", "assignment_expression"):
+            continue
+        return True
+    return False
+
+
 _COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
 _HEADER_FRAME = re.compile(r'(?:\.|->)header\.frame_id\s*=\s*"([^"\\\n]*)"')
 
@@ -6348,6 +6594,8 @@ class CppCodeCollector:
         file_id = ws.file_id(unit.path)
         literals = name_literals(unit.source)
         stamped = stamped_frames(unit.source)
+        root = unit.syntax if unit.parsed else None
+        waits = cpp_blocking_waits(root, unit.source)
         builder.node(file_id, attrs={"language": "cpp", "loadable": unit.parsed})
         if unit.pkg and unit.pkg != ids.REPO_PKG:
             pkg_id = ids.build_pkg(unit.pkg)
@@ -6370,6 +6618,7 @@ class CppCodeCollector:
                 "type_aliases": unit.type_aliases,
                 **({"name_literals": literals} if literals else {}),
                 **({"stamped_frames": stamped} if stamped else {}),
+                **({"blocking_waits": waits} if waits else {}),
                 **(
                     {"plugin_loaders": [{"base_class": base} for base in unit.plugin_loaders]}
                     if unit.plugin_loaders

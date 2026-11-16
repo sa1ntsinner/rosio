@@ -426,6 +426,225 @@ def _is_self(node: ast.AST) -> bool:
     return isinstance(node, ast.Name) and node.id == "self"
 
 
+# ---------------------------------------------------------------------------
+# misuse a file proves on its own: a wait that blocks the callback's executor
+
+_REGISTRATIONS = {
+    # call name: (callback position, callback keywords, positions that hand a callback group)
+    "create_subscription": (2, ("callback",), 4),
+    "create_timer": (1, ("callback",), 2),
+    "create_service": (2, ("callback",), 99),
+}
+_SYNC_CALLS = {"call": "client", "send_goal": "action"}
+_ASYNC_CALLS = {"call_async": "client", "send_goal_async": "action"}
+
+
+def _self_attr(node: ast.AST) -> str:
+    """`x` of `self.x`."""
+    if isinstance(node, ast.Attribute) and _is_self(node.value):
+        return node.attr
+    return ""
+
+
+def _keyword(call: ast.Call, name: str) -> ast.expr | None:
+    return next((item.value for item in call.keywords if item.arg == name), None)
+
+
+def _walk_own(body: Sequence[ast.AST]) -> list[ast.AST]:
+    """Every node of a function body outside the functions and lambdas it defines."""
+    out: list[ast.AST] = []
+    stack = list(reversed(body))
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef):
+            continue
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+    return out
+
+
+def _default_group_handles(cls: ast.ClassDef) -> dict[str, str]:
+    """Members a node creates a service or action client in with no callback group, so the
+    client shares the node's mutually exclusive default group. A member the class assigns
+    anything else is left out."""
+    seen: dict[str, set[str]] = {}
+    for node in ast.walk(cls):
+        if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
+            continue
+        call = node.value
+        kind = ""
+        if isinstance(call, ast.Call) and _self_attr(call.func) == "create_client":
+            kind = "client"
+        elif (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name | ast.Attribute)
+            and (call.func.id if isinstance(call.func, ast.Name) else call.func.attr)
+            == "ActionClient"
+            and call.args
+            and _is_self(call.args[0])
+        ):
+            kind = "action"
+        if kind and _keyword(call, "callback_group") is not None:
+            kind = ""
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            name = _self_attr(target)
+            if name:
+                seen.setdefault(name, set()).add(kind)
+    return {
+        name: next(iter(kinds))
+        for name, kinds in seen.items()
+        if len(kinds) == 1 and "" not in kinds
+    }
+
+
+def _callbacks(cls: ast.ClassDef) -> dict[str, tuple[str, int]]:
+    """Methods the node registers as a subscription, timer or service callback on its default
+    callback group, by name, with the registration and its line."""
+    found: dict[str, set[tuple[str, int]]] = {}
+    for node in ast.walk(cls):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if not _is_self(node.func.value) or node.func.attr not in _REGISTRATIONS:
+            continue
+        position, keywords, grouped_at = _REGISTRATIONS[node.func.attr]
+        if _keyword(node, "callback_group") is not None or len(node.args) > grouped_at:
+            continue
+        target = node.args[position] if len(node.args) > position else None
+        for word in keywords:
+            target = target or _keyword(node, word)
+        name = _self_attr(target) if target is not None else ""
+        if name:
+            found.setdefault(name, set()).add((node.func.attr, node.lineno))
+    return {name: min(rows) for name, rows in found.items()}
+
+
+def _executor_set_up(tree: ast.Module) -> bool:
+    """A file that builds a multi threaded executor and a callback group, or replaces the default
+    group, may run the wait on another thread. rosio does not follow which."""
+    names = {
+        node.id if isinstance(node, ast.Name) else node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name | ast.Attribute)
+    }
+    group = any(name.endswith("CallbackGroup") for name in names)
+    return ("MultiThreadedExecutor" in names and group) or "_default_callback_group" in names
+
+
+def blocking_waits(tree: ast.Module) -> list[dict[str, Any]]:
+    """Waits inside a node callback on a reply only the same callback group can deliver.
+
+    The callback and the client both sit in the node's default group, which is mutually
+    exclusive, so the executor cannot run the reply while the callback waits: `call()` and
+    `send_goal()`, and a future from `call_async()` or `send_goal_async()` spun on or polled in
+    a loop, never return, whatever executor spins the node."""
+    if _executor_set_up(tree):
+        return []
+    out: list[dict[str, Any]] = []
+    for cls in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+        handles = _default_group_handles(cls)
+        callbacks = _callbacks(cls)
+        if not handles or not callbacks:
+            continue
+        methods = {
+            item.name: item
+            for item in cls.body
+            if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        for name, (registration, registered_at) in sorted(callbacks.items()):
+            if name not in methods:
+                continue
+            reached = [(methods[name], "")]
+            for node in _walk_own(methods[name].body):
+                called = _self_attr(node.func) if isinstance(node, ast.Call) else ""
+                if called in methods and called != name:
+                    reached.append((methods[called], called))
+            for method, via in reached:
+                for row in _waits_of(method, handles):
+                    row.update(
+                        callback=f"{cls.name}.{name}",
+                        registration=registration,
+                        registration_line=registered_at,
+                        **({"via": via} if via else {}),
+                    )
+                    out.append(row)
+    unique = {(row["line_hint"], row["call"]): row for row in out}
+    return [unique[key] for key in sorted(unique)]
+
+
+def _waits_of(
+    method: ast.FunctionDef | ast.AsyncFunctionDef, handles: dict[str, str]
+) -> list[dict[str, Any]]:
+    futures: dict[str, str] = {}
+    own = _walk_own(method.body)
+    for node in own:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr in _ASYNC_CALLS
+            and handles.get(_self_attr(node.value.func.value)) == _ASYNC_CALLS[node.value.func.attr]
+        ):
+            futures[node.targets[0].id] = _self_attr(node.value.func.value)
+    return [row for row in (_blocking_wait(node, handles, futures) for node in own) if row]
+
+
+def _blocking_wait(
+    node: ast.AST, handles: dict[str, str], futures: dict[str, str]
+) -> dict[str, Any] | None:
+    if isinstance(node, ast.While):
+        test = node.test
+        if (
+            isinstance(test, ast.UnaryOp)
+            and isinstance(test.op, ast.Not)
+            and isinstance(test.operand, ast.Call)
+            and isinstance(test.operand.func, ast.Attribute)
+            and test.operand.func.attr == "done"
+            and isinstance(test.operand.func.value, ast.Name)
+            and test.operand.func.value.id in futures
+            and not any(
+                isinstance(item, ast.Break | ast.Return | ast.Raise)
+                for item in _walk_own(node.body)
+            )
+        ):
+            name = test.operand.func.value.id
+            return {
+                "call": f"while not {name}.done()",
+                "client": futures[name],
+                "line_hint": node.lineno,
+            }
+        return None
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return None
+    attr = node.func.attr
+    if attr in _SYNC_CALLS and handles.get(_self_attr(node.func.value)) == _SYNC_CALLS[attr]:
+        if _keyword(node, "timeout_sec") is not None or len(node.args) > 1:
+            return None
+        member = _self_attr(node.func.value)
+        return {"call": f"self.{member}.{attr}()", "client": member, "line_hint": node.lineno}
+    if attr != "spin_until_future_complete" or _keyword(node, "timeout_sec") is not None:
+        return None
+    receiver = node.func.value
+    module = isinstance(receiver, ast.Name) and receiver.id == "rclpy"
+    executor = _self_attr(receiver) == "executor"
+    arguments = node.args[1:] if module else node.args
+    if module and not (node.args and _is_self(node.args[0])):
+        return None
+    if not (module or executor) or len(arguments) != 1:
+        return None
+    future = arguments[0]
+    if not isinstance(future, ast.Name) or future.id not in futures:
+        return None
+    spelled = "rclpy" if module else "self.executor"
+    return {
+        "call": f"{spelled}.spin_until_future_complete()",
+        "client": futures[future.id],
+        "line_hint": node.lineno,
+    }
+
+
 def _sorted_key(value: str | None) -> tuple[int, str]:
     """Sort key that puts a missing name last without comparing None to a string."""
     return (1, "") if value is None else (0, value)
@@ -2913,6 +3132,9 @@ class PyFile:
             record["stamped_frames"] = [
                 {"frame": frame, "line_hint": line} for frame, line in sorted(stamped)
             ]
+        waits = blocking_waits(self.tree)
+        if waits:
+            record["blocking_waits"] = waits
         for prefix, construction, read in self.prefix_reads:
             for (_scope, name, held), row in self.params.items():
                 under = not prefix or (isinstance(name, str) and name.startswith(prefix + "."))
@@ -3480,7 +3702,12 @@ class PyCodeCollector:
             "wrappers": record.get("wrappers", []),
             **{
                 key: record[key]
-                for key in ("node_handoffs", "name_literals", "stamped_frames")
+                for key in (
+                    "node_handoffs",
+                    "name_literals",
+                    "stamped_frames",
+                    "blocking_waits",
+                )
                 if key in record
             },
         }

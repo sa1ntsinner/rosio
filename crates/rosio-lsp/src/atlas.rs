@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn a_parameter_finding_about_a_file_is_also_about_the_parameters_its_lines_set() {
         let atlas = Atlas::parse(
-            r#"{"schema_version":"1.35","entities":{
+            r#"{"schema_version":"1.36","entities":{
             "param:/n|a":{"kind":"param","candidates":[{"source":{"file":"file:p|c.yaml","line_hint":9}}]},
             "param:/n|b":{"kind":"param","candidates":[{"source":{"file":"file:p|c.yaml","line_hint":4}}]}},
             "findings":[

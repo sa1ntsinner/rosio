@@ -77,7 +77,7 @@ full command list are in [docs/commands.md](https://github.com/sa1ntsinner/rosio
 | --- | --- |
 | **Effective parameters** | The chain behind one value, winner first, every shadowed value with its file and line, through `SetParameter`, rewritten yaml and launcher scripts. |
 | **Real names** | A code literal plus a remap plus a namespace is the topic that exists. |
-| **Drift** | Fifty seven rules with a committed vocabulary and stable waiver keys. |
+| **Drift** | Fifty eight rules with a committed vocabulary and stable waiver keys. |
 | **Middleware and clocks** | Mixed RMW implementations, a missing Zenoh router, and header stamps that go backwards, freeze or carry a TAI offset. |
 | **Blind spots** | What it could not work out is listed with the raw expression, never guessed. |
 

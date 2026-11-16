@@ -209,6 +209,12 @@ record. Three other spellings went with the alias table that held them, `plugin_
 `lookups` and the nested `tf` block they sat in into nothing, because no collector ever wrote
 that block into a fact.
 
+A coded file value sits beside the block and is not a record, because no join reads it:
+the misuse rule of section 10 does. `blocking_waits` is one row `{call, client, callback,
+registration, registration_line, via, line_hint}` per wait inside a node callback that the
+executor running it can never end. A reader states a row only where the source
+settles it, so a site it could not follow is no row at all rather than a blind spot.
+
 ## 3. Identity
 
 ### 3.1 Grammar
@@ -853,7 +859,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.35`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.36`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -1739,6 +1745,10 @@ be its own; its sentence about unnamed processes changed, which moved those fing
 
 * in `1.35`, the refused file attribute `generated_by`.
 
+* in `1.36`, the rule id `callback.blocks_executor`, the first rule that reads one source
+  file alone, and the coded file value `blocking_waits` (section 2.2) it reads. No id form
+  moved.
+
 Inside `1.35`, a second run over public repositories moved four readings. A refused share
 file that the package's CMake writes into the build directory and installs carries
 `generated_by`, the file id of that `CMakeLists.txt`, and no `found_elsewhere`;
@@ -1783,7 +1793,7 @@ calling the package unbuilt and `extract.input_refused` treats it as the templat
 argument it is: silent unless a profile loads it with its defaults. The id of that blind spot
 moved with its expression.
 
-A reader pinned to `1.0` still loads a `1.35` file: `Atlas.from_json` compares the major
+A reader pinned to `1.0` still loads a `1.36` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
@@ -1833,6 +1843,7 @@ build.unbuilt               build.underlay                remap.matches_nothing
 type.incompatible           service.no_server             launch.argument_undeclared
 frame.broadcast_twice       param.read_undeclared         controller.undefined
 controller.joint_missing     topic.namespace_escape
+callback.blocks_executor
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -1953,6 +1964,26 @@ names a library shares on purpose (`/tf`, `/tf_static`, `/rosout`, `/diagnostics
 `/parameter_events`, `/clock`) are left out. It names the line and asks to drop the slash or
 remap the name per namespace. It is not `type.incompatible` or `qos.incompatible`, which are two
 ends that cannot connect, while here the ends connect and should not.
+
+`callback.blocks_executor` is `error`. It fires once per callback and wait when a subscription,
+timer or service callback of a node, or a method of the same class it calls directly, waits on
+something the executor running it can never deliver. In rclpy that is `client.call()`,
+`action_client.send_goal()`, and a future from `call_async()` or `send_goal_async()` handed to
+`rclpy.spin_until_future_complete(self, ...)` or `self.executor.spin_until_future_complete` with
+no timeout or polled by a `while not future.done()` loop that cannot leave; in rclcpp it is
+`get()` or `wait()` on the future `async_send_request` or `async_send_goal` returns, when nothing
+else in the function waits for that future first. Each case needs the client and the callback
+both registered with no callback group, so both sit in the node's default group, which is
+mutually exclusive: the executor takes the reply only once the callback returns, so the wait
+never ends under a single or a multi threaded executor, and the grade is `error` because that
+holds for every executor. A third rclcpp case needs no client: `rclcpp::spin_until_future_complete`
+or `rclcpp::spin_some` handed the node itself (`shared_from_this()`, `get_node_base_interface()`)
+inside its own callback adds it to a second executor, which throws because the node has one. It
+is silent on a lambda callback it cannot match to a registration, on a callback or client given
+a group, options or another node, on a wait with a timeout, and on a file that builds a
+`MultiThreadedExecutor` together with a callback group or replaces the default group. The fix
+names the asynchronous call with a done callback, or a separate callback group with a multi
+threaded executor.
 
 `param.read_undeclared` is `warn`. It fires once per parameter of a node whose code reads it
 with `get_parameter(name)`, in rclcpp or rclpy, when no code the node runs declares the name.
@@ -2246,6 +2277,7 @@ One owner per module per milestone. Do not edit a module you do not own in your 
 | `rosio/drift/engine.py` | M3 | run order, rule isolation, deduplication, waivers, filtering and the counters |
 | `rosio/drift/{build,frames,nodes,params,plugins,time,topics}.py` | M3 | one module per rule family |
 | `rosio/drift/middleware.py` | M5 | mixed middleware and missing Zenoh routers per observed profile |
+| `rosio/drift/misuse.py` | M3 | ROS API misuse one source proves alone: a wait that blocks its callback's executor |
 | `rosio/drift/controllers.py` | M3 | ros2_control: spawned controllers no configuration defines, controller joints the model lacks |
 | `rosio/query.py` | M3 | CLI slices: explain, param, query, path, diff, unresolved, drift |
 | `rosio/render/__init__.py` | M4 | the render package surface, pure functions of a loaded atlas |
