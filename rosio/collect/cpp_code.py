@@ -469,6 +469,8 @@ class ParamSite:
     spelling: str = ""
     default_site: tuple[str, str, int] | None = None
     construction: str = ""
+    type_stated: bool = False
+    """The call states the type (`declare_parameter<int>`), so the default does not decide it."""
 
 
 @dataclass(frozen=True)
@@ -2482,6 +2484,7 @@ class _Reader:
                 default_reason=refused or "",
                 via_wrapper=wrapper,
                 spelling=_flat(name_node, self.src),
+                type_stated=bool(_scalar_type(types)),
             )
         )
         if ref.resolved and not refused:
@@ -4059,6 +4062,46 @@ def _member_defaults(units: Sequence[Unit]) -> None:
                 default_state="known",
                 value_type=item.value_type or _type_of(value),
             )
+        # `x_(0)` before `declare_parameter("x", x_)` with `double x_;` declares a double
+        for position, item in enumerate(unit.params):
+            if (
+                item.default_state == "known"
+                and type(item.default) is int
+                and not item.type_stated
+                and item.default_ref is not None
+                and item.default_ref.member
+                and item.owner_class
+                and _member_type(units, unit.pkg, item.owner_class, item.default_ref.member)
+                == "double"
+            ):
+                unit.params[position] = replace(
+                    item, default=float(item.default), value_type="double"
+                )
+
+
+def _member_type(units: Sequence[Unit], pkg: str, owner: str, member: str) -> str:
+    """The scalar type a class of the package declares one member with, when only one."""
+    tail = _type_tail(owner)
+    types: set[str] = set()
+    for unit in units:
+        if unit.pkg != pkg or unit.syntax is None:
+            continue
+        stack = [unit.syntax]
+        while stack:
+            node = stack.pop()
+            stack.extend(node.named_children)
+            if node.type != "field_declaration":
+                continue
+            parent = node.parent.parent if node.parent is not None else None
+            label = _child(parent, "name") if parent is not None else None
+            if label is None or _type_tail(_flat(label, unit.source)) != tail:
+                continue
+            if any(
+                child.type == "field_identifier" and _flat(child, unit.source) == member
+                for child in node.named_children
+            ):
+                types.add(SCALAR_TYPES.get(_flat(_child(node, "type"), unit.source), ""))
+    return next(iter(types)) if len(types) == 1 else ""
 
 
 def _type_tail(name: str) -> str:

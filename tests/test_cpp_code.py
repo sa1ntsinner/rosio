@@ -869,6 +869,25 @@ def test_timer_callbacks_link_member_publishers(expression):
 
 
 @needs_cpp
+def test_a_member_default_takes_the_type_the_header_declares(tmp_path: Path) -> None:
+    header = cpp.parse_text(
+        "class N : public rclcpp::Node {\n public:\n  N();\n private:\n"
+        "  double gain_;\n  int count_;\n};\n",
+        path="n.hpp",
+    )
+    source = cpp.parse_text(
+        '#include "n.hpp"\nN::N() : Node("n"), gain_(0), count_(0) {\n'
+        '  gain_ = declare_parameter("gain", gain_);\n'
+        '  count_ = declare_parameter("count", count_);\n}\n',
+        path="n.cpp",
+    )
+    cpp.analyse([header, source])
+    rows = {row["name"]: row for row in cpp.file_report(source)["parameters"]}
+    assert (rows["gain"]["type"], rows["gain"]["default"]) == ("double", 0.0)
+    assert (rows["count"]["type"], rows["count"]["default"]) == ("int", 0)
+
+
+@needs_cpp
 def test_a_timer_period_json_cannot_hold_records_a_blind_spot(tmp_path: Path) -> None:
     """This one left no trace at all: the rate resolved count dropped, no blind spot
     appeared, nothing raised, and the rate read 1.000 over the smaller denominator."""
