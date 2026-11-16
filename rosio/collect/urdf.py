@@ -825,7 +825,8 @@ def scan_xacro(path: str, *, resolve_package: PackageResolver | None = None) -> 
     walk(root)
     declared = {name for name, _default in args}
     used = sorted(set(_ARG_USE.findall(text)))
-    robot_name = (root.get("name") or "").strip() or None
+    # Only a `<robot>` root is a model: xacro expands anything, urdf reads only that.
+    robot_name = (root.get("name") or "").strip() or None if root.tag == "robot" else None
     return XacroFile(
         path=path,
         kind="model" if robot_name else "include_only",

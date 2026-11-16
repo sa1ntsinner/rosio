@@ -164,6 +164,16 @@ def test_an_undeclared_xacro_argument_is_named(static_root: Path, ws: Workspace)
     assert scan.kind == "model"
 
 
+def test_a_xacro_whose_root_is_not_robot_is_no_model(tmp_path: Path) -> None:
+    path = tmp_path / "offset.xacro"
+    path.write_text(
+        '<gripper name="g" xmlns:xacro="http://www.ros.org/wiki/xacro">\n'
+        '  <xacro:arg name="xyz" default="0 0 0.1"/>\n</gripper>\n',
+        encoding="utf-8",
+    )
+    assert urdf_collect.scan_xacro(str(path)).kind == "include_only"
+
+
 def test_a_missing_xacro_tool_refuses_with_a_reason(
     static_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
