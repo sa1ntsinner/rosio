@@ -62,7 +62,7 @@ def test_the_default_roots_are_left_out_so_a_later_build_is_read(workspace: Path
 
 @pytest.mark.ros
 def test_an_included_launch_file_that_needs_arguments_is_not_offered(workspace: Path) -> None:
-    launch = next((workspace / "src").rglob("*.launch.py"))
+    launch = workspace / "src" / "lx_bringup" / "launch" / "plain_node.launch.py"
     base = launch.with_name("needs_args.launch.py")
     base.write_text(
         "from launch import LaunchDescription\n"
@@ -99,7 +99,7 @@ def _including(name: str, through_variable: bool = False, package: str = "lx_bri
 def test_only_a_real_include_hides_a_launch_file_that_needs_arguments(workspace: Path) -> None:
     """`sim.launch.py` counted as included wherever `nav_sim.launch.py` was, and a comment
     naming a file counted as including it."""
-    launch = next((workspace / "src").rglob("*.launch.py"))
+    launch = workspace / "src" / "lx_bringup" / "launch" / "plain_node.launch.py"
     needs = (
         "from launch import LaunchDescription\n"
         "from launch.actions import DeclareLaunchArgument\n"
