@@ -323,11 +323,29 @@ class _NoProcesses:
         self._saved.clear()
 
     def _refuse(self, name: str):
-        def refuse(*_args, **_kwargs):
+        def refuse(*args, **kwargs):
             self.blocked.append(name)
-            raise RuntimeError(f"the launch walk refused to start a process through {name}")
+            command = _command_words(args[0] if args else kwargs.get("args"))
+            raise RuntimeError(
+                f"the launch walk refused to run the command {command} through {name}"
+                if command
+                else f"the launch walk refused to start a process through {name}"
+            )
 
         return refuse
+
+
+def _command_words(command: Any) -> str:
+    """The program and its leading plain arguments, never a path a machine holds."""
+    words = command.split() if isinstance(command, str) else command
+    if not isinstance(words, (list, tuple)) or not words:
+        return ""
+    out = [Path(str(words[0])).name]
+    for word in words[1:4]:
+        if not isinstance(word, str) or not re.fullmatch(r"[\w.:=-]+", word):
+            break
+        out.append(word)
+    return " ".join(out) if out[0] else ""
 
 
 PROCESS_EVENTS = frozenset(

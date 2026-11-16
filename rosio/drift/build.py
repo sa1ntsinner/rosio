@@ -263,6 +263,12 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
             )
         )
         say = _raised_say(first.label, first.exc_type, first.phase, first.message, first.kept)
+        if _REFUSED_COMMAND.search(first.message):
+            fix = (
+                "nothing to change for the robot: rosio reads launch files without running the "
+                "commands they call, so build the description without that output, or take "
+                "the profile out of rosio.yaml"
+            )
         slugs = ", ".join(ids.parse_profile(item) for item in _profile_ids(rows))
         package = launch_declared.missing_package(first.message)
         module = (
@@ -502,10 +508,20 @@ def _raised_say(label: str, exc_type: str, phase: str, message: str, kept: str =
             f"({_clip(message).rstrip('.')}), so this atlas holds {kept} without the values that "
             "failed to expand."
         )
+    command = _REFUSED_COMMAND.search(message)
+    if command:
+        return (
+            f"{label} runs the command {command.group(1)} in the {phase} phase, and the launch "
+            "walk never starts a process, so the nodes it starts are missing from this atlas."
+        )
+    did = "exited" if exc_type == "SystemExit" else f"raised {exc_type}"
     return (
-        f"{label} raised {exc_type} in the {phase} phase{where}, so the nodes it starts are "
-        "missing from this atlas."
+        f"{label} {did} in the {phase} phase{where} ({_clip(message).rstrip('.')}), so the "
+        "nodes it starts are missing from this atlas."
     )
+
+
+_REFUSED_COMMAND = re.compile(r"refused to run the command (.+?) through ")
 
 
 def _where(row: _Row) -> Source:

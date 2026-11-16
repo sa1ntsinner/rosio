@@ -1548,6 +1548,21 @@ def test_launch_raised_without_a_kept_action_keeps_its_wording_and_id():
     )
 
 
+def test_launch_raised_names_the_command_a_file_runs_and_why_a_file_exited():
+    from rosio.resolve import _launch_child
+
+    command = _launch_child._command_words(["/usr/bin/tool", "list", "/home/x/y"])
+    assert command == "tool list"
+    message = f"the launch walk refused to run the command {command} through run"
+    row = dict(_RAISED_ROW, phase="import", message=message)
+    (found,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert "runs the command tool list in the import phase" in found.say
+    assert "without running the commands" in found.fix
+    row = dict(_RAISED_ROW, phase="import", exc_type="SystemExit", message="tools not built")
+    (found,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert "exited in the import phase (tools not built)" in found.say
+
+
 def test_launch_raised_names_a_missing_module_and_its_apt_package():
     """The row held `No module named 'controller_manager'` and the fix said to supply an
     argument."""
