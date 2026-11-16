@@ -174,6 +174,20 @@ def test_a_xacro_whose_root_is_not_robot_is_no_model(tmp_path: Path) -> None:
     assert urdf_collect.scan_xacro(str(path)).kind == "include_only"
 
 
+def test_a_xacro_robot_that_only_defines_macros_is_no_model(tmp_path: Path) -> None:
+    path = tmp_path / "_sensor.urdf.xacro"
+    path.write_text(
+        '<robot name="sensor" xmlns:xacro="http://www.ros.org/wiki/xacro">\n'
+        '  <xacro:macro name="sensor" params="parent">\n'
+        '    <xacro:arg name="plug" default="false"/>\n'
+        '    <link name="sensor_link"/>\n'
+        '    <xacro:if value="$(arg plug)"><link name="plug_link"/></xacro:if>\n'
+        "  </xacro:macro>\n</robot>\n",
+        encoding="utf-8",
+    )
+    assert urdf_collect.scan_xacro(str(path)).kind == "include_only"
+
+
 def test_a_missing_xacro_tool_refuses_with_a_reason(
     static_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

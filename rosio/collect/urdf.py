@@ -795,12 +795,15 @@ def scan_xacro(path: str, *, resolve_package: PackageResolver | None = None) -> 
     args: list[tuple[str, str | None]] = []
     includes: list[XacroInclude] = []
     calls: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+    plain: list[str] = []
 
     def walk(parent: ElementTree.Element) -> None:
         for element in parent:
             tag = element.tag
             namespace = _xacro_namespace(tag)
             if namespace is None:
+                if isinstance(tag, str):
+                    plain.append(tag)
                 walk(element)
                 continue
             local = tag[len(namespace) :]
@@ -827,9 +830,11 @@ def scan_xacro(path: str, *, resolve_package: PackageResolver | None = None) -> 
     used = sorted(set(_ARG_USE.findall(text)))
     # Only a `<robot>` root is a model: xacro expands anything, urdf reads only that.
     robot_name = (root.get("name") or "").strip() or None if root.tag == "robot" else None
+    # Macros and nothing that calls one or writes an element: a library another model includes.
+    library = bool(macros) and not calls and not plain
     return XacroFile(
         path=path,
-        kind="model" if robot_name else "include_only",
+        kind="model" if robot_name and not library else "include_only",
         robot_name=robot_name,
         properties=tuple(properties),
         macros=tuple(macros),
