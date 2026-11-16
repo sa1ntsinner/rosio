@@ -468,6 +468,27 @@ def test_a_missing_default_cites_the_argument_and_names_the_file_one_slip_away(t
     assert "lidar.yaml" in found[0].fix
 
 
+@pytest.mark.ros
+def test_a_missing_file_a_default_names_by_its_file_name_cites_the_default(tmp_path: Path):
+    package(
+        tmp_path,
+        "p",
+        {
+            "config/lidar.yaml": "lidar:\n  ros__parameters:\n    rate: 10\n",
+            "run.launch.py": launch(
+                "DeclareLaunchArgument('params', default_value='lidar_params.yaml')",
+                'Node(package="ext", executable="lidar", name="lidar", '
+                "parameters=[PathJoinSubstitution([os.path.dirname(__file__), 'config', "
+                "LaunchConfiguration('params')])])",
+                imports="import os\nfrom launch.substitutions import PathJoinSubstitution\n",
+            ),
+        },
+    )
+    atlas = run_twice(config(tmp_path, Entrypoint("launch", "p", "run.launch.py")))
+    (found,) = findings(atlas, "extract.input_refused")
+    assert "DeclareLaunchArgument" in " ".join(row.locator for row in found.where)
+
+
 # ---------------------------------------------------------------------------
 # M7, what the probe states about processes
 

@@ -2730,8 +2730,14 @@ class ParamsCollector:
                 line = _YAML_LINE.search(reason)
                 site = ctx.ws.site(path, line_hint=int(line.group(1)) if line else None)
                 evidence.append(ctx.ws.source(site))
-            if not exists and path in origins:
-                evidence.append(ctx.ws.source(origins[path]))
+            # A default may spell only the tail of the path launch joins it onto.
+            tails = [
+                item
+                for item in origins
+                if path == item or ("." in Path(item).name and path.endswith(f"/{item}"))
+            ]
+            if not exists and tails:
+                evidence.append(ctx.ws.source(origins[max(tails, key=len)]))
             # a reader inside a launch file no root holds (nav2_bringup from the release)
             # has no line here to cite
             held = reader is not None and _readable(ctx.ws, reader.path)
