@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
+
 ### Continuous integration
 
 * `rosio drift --format github` prints one workflow command per finding, so GitHub pins each
@@ -17,6 +19,18 @@
 ### VS Code
 
 * The hover says what a name was read from (config, code, the live system, a bag).
+
+### Reading
+
+* The fallback configuration no longer offers a launch file that a CMake test command of its
+  package runs.
+* A xacro file whose root element is not `robot`, or that only defines macros, is read as a
+  file other models include and not as a model of its own.
+* A file the package's CMake writes into the build directory and installs into its share is
+  reported once by `build.unbuilt` instead of `launch.raised` per launch file.
+* A C++ parameter whose default is a member initialized with an integer literal takes the
+  type its class declares the member with, so a `double` member no longer reads as an integer
+  parameter and `param.type_changed` stays silent on it.
 
 ## 0.2.0
 

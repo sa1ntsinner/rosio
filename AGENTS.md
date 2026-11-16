@@ -853,7 +853,7 @@ value precedence.
   Adding the recorded layer appends `layer.recorded`, `edge.timing` and `bagtopic.stats`.
   The pass record still has no mark of its own, which is owed and lives in `rosio/extract.py`.
 
-The current version is **`1.34`**, and every addition it holds over `1.0` is additive, so no
+The current version is **`1.35`**, and every addition it holds over `1.0` is additive, so no
 stored finding id moved, no waiver stopped matching and no consumer cache was invalidated.
 What was added, in the order it arrived:
 
@@ -1737,7 +1737,21 @@ file reported by `param.set_undeclared`; those findings are gone and the paramet
 code was not read, because such a node takes the name its source gives it and the block may
 be its own; its sentence about unnamed processes changed, which moved those fingerprints.
 
-A reader pinned to `1.0` still loads a `1.34` file: `Atlas.from_json` compares the major
+* in `1.35`, the refused file attribute `generated_by`.
+
+Inside `1.35`, a second run over public repositories moved four readings. A refused share
+file that the package's CMake writes into the build directory and installs carries
+`generated_by`, the file id of that `CMakeLists.txt`, and no `found_elsewhere`;
+`build.unbuilt` reports it where `launch.raised` fired once per launch file. A xacro file whose
+root is not `robot`, or whose top level holds only includes, properties and macro definitions,
+is `include_only` and no model, so its frames, run and blind spots are gone. A C++ parameter
+default that is a member initialized with an integer literal takes the scalar type the class
+declares the member with, unless the call states its type, which moved the `type` and
+`default` of such rows and the keys of their coded edges. The fallback configuration offers no
+launch file a CMake command whose name contains `test` runs, so those profiles and run ids are
+gone.
+
+A reader pinned to `1.0` still loads a `1.35` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside
 `SCHEMA_MINOR`, and a test loads a file carrying the additions with the version pinned
