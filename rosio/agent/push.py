@@ -107,7 +107,25 @@ def newer_source(root: Path, since: float) -> str:
     return ""
 
 
-def briefing(root: Path) -> str:
+def session_mark(data: dict) -> Path | None:
+    """Where the SessionStart hook notes whether the atlas was older than the sources."""
+    session = str(data.get("session_id") or "")
+    if not session:
+        return None
+    key = hashlib.sha256(session.encode("utf-8")).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / "rosio-hooks" / f"session-{key}.json"
+
+
+def stale_at_start(data: dict) -> str:
+    """The source the SessionStart hook found newer than the atlas, or nothing."""
+    mark = session_mark(data)
+    try:
+        return str(json.loads(mark.read_text(encoding="utf-8")).get("stale") or "")
+    except (AttributeError, OSError, ValueError):
+        return ""
+
+
+def briefing(root: Path, mark: Path | None = None) -> str:
     target = root / ATLAS
     if not target.is_file():
         return f"rosio: no atlas here. rosio extract . --out {DEFAULT_OUT_DIR} builds one."
@@ -128,6 +146,10 @@ def briefing(root: Path) -> str:
         f"findings: {shown or 'none'}",
     ]
     changed = newer_source(root, target.stat().st_mtime)
+    # the first start of a session decides, a resume finds the session's own edits
+    if mark is not None and not mark.exists():
+        mark.parent.mkdir(parents=True, exist_ok=True)
+        mark.write_text(dumps_line({"stale": changed}), encoding="utf-8")
     if changed:
         lines.insert(
             1,
@@ -324,9 +346,11 @@ def prompt_slice(root: Path, prompt: str) -> str:
 # Stop
 
 
-def stop_check(root: Path, changed: list[str], said: str) -> str:
+def stop_check(root: Path, changed: list[str], said: str, stale: str = "") -> str:
     """Extract the workspace again into a temporary directory and state the findings the
-    session's edits added. The atlas in rosio-out stays as it was."""
+    session's edits added. The atlas in rosio-out stays as it was. When it was already older
+    than `stale` as the session began, earlier edits may have added them, and nothing says
+    which."""
     target = root / ATLAS
     edits = [path for path in changed if watched(path)]
     if not edits or not target.is_file():
@@ -346,10 +370,16 @@ def stop_check(root: Path, changed: list[str], said: str) -> str:
     if not added:
         return ""
     gone = len(delta.data["gone"])
-    lines = [
-        f"rosio extracted this workspace again after the edits to {', '.join(edits[:5])}: "
-        f"{len(added)} finding{'s' if len(added) != 1 else ''} added, {gone} gone."
-    ]
+    count = f"{len(added)} finding{'s' if len(added) != 1 else ''}"
+    head = f"rosio extracted this workspace again after the edits to {', '.join(edits[:5])}: "
+    if stale:
+        head += (
+            f"{count} not in {ATLAS}, {gone} gone. That atlas was older than {stale} when this "
+            "session began, so earlier edits may have added them."
+        )
+    else:
+        head += f"{count} added, {gone} gone."
+    lines = [head]
     for item in added[:8]:
         lines.append(finding_line(item))
         lines.extend(f"  {row}" for row in slices.edit_lines(item))
@@ -372,7 +402,7 @@ def _quiet(answer) -> int:
 
 
 def brief_main() -> int:
-    return _quiet(lambda data: briefing(root_of(data)))
+    return _quiet(lambda data: briefing(root_of(data), session_mark(data)))
 
 
 def prompt_main() -> int:

@@ -169,6 +169,16 @@ def test_session_and_prompt_hooks_state_the_atlas(tmp_path, monkeypatch):
     assert "parameter /controller_server FollowPath.plugin" in said
     assert push.prompt_slice(tmp_path, "tidy the readme") == ""
 
+    data = {"session_id": "s1"}
+    edit = tmp_path / "node.py"
+    edit.write_text("x = 1\n", encoding="utf-8")
+    os.utime(edit, (target.stat().st_mtime + 10,) * 2)
+    push.briefing(tmp_path, push.session_mark(data))
+    edit.unlink()
+    push.briefing(tmp_path, push.session_mark(data))
+    assert push.stale_at_start(data) == "node.py", "the first start of the session decides"
+    assert push.stale_at_start({"session_id": "s2"}) == ""
+
 
 # the table
 

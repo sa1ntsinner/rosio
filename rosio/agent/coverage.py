@@ -111,7 +111,11 @@ def _run() -> None:
     changed = edited(data["transcript_path"], root)
     if changed:
         try:
-            measured = "" if data.get("stop_hook_active") else push.stop_check(root, changed, text)
+            measured = (
+                ""
+                if data.get("stop_hook_active")
+                else push.stop_check(root, changed, text, push.stale_at_start(data))
+            )
         except Exception as exc:
             measured = ""
             print(f"rosio stop check skipped: {' '.join(str(exc).splitlines())}", file=sys.stderr)

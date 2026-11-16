@@ -35,6 +35,8 @@ Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
   the workspace.
 * The Stop hook extracts a workspace the session edited again into a temporary directory and
   stops the session once with the findings the edit added. `rosio-out` is left as it was.
+  When the atlas was already older than the sources as the session began, it says so and
+  calls those findings not in the atlas rather than added by the edits.
 * `rosio uninstall claude-code` removes all three hooks.
 
 ### Reading
