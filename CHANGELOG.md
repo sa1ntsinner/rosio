@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Continuous integration
+
+* `rosio drift --format github` prints one workflow command per finding, so GitHub pins each
+  one to its line of the pull request. `--format sarif` writes SARIF 2.1.0 for code scanning,
+  with the finding fingerprint under `partialFingerprints` and a waived finding as an external
+  suppression.
+* `rosio drift --baseline FILE` leaves out every finding whose id the baseline atlas holds, so
+  the gate grades only what a change adds.
+* A GitHub Action at the repository root, `uses: sa1ntsinner/rosio@main`. See
+  [docs/ci.md](docs/ci.md).
+* Tested on ROS 2 Lyrical and Kilted and on Python 3.14.
+
+### VS Code
+
+* The hover says what a name was read from (config, code, the live system, a bag).
+
 ## 0.2.0
 
 Atlas schema `1.34` (`0.1.0` wrote `1.32`). Both steps are additive: a reader of a `1.32`

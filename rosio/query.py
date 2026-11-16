@@ -2512,17 +2512,19 @@ def drift_sarif(atlas: Atlas, findings: Sequence[Finding], waived: Mapping[str, 
     results = []
     for item in sorted(findings, key=Finding.sort_key):
         path, line = checkout_site(atlas, item)
+        if not path:
+            # code scanning refuses a result with no location
+            continue
         result: dict[str, Any] = {
             "ruleId": item.rule,
             "level": _SARIF_LEVEL[item.severity],
             "message": {"text": _ci_message(item)},
             "partialFingerprints": {"rosio/v1": item.fingerprint},
         }
-        if path:
-            physical: dict[str, Any] = {"artifactLocation": {"uri": path}}
-            if line is not None:
-                physical["region"] = {"startLine": line}
-            result["locations"] = [{"physicalLocation": physical}]
+        physical: dict[str, Any] = {"artifactLocation": {"uri": path}}
+        if line is not None:
+            physical["region"] = {"startLine": line}
+        result["locations"] = [{"physicalLocation": physical}]
         if item.id in waived:
             result["suppressions"] = [{"kind": "external", "justification": waived[item.id]}]
         results.append(result)

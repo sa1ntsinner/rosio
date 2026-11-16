@@ -2118,7 +2118,11 @@ point and it is `rosio drift`, never `extract`.
   `--min-severity {error,warn,info}` for output filtering, because the gate severity and
   the print threshold are two decisions and one flag cannot carry both. It takes
   `--waivers FILE` for the third decision, which findings this repository has already
-  accepted, and section 10.1 says why that one never reaches an extraction.
+  accepted, and section 10.1 says why that one never reaches an extraction. `--baseline FILE`
+  is the fourth, which findings the target branch already had, matched on finding id, and
+  `--format {text,json,github,sarif}` is how the same graded findings are printed: `github`
+  leaves a waived finding out, `sarif` keeps it as an external suppression and leaves out a
+  finding with no file, which code scanning refuses.
 
 ## 11a. Published numbers
 

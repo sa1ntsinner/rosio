@@ -102,6 +102,25 @@ jobs:
           cd src/rosio_monitor
           PYTHONPATH="$GITHUB_WORKSPACE:$PYTHONPATH" /opt/venv/bin/python -m pytest -q test
 
+  action:
+    name: action
+    runs-on: ubuntu-latest
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          path: examples/rover_ws
+          version: .
+          sarif: "false"
+          fail-on: never
+      - name: findings are pinned to files of the checkout
+        shell: bash
+        run: |
+          rosio drift --atlas "$RUNNER_TEMP/rosio-out/atlas.json" --format github \
+            | grep -q "file=examples/rover_ws/src/rover_control/rover_control/safety_stop.py,line="
+          rosio drift --atlas "$RUNNER_TEMP/rosio-out/atlas.json" --format sarif > /dev/null
+
   rust:
     name: rust ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

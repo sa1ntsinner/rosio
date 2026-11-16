@@ -12,7 +12,7 @@ inputs:
     description: lowest severity that fails the step, error, warn, info or never
     default: error
   version:
-    description: rosio version to install from PyPI, or latest
+    description: rosio version to install from PyPI, latest, or a path to a checkout of rosio
     default: latest
   sarif:
     description: upload the findings to code scanning as SARIF, true or false
@@ -24,18 +24,24 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
     - name: install rosio
       shell: bash
       env:
         ROSIO_VERSION: ${{ inputs.version }}
       run: |
-        spec="rosio[cpp]"
-        if [ "$ROSIO_VERSION" != "latest" ]; then spec="rosio[cpp]==$ROSIO_VERSION"; fi
-        python -m pip install --quiet "$spec"
+        # The system python is the one a ROS installation ships its launch modules for.
+        venv="$RUNNER_TEMP/rosio-venv"
+        if ! python3 -m venv --system-site-packages "$venv" 2>/dev/null; then
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends python3-venv
+          python3 -m venv --system-site-packages "$venv"
+        fi
+        case "$ROSIO_VERSION" in
+          latest) spec="rosio[cpp]" ;;
+          .* | /*) spec="$ROSIO_VERSION[cpp]" ;;
+          *) spec="rosio[cpp]==$ROSIO_VERSION" ;;
+        esac
+        "$venv/bin/python" -m pip install --quiet "$spec"
+        echo "$venv/bin" >> "$GITHUB_PATH"
 
     - name: rosio extract
       shell: bash
@@ -43,6 +49,9 @@ runs:
         ROSIO_PATH: ${{ inputs.path }}
         ROSIO_ARGS: ${{ inputs.args }}
       run: |
+        # A job that runs in a ROS container has a setup file, and the launch files are walked.
+        setup=$(ls /opt/ros/*/setup.bash 2>/dev/null | head -n 1)
+        if [ -n "$setup" ]; then source "$setup"; fi
         # ROSIO_ARGS is split on spaces on purpose, it holds several arguments
         rosio extract "$ROSIO_PATH" --out "$RUNNER_TEMP/rosio-out" $ROSIO_ARGS
         # the waivers key of the workspace configuration, when there is one
