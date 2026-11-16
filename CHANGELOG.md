@@ -46,12 +46,14 @@ Atlas schema `1.36`, additive: a reader of a `1.35` file loads it.
 
 ### Code
 
-* A rule reads one source file alone, with no launch file or live system to compare.
+* Two rules read one source file alone, with no launch file or live system to compare.
   `callback.blocks_executor` reports a subscription, timer or service callback that waits on a
   service or action client in the node's default callback group (`client.call()`,
   `future.get()`, `spin_until_future_complete` on that future), which never returns under any
   executor, and an rclcpp callback that spins its own node, which throws.
-  It stays silent wherever the file does not settle the case.
+  `clock.mixed` reports a comparison or subtraction of two times whose clock types differ
+  (`this->now() - rclcpp::Time(0)`, `self.get_clock().now() - Time()`), which throws every time
+  the line runs. Both stay silent wherever the file does not settle the case.
 
 ### Reading
 

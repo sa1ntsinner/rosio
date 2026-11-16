@@ -103,7 +103,7 @@ others.
 | `rosio/drift/topics.py` | publishers with no subscriber, subscribers with no publisher, QoS and type disagreement, rate below the declared expectation, observed only endpoints |
 | `rosio/drift/nodes.py` | node identity: declared and not observed, observed only, ambiguous, regressed, unnamed, plus the profile scoping the graph rules share |
 | `rosio/drift/middleware.py` | observed middleware groups and missing Zenoh routers, scoped by profile |
-| `rosio/drift/misuse.py` | ROS API misuse one source file proves alone: a wait that blocks its callback's executor |
+| `rosio/drift/misuse.py` | ROS API misuse one source file proves alone: a wait that blocks its callback's executor, times of two clock types compared |
 | `rosio/drift/frames.py` | frames with no broadcaster, orphan roots, config frames absent from every urdf, parent geometry disagreement, remaps and lifecycle |
 | `rosio/drift/plugins.py` | what a selector list loads, what it leaves behind, and what it names that no manifest exports, which is what gates the parameter family |
 | `rosio/drift/controllers.py` | ros2_control: a spawned controller no configuration defines, a controller joint the robot model lacks |

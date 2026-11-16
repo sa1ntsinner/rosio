@@ -427,7 +427,7 @@ def _is_self(node: ast.AST) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# misuse a file proves on its own: a wait that blocks the callback's executor
+# misuse a file proves on its own: a wait that blocks the callback's executor, and two clocks
 
 _REGISTRATIONS = {
     # call name: (callback position, callback keywords, positions that hand a callback group)
@@ -643,6 +643,204 @@ def _blocking_wait(
         "client": futures[future.id],
         "line_hint": node.lineno,
     }
+
+
+_CLOCK_TYPES = ("ROS_TIME", "SYSTEM_TIME", "STEADY_TIME")
+
+
+def _rclpy_names(tree: ast.Module) -> dict[str, str]:
+    """Local names bound to `rclpy.time.Time`, `rclpy.clock.Clock` and `rclpy.clock.ROSClock`."""
+    out: dict[str, str] = {}
+    other: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if node.module in ("rclpy.time", "rclpy.clock") and alias.name in (
+                    "Time",
+                    "Clock",
+                    "ROSClock",
+                ):
+                    out[local] = alias.name
+                else:
+                    other.add(local)
+        elif isinstance(node, ast.Import):
+            other.update(alias.asname or alias.name for alias in node.names)
+    return {local: name for local, name in out.items() if local not in other}
+
+
+def _clock_keyword(call: ast.Call, default: str) -> str:
+    """The clock type a `clock_type=` keyword names, the default when absent, else unknown."""
+    value = _keyword(call, "clock_type")
+    if value is None:
+        return default
+    if isinstance(value, ast.Attribute) and value.attr in _CLOCK_TYPES:
+        return value.attr
+    if (
+        isinstance(value, ast.Attribute)
+        and value.attr == "clock_type"
+        and _node_clock_call(value.value)
+    ):
+        return "ROS_TIME"
+    return ""
+
+
+def _node_clock_call(node: ast.AST) -> bool:
+    """`self.get_clock()` inside a node, which rclpy builds as a ROS clock."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get_clock"
+        and _is_self(node.func.value)
+        and not node.args
+    )
+
+
+def _class_of(names: dict[str, str], func: ast.AST) -> str:
+    if isinstance(func, ast.Name):
+        return names.get(func.id, "")
+    if (
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Attribute)
+        and isinstance(func.value.value, ast.Name)
+        and func.value.value.id == "rclpy"
+        and func.value.attr in ("time", "clock")
+        and func.attr in ("Time", "Clock", "ROSClock")
+    ):
+        return func.attr
+    return ""
+
+
+def _py_clock(node: ast.AST, names: dict[str, str], known: dict[str, str]) -> str:
+    """The clock type of a time expression, or "" when the source does not settle it."""
+    if isinstance(node, ast.Name):
+        return known.get(node.id, "")
+    member = _self_attr(node)
+    if member:
+        return known.get("self." + member, "")
+    if not isinstance(node, ast.Call):
+        return ""
+    func = node.func
+    built = _class_of(names, func)
+    if built == "Time":
+        return _clock_keyword(node, "SYSTEM_TIME")
+    if isinstance(func, ast.Attribute) and func.attr == "from_msg":
+        if _class_of(names, func.value) == "Time":
+            return _clock_keyword(node, "ROS_TIME")
+        return ""
+    if not isinstance(func, ast.Attribute) or func.attr != "now" or node.args:
+        return ""
+    clock = func.value
+    if _node_clock_call(clock):
+        return "ROS_TIME"
+    if isinstance(clock, ast.Call):
+        made = _class_of(names, clock.func)
+        if made == "ROSClock":
+            return "ROS_TIME"
+        if made == "Clock" and not clock.args:
+            return _clock_keyword(clock, "SYSTEM_TIME")
+    return ""
+
+
+def _assigned(scope: Sequence[ast.AST], key: str) -> list[ast.AST]:
+    """Every value written to a local or a `self.` member in a scope; a write rosio cannot
+    read (augmented, unpacked, a loop target) is None."""
+    out: list[Any] = []
+    for node in scope:
+        if isinstance(node, ast.Assign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if _target_key(target) == key:
+                    out.append(node.value)
+                elif any(_target_key(item) == key for item in ast.walk(target)):
+                    out.append(None)
+        elif isinstance(node, ast.AugAssign | ast.For | ast.AsyncFor | ast.withitem):
+            target = node.optional_vars if isinstance(node, ast.withitem) else node.target
+            if target is not None and any(_target_key(item) == key for item in ast.walk(target)):
+                out.append(None)
+        elif isinstance(node, ast.NamedExpr) and _target_key(node.target) == key:
+            out.append(None)
+    return out
+
+
+def _target_key(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    member = _self_attr(node)
+    return "self." + member if member else ""
+
+
+def _settled(values: list[Any], names: dict[str, str], known: dict[str, str]) -> str:
+    clocks = {_py_clock(value, names, known) if value is not None else "" for value in values}
+    return next(iter(clocks)) if len(clocks) == 1 else ""
+
+
+def clock_mixes(tree: ast.Module) -> list[dict[str, Any]]:
+    """Comparisons and subtractions of two rclpy times whose clock types the file settles and
+    which differ, which rclpy refuses with a TypeError on every evaluation.
+
+    A local counts when every write in its function states one clock type, a `self.` member
+    when every write in its class does."""
+    names = _rclpy_names(tree)
+    out: list[dict[str, Any]] = []
+    for cls in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+        if not any(ast.unparse(base).endswith("Node") for base in cls.bases):
+            # `self.get_clock()` is the node's ROS clock only on a node
+            continue
+        class_scope = list(ast.walk(cls))
+        members: dict[str, str] = {}
+        for key in sorted({_target_key(item) for item in class_scope} - {""}):
+            if key.startswith("self."):
+                values = _assigned(class_scope, key)
+                clock = _settled(values, names, {}) if values else ""
+                if clock:
+                    members[key] = clock
+        for method in cls.body:
+            if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef):
+                out.extend(_mixes_in(method, names, members))
+    return sorted(out, key=lambda row: (row["line_hint"], row["expr"]))
+
+
+def _mixes_in(
+    method: ast.FunctionDef | ast.AsyncFunctionDef, names: dict[str, str], members: dict[str, str]
+) -> list[dict[str, Any]]:
+    scope = _walk_own(method.body)
+    known = dict(members)
+    arguments = {item.arg for item in ast.walk(method.args) if isinstance(item, ast.arg)}
+    for key in sorted({_target_key(item) for item in scope if isinstance(item, ast.Name)} - {""}):
+        if key in arguments:
+            continue
+        values = _assigned(scope, key)
+        clock = _settled(values, names, members) if values else ""
+        if clock:
+            known[key] = clock
+    out: list[dict[str, Any]] = []
+    for node in scope:
+        pairs: list[tuple[ast.AST, ast.AST, str]] = []
+        if isinstance(node, ast.Compare):
+            left = node.left
+            for operator, right in zip(node.ops, node.comparators, strict=True):
+                if not isinstance(operator, ast.Is | ast.IsNot | ast.In | ast.NotIn):
+                    pairs.append((left, right, "compare"))
+                left = right
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub):
+            pairs.append((node.left, node.right, "subtract"))
+        for left, right, operation in pairs:
+            first = _py_clock(left, names, known)
+            second = _py_clock(right, names, known)
+            if first and second and first != second:
+                out.append(
+                    {
+                        "operation": operation,
+                        "expr": ast.unparse(node)[:160],
+                        "left": ast.unparse(left)[:80],
+                        "right": ast.unparse(right)[:80],
+                        "left_clock": first,
+                        "right_clock": second,
+                        "line_hint": node.lineno,
+                    }
+                )
+    return out
 
 
 def _sorted_key(value: str | None) -> tuple[int, str]:
@@ -3135,6 +3333,9 @@ class PyFile:
         waits = blocking_waits(self.tree)
         if waits:
             record["blocking_waits"] = waits
+        mixes = clock_mixes(self.tree)
+        if mixes:
+            record["clock_mixes"] = mixes
         for prefix, construction, read in self.prefix_reads:
             for (_scope, name, held), row in self.params.items():
                 under = not prefix or (isinstance(name, str) and name.startswith(prefix + "."))
@@ -3707,6 +3908,7 @@ class PyCodeCollector:
                     "name_literals",
                     "stamped_frames",
                     "blocking_waits",
+                    "clock_mixes",
                 )
                 if key in record
             },

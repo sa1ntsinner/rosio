@@ -51,6 +51,7 @@ LAYER = model.Layer.CODED.value
 NAME = "cpp_code"
 
 SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".hpp", ".hh", ".hxx", ".h", ".ipp")
+SOURCE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c")
 
 TREE_SITTER_PIN = ("tree-sitter>=0.23,<0.27", "tree-sitter-cpp>=0.23,<0.24")
 """The pair this collector is written against. The python binding changed shape more than
@@ -3053,7 +3054,7 @@ def cpp_blocking_waits(root: Any, src: bytes) -> list[dict[str, Any]]:
             bodies.append((_child(found[0], "body"), method, registration, line))
     out: list[dict[str, Any]] = []
     for body, callback, registration, line in bodies:
-        if body is None:
+        if body is None or body.has_error:
             continue
         reached = [(body, "")]
         for node in _descendants(body, into_lambdas=False):
@@ -3061,8 +3062,9 @@ def cpp_blocking_waits(root: Any, src: bytes) -> list[dict[str, Any]]:
                 continue
             name, _receiver, _template = _call_parts(node, src)
             found = definitions.get(name, [])
-            if len(found) == 1 and name != callback and _child(found[0], "body") is not None:
-                reached.append((_child(found[0], "body"), name))
+            helper = _child(found[0], "body") if len(found) == 1 else None
+            if helper is not None and name != callback and not helper.has_error:
+                reached.append((helper, name))
         for held, via in reached:
             for row in _waits_in(held, src, clients):
                 row.update(callback=callback, registration=registration, registration_line=line)
@@ -3145,6 +3147,219 @@ def _waited_elsewhere(scope: Sequence[Any], src: bytes, future: str, site: Any) 
             continue
         return True
     return False
+
+
+_RCL_CLOCKS = {
+    "RCL_ROS_TIME": "ROS_TIME",
+    "RCL_SYSTEM_TIME": "SYSTEM_TIME",
+    "RCL_STEADY_TIME": "STEADY_TIME",
+}
+_NODE_HANDLES = frozenset({"this", "node", "node_"})
+_STAMP = re.compile(r"(?:\.|->)header\.stamp$")
+_INTEGER = re.compile(r"\d+[uUlL]*")
+_COMPARED = frozenset({"<", ">", "<=", ">=", "==", "!=", "-"})
+
+
+def _time_arguments(arguments: Sequence[Any], src: bytes, known: dict[str, str]) -> str:
+    """The clock type an `rclcpp::Time(...)` constructor gives its value (jazzy `time.hpp`):
+    a builtin message time is ROS time, nanoseconds or seconds and nanoseconds are system time,
+    unless a literal clock type follows."""
+    texts = [_flat(item, src) for item in arguments]
+    if texts and texts[-1] in _RCL_CLOCKS:
+        return _RCL_CLOCKS[texts[-1]] if len(texts) in (2, 3) else ""
+    if not texts:
+        return "SYSTEM_TIME"
+    if len(texts) == 1:
+        if _STAMP.search(texts[0]):
+            return "ROS_TIME"
+        if _INTEGER.fullmatch(texts[0]) or texts[0].endswith((".nanoseconds()", ".count()")):
+            return "SYSTEM_TIME"
+        return _cpp_clock(arguments[0], src, known)
+    plain_pair = len(texts) == 2 and not _STAMP.search(texts[0])
+    if plain_pair and (_INTEGER.fullmatch(texts[1]) or texts[1].endswith("nanosec")):
+        return "SYSTEM_TIME"
+    return ""
+
+
+def _cpp_clock(node: Any, src: bytes, known: dict[str, str]) -> str:
+    """The clock type of a time expression, or "" when this function and the class's member
+    writes do not settle it."""
+    while (
+        node is not None and node.type == "parenthesized_expression" and node.named_child_count == 1
+    ):
+        node = node.named_children[0]
+    if node is None:
+        return ""
+    text = _flat(node, src)
+    if node.type in ("identifier", "field_expression", "field_identifier"):
+        return known.get(text.removeprefix("this->"), "")
+    if node.type != "call_expression":
+        return ""
+    name, receiver, _template = _call_parts(node, src)
+    if name == "Time" and _scope_text(node, src) == "rclcpp":
+        return _time_arguments(_args(node), src, known)
+    if name != "now" or _args(node) or receiver is None:
+        return ""
+    held = _flat(receiver, src)
+    if held in _NODE_HANDLES or re.fullmatch(r"(?:(?:this|node_?)->)?get_clock\(\)", held):
+        return "ROS_TIME"
+    if receiver.type == "call_expression":
+        made, _r, _t = _call_parts(receiver, src)
+        if made == "Clock" and _scope_text(receiver, src) == "rclcpp":
+            clocks = [_flat(item, src) for item in _args(receiver)]
+            if not clocks:
+                return "SYSTEM_TIME"
+            return _RCL_CLOCKS.get(clocks[0], "") if len(clocks) == 1 else ""
+    return ""
+
+
+def _written(scope: Sequence[Any], src: bytes, name: str) -> list[Any] | None:
+    """Every value a scope writes to a name, None when a write is one rosio cannot read."""
+    out: list[Any] = []
+    for node in scope:
+        if node.type == "assignment_expression":
+            target = _child(node, "left")
+            if target is not None and _member_name(target, src) == name:
+                if _text(_child(node, "operator"), src) != "=":
+                    return None
+                out.append(_child(node, "right"))
+        elif node.type == "update_expression" or (
+            node.type == "unary_expression" and _text(node, src).startswith("&")
+        ):
+            argument = _child(node, "argument")
+            if argument is not None and _member_name(argument, src) == name:
+                return None
+    return out
+
+
+def _declared_time(node: Any, src: bytes, known: dict[str, str]) -> tuple[str, str] | None:
+    """(name, clock) of `rclcpp::Time t(...)`, `rclcpp::Time t{...}`, `rclcpp::Time t = x` or
+    `auto t = x`; the clock is "" when the initializer does not settle it."""
+    if node.type not in ("declaration", "field_declaration"):
+        return None
+    type_node = _child(node, "type")
+    spelled = _flat(type_node, src) if type_node is not None else ""
+    declarators = [
+        item
+        for item in node.named_children
+        if item.type in ("init_declarator", "identifier", "field_identifier")
+    ]
+    if len(declarators) != 1:
+        return None
+    item = declarators[0]
+    if item.type in ("identifier", "field_identifier"):
+        if spelled == "rclcpp::Time" and node.type == "declaration":
+            return _text(item, src), "SYSTEM_TIME"
+        if spelled == "rclcpp::Time":
+            default = _child(node, "default_value")
+            if default is None:
+                return _text(item, src), "SYSTEM_TIME"
+            if default.type == "initializer_list":
+                return _text(item, src), _time_arguments(default.named_children, src, known)
+            return _text(item, src), _cpp_clock(default, src, known)
+        return None
+    target, value = _child(item, "declarator"), _child(item, "value")
+    if target is None or value is None:
+        return None
+    if spelled == "rclcpp::Time" and value.type in ("argument_list", "initializer_list"):
+        return _text(target, src), _time_arguments(
+            [child for child in value.named_children if child.type != "comment"], src, known
+        )
+    if spelled in ("rclcpp::Time", "auto"):
+        clock = _cpp_clock(value, src, known)
+        return (_text(target, src), clock) if clock or spelled == "rclcpp::Time" else None
+    return None
+
+
+def cpp_clock_mixes(root: Any, src: bytes, *, header: bool = False) -> list[dict[str, Any]]:
+    """Comparisons and subtractions of two `rclcpp::Time` values whose clock types this file
+    settles and which differ. rclcpp throws `can't compare times with different time sources`
+    on each evaluation.
+
+    A local counts when its declaration and every write in its function state one clock type,
+    a member when its declaration and every write to it are in this file. A header is left
+    to its own locals, because the source that defines its methods can write any member."""
+    if root is None:
+        return []
+    nodes = _descendants(root)
+    members: dict[str, str] = {}
+    declared: dict[str, set[str]] = {}
+    for node in nodes:
+        if node.type == "field_declaration" and not header and not node.has_error:
+            found = _declared_time(node, src, {})
+            if found:
+                declared.setdefault(found[0], set()).add(found[1])
+    for name, clocks in declared.items():
+        values = _written(nodes, src, name)
+        if values is None or len(clocks) != 1:
+            continue
+        for node in nodes:
+            if node.type == "field_initializer" and _text(node.named_children[0], src) == name:
+                arguments = [
+                    item
+                    for item in (
+                        node.named_children[1].named_children if node.named_child_count > 1 else []
+                    )
+                    if item.type != "comment"
+                ]
+                clocks.add(_time_arguments(arguments, src, {}))
+        clocks.update(_cpp_clock(value, src, {}) for value in values)
+        if len(clocks) == 1 and "" not in clocks:
+            members[name] = next(iter(clocks))
+    out: list[dict[str, Any]] = []
+    for function in (
+        node for node in nodes if node.type in ("function_definition", "lambda_expression")
+    ):
+        body = _child(function, "body")
+        if body is None or body.has_error:
+            continue
+        scope = _descendants(body, into_lambdas=False)
+        known = dict(members)
+        for parameter in _descendants(_child(function, "declarator") or body):
+            if parameter.type == "parameter_declaration":
+                for item in _descendants(parameter):
+                    if item.type == "identifier":
+                        known[_text(item, src)] = ""
+        locals_seen: set[str] = set()
+        for node in scope:
+            found = _declared_time(node, src, known) if node.type == "declaration" else None
+            if not found:
+                continue
+            name, clock = found
+            if name in locals_seen:
+                known[name] = ""
+                continue
+            locals_seen.add(name)
+            values = _written(scope, src, name)
+            if values is None:
+                known[name] = ""
+                continue
+            clocks = {clock, *(_cpp_clock(value, src, known) for value in values)}
+            if len(clocks) == 1 and "" not in clocks:
+                known[name] = clock
+            else:
+                known[name] = ""
+        for node in scope:
+            if node.type != "binary_expression":
+                continue
+            operator = _child(node, "operator")
+            if operator is None or _text(operator, src) not in _COMPARED:
+                continue
+            left, right = _child(node, "left"), _child(node, "right")
+            first, second = _cpp_clock(left, src, known), _cpp_clock(right, src, known)
+            if first and second and first != second:
+                out.append(
+                    {
+                        "operation": "subtract" if _text(operator, src) == "-" else "compare",
+                        "expr": _flat(node, src)[:160],
+                        "left": _flat(left, src)[:80],
+                        "right": _flat(right, src)[:80],
+                        "left_clock": first,
+                        "right_clock": second,
+                        "line_hint": _line(node),
+                    }
+                )
+    return sorted(out, key=lambda row: (row["line_hint"], row["expr"]))
 
 
 _COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
@@ -6594,8 +6809,9 @@ class CppCodeCollector:
         file_id = ws.file_id(unit.path)
         literals = name_literals(unit.source)
         stamped = stamped_frames(unit.source)
-        root = unit.syntax if unit.parsed else None
+        root = unit.syntax
         waits = cpp_blocking_waits(root, unit.source)
+        mixes = cpp_clock_mixes(root, unit.source, header=not unit.path.endswith(SOURCE_SUFFIXES))
         builder.node(file_id, attrs={"language": "cpp", "loadable": unit.parsed})
         if unit.pkg and unit.pkg != ids.REPO_PKG:
             pkg_id = ids.build_pkg(unit.pkg)
@@ -6619,6 +6835,7 @@ class CppCodeCollector:
                 **({"name_literals": literals} if literals else {}),
                 **({"stamped_frames": stamped} if stamped else {}),
                 **({"blocking_waits": waits} if waits else {}),
+                **({"clock_mixes": mixes} if mixes else {}),
                 **(
                     {"plugin_loaders": [{"base_class": base} for base in unit.plugin_loaders]}
                     if unit.plugin_loaders

@@ -54,10 +54,14 @@ def _atlas(language: str, source: str) -> model.Atlas:
     if language == "python":
         tree = ast.parse(source)
         values = {"blocking_waits": py_code.blocking_waits(tree)}
+        values["clock_mixes"] = py_code.clock_mixes(tree)
     else:
         src = source.encode()
         root = cpp_code.load_parser().parse(src).root_node
-        values = {"blocking_waits": cpp_code.cpp_blocking_waits(root, src)}
+        values = {
+            "blocking_waits": cpp_code.cpp_blocking_waits(root, src),
+            "clock_mixes": cpp_code.cpp_clock_mixes(root, src),
+        }
     builder.node(file_id)
     builder.fact(
         file_id,
@@ -83,3 +87,18 @@ def test_a_client_on_its_own_callback_group_is_not_reported() -> None:
     py = PY_NODE.replace('"trigger")', '"trigger", callback_group=self.group)')
     for language, source in (("cpp", cpp), ("python", py)):
         assert misuse.callback_blocks_executor(_atlas(language, source)) == [], language
+
+
+def test_times_of_two_clock_types_compared_are_reported() -> None:
+    for language, source in (("cpp", CPP_NODE), ("python", PY_NODE)):
+        found = misuse.clock_mixed(_atlas(language, source))
+        assert len(found) == 1, language
+        assert found[0].severity == "error"
+        assert "system time" in found[0].title and "ROS time" in found[0].title
+
+
+def test_times_of_one_clock_type_are_not_reported() -> None:
+    cpp = CPP_NODE.replace("rclcpp::Clock().now()", "this->now()")
+    py = PY_NODE.replace("Time()", "Time(clock_type=self.get_clock().clock_type)")
+    for language, source in (("cpp", cpp), ("python", py)):
+        assert misuse.clock_mixed(_atlas(language, source)) == [], language

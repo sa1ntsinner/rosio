@@ -209,10 +209,12 @@ record. Three other spellings went with the alias table that held them, `plugin_
 `lookups` and the nested `tf` block they sat in into nothing, because no collector ever wrote
 that block into a fact.
 
-A coded file value sits beside the block and is not a record, because no join reads it:
-the misuse rule of section 10 does. `blocking_waits` is one row `{call, client, callback,
+Two coded file values sit beside the block and are not records, because no join reads them:
+the misuse rules of section 10 do. `blocking_waits` is one row `{call, client, callback,
 registration, registration_line, via, line_hint}` per wait inside a node callback that the
-executor running it can never end. A reader states a row only where the source
+executor running it can never end, and `clock_mixes` is one row `{operation, expr, left,
+right, left_clock, right_clock, line_hint}` per comparison or subtraction of two times whose
+clock types the file settles and which differ. A reader states a row only where the source
 settles it, so a site it could not follow is no row at all rather than a blind spot.
 
 ## 3. Identity
@@ -1745,9 +1747,9 @@ be its own; its sentence about unnamed processes changed, which moved those fing
 
 * in `1.35`, the refused file attribute `generated_by`.
 
-* in `1.36`, the rule id `callback.blocks_executor`, the first rule that reads one source
-  file alone, and the coded file value `blocking_waits` (section 2.2) it reads. No id form
-  moved.
+* in `1.36`, the rule ids `callback.blocks_executor` and `clock.mixed`, the first rules that
+  read one source file alone, and the coded file values `blocking_waits` and `clock_mixes`
+  (section 2.2) they read. No id form moved.
 
 Inside `1.35`, a second run over public repositories moved four readings. A refused share
 file that the package's CMake writes into the build directory and installs carries
@@ -1843,7 +1845,7 @@ build.unbuilt               build.underlay                remap.matches_nothing
 type.incompatible           service.no_server             launch.argument_undeclared
 frame.broadcast_twice       param.read_undeclared         controller.undefined
 controller.joint_missing     topic.namespace_escape
-callback.blocks_executor
+callback.blocks_executor    clock.mixed
 ```
 
 `launch.file_not_installed` is `error`. It fires once per file a launch file reads
@@ -1984,6 +1986,22 @@ a group, options or another node, on a wait with a timeout, and on a file that b
 `MultiThreadedExecutor` together with a callback group or replaces the default group. The fix
 names the asynchronous call with a done callback, or a separate callback group with a multi
 threaded executor.
+
+`clock.mixed` is `error`. It fires once per expression that compares or subtracts two times of
+different clock types, which rclcpp refuses with `can't compare times with different time
+sources` and rclpy with a TypeError each time the line runs. The clock types are the ones the
+jazzy headers and `rclpy/time.py` state: `this->now()`, `get_clock()->now()`, a message stamp
+(`rclcpp::Time(msg->header.stamp)`) and rclpy's node clock and `Time.from_msg` are ROS time;
+`rclcpp::Clock()`, `rclcpp::Time()`, `rclcpp::Time(nanoseconds)`, `rclcpp::Time(sec, nanosec)`,
+rclpy `Clock()` and `Time()` are system time unless a literal clock type is passed. Both sides
+have to be settled in the file: an expression of that shape, a local whose declaration and
+every write in its function agree, or a member of a class this file declares whose declaration,
+constructor initializers and every write in the file agree. A header settles only its locals,
+because the source that defines its methods can write any member, and a python time counts
+only inside a node class and through names imported from `rclpy.time` or `rclpy.clock`. The fix
+builds the odd side from the node clock or with its clock type. It is not
+`param.sim_time_mixed`, which compares the `use_sim_time` values of a profile's nodes, and not a
+`time.*` rule, which reads the stamps of a recording.
 
 `param.read_undeclared` is `warn`. It fires once per parameter of a node whose code reads it
 with `get_parameter(name)`, in rclcpp or rclpy, when no code the node runs declares the name.
@@ -2277,7 +2295,7 @@ One owner per module per milestone. Do not edit a module you do not own in your 
 | `rosio/drift/engine.py` | M3 | run order, rule isolation, deduplication, waivers, filtering and the counters |
 | `rosio/drift/{build,frames,nodes,params,plugins,time,topics}.py` | M3 | one module per rule family |
 | `rosio/drift/middleware.py` | M5 | mixed middleware and missing Zenoh routers per observed profile |
-| `rosio/drift/misuse.py` | M3 | ROS API misuse one source proves alone: a wait that blocks its callback's executor |
+| `rosio/drift/misuse.py` | M3 | ROS API misuse one source proves alone: a wait that blocks its callback's executor, times of two clocks |
 | `rosio/drift/controllers.py` | M3 | ros2_control: spawned controllers no configuration defines, controller joints the model lacks |
 | `rosio/query.py` | M3 | CLI slices: explain, param, query, path, diff, unresolved, drift |
 | `rosio/render/__init__.py` | M4 | the render package surface, pure functions of a loaded atlas |

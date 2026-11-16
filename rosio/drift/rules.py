@@ -83,6 +83,7 @@ COMMITTED = (
     "controller.joint_missing",
     "topic.namespace_escape",
     "callback.blocks_executor",
+    "clock.mixed",
 )
 """AGENTS section 10, in the order that file lists them."""
 
@@ -153,6 +154,7 @@ SEVERITY: dict[str, str] = {
     "controller.joint_missing": ERROR,
     "topic.namespace_escape": WARN,
     "callback.blocks_executor": ERROR,
+    "clock.mixed": ERROR,
 }
 
 VARIANT_SEVERITY: dict[str, dict[str, str]] = {

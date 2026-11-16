@@ -37,8 +37,8 @@ from rosio.errors import ContractError
 
 SCHEMA_MINOR = "36"
 """What has been added since `<major>.0`, all of it additive and none of it moving a
-stored id: the rule `callback.blocks_executor` with the coded file value
-`blocking_waits` it reads; the refused file attribute `generated_by`; the
+stored id: the rules `callback.blocks_executor` and `clock.mixed` with the coded file values
+`blocking_waits` and `clock_mixes` they read; the refused file attribute `generated_by`; the
 finding key `edits`, the exact text replacements a fix makes; the
 `publishes` and `subscribes` edge value `qos_overridden`, the record key
 `parameter_writes` and the `code_set` mechanism; the rules
