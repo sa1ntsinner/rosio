@@ -711,6 +711,10 @@ def test_a_baseline_holds_back_the_findings_it_already_has(
     assert "param.shadowed" in printed and "param.type_changed" not in printed
     assert "1 finding the baseline holds, not printed or graded" in printed
 
+    waivers = _waiver_file(tmp_path, (_finding("param.type_changed").id, "accepted"))
+    main([*args, "--waivers", str(waivers)])
+    assert "waiver matched nothing" not in capsys.readouterr().out, "the baseline hid it"
+
 
 def test_an_atlas_the_rules_never_ran_over_is_refused_rather_than_called_clean(
     tmp_path: Path, capsys

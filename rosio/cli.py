@@ -1647,11 +1647,14 @@ def cmd_drift(args: argparse.Namespace) -> int:
         )
     if wanted:
         atlas.findings = [item for item in atlas.findings if item.rule in set(wanted)]
-    held = _hold_baseline(args, atlas)
+    behind = _hold_baseline(args, atlas)
+    held = len(behind)
     if args.format == "json":
         args.json = True
     waivers = _waivers(args)
     graded, matched = engine.waive(atlas.findings, [item.key for item in waivers])
+    # A waiver whose finding the baseline holds still matches a finding of this atlas.
+    hidden = set(engine.waive(behind, [item.key for item in waivers])[1].values())
     if args.fix:
         for line in _apply_fixes(args, graded):
             print(line)
@@ -1662,7 +1665,7 @@ def cmd_drift(args: argparse.Namespace) -> int:
         answer.lines.append(
             f"  {plural(held, 'finding')} the baseline holds, not printed or graded"
         )
-    _report_waivers(answer, waivers, matched, args.limit)
+    _report_waivers(answer, waivers, matched, args.limit, hidden)
     # A rule that raised while the atlas was built left nothing behind it but its name.
     failed = [
         name
@@ -1715,14 +1718,14 @@ def cmd_drift(args: argparse.Namespace) -> int:
     return code
 
 
-def _hold_baseline(args: argparse.Namespace, atlas) -> int:
-    """Drop the findings a baseline atlas already holds, by id, and say how many went."""
+def _hold_baseline(args: argparse.Namespace, atlas) -> list:
+    """Drop the findings a baseline atlas already holds, by id, and return them."""
     if not args.baseline:
-        return 0
+        return []
     known = {item.id for item in load_atlas(args, args.baseline).findings}
-    before = len(atlas.findings)
+    held = [item for item in atlas.findings if item.id in known]
     atlas.findings = [item for item in atlas.findings if item.id not in known]
-    return before - len(atlas.findings)
+    return held
 
 
 def _waivers(args: argparse.Namespace):
@@ -1737,7 +1740,7 @@ def _waivers(args: argparse.Namespace):
     return load_waivers(named or list(waiver_files(args.config)))
 
 
-def _report_waivers(answer, waivers, matched: dict, limit: int) -> None:
+def _report_waivers(answer, waivers, matched: dict, limit: int, held: set = frozenset()) -> None:
     """Say what a waiver did, on the answer that prints the findings it acted on.
 
     A waiver key that matched nothing is named too. A stored key rots when the finding it
@@ -1751,7 +1754,7 @@ def _report_waivers(answer, waivers, matched: dict, limit: int) -> None:
         {"finding": finding, "key": key, "reason": reasons[key]}
         for finding, key in sorted(matched.items())
     ]
-    stale = sorted(set(reasons) - set(matched.values()))
+    stale = sorted(set(reasons) - set(matched.values()) - set(held))
     answer.data["waived"] = rows
     answer.data["waivers_matching_nothing"] = stale
     answer.lines.append(
