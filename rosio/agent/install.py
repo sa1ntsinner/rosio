@@ -44,6 +44,11 @@ ABSENT = "absent"
 SKIPPED = "skipped"
 PRUNED = "pruned"
 COVERAGE_COMMAND = "rosio hook coverage"
+HOOKS = (
+    ("Stop", COVERAGE_COMMAND),
+    ("SessionStart", "rosio hook brief"),
+    ("UserPromptSubmit", "rosio hook prompt"),
+)
 
 WOULD = {CREATED: "create", UPDATED: "update", REMOVED: "remove", PRUNED: "prune"}
 """What a dry run says it would do, per status. `kept`, `unchanged` and `absent` read the
@@ -475,51 +480,58 @@ def _uninstall_json(target: plat.Target, path: Path, report: Report) -> None:
 def _coverage_hook(target: plat.Target, path: Path, report: Report, *, remove: bool) -> None:
     doc = _load_json(path)
     node = _container(doc, target.container, create=not remove)
-    entries = node.get("Stop", []) if node is not None else []
-    if not isinstance(entries, list):
-        raise UsageError(f"hooks.Stop is not a list in {path}, fix it by hand")
-    wanted = []
-    found = False
-    for entry in entries:
-        hooks = entry.get("hooks") if isinstance(entry, dict) else None
-        if not isinstance(hooks, list):
-            wanted.append(entry)
+    moved = []
+    for event, command in HOOKS:
+        entries = node.get(event, []) if node is not None else []
+        if not isinstance(entries, list):
+            raise UsageError(f"hooks.{event} is not a list in {path}, fix it by hand")
+        wanted = []
+        found = False
+        for entry in entries:
+            hooks = entry.get("hooks") if isinstance(entry, dict) else None
+            if not isinstance(hooks, list):
+                wanted.append(entry)
+                continue
+            kept = [
+                hook
+                for hook in hooks
+                if not (isinstance(hook, dict) and hook.get("command") == command)
+            ]
+            if len(kept) == len(hooks):
+                wanted.append(entry)
+                continue
+            found = True
+            if not remove:
+                wanted.append(entry)
+            elif kept:
+                wanted.append({**entry, "hooks": kept})
+        if found != remove:
             continue
-        kept = [
-            hook
-            for hook in hooks
-            if not (isinstance(hook, dict) and hook.get("command") == COVERAGE_COMMAND)
-        ]
-        if len(kept) == len(hooks):
-            wanted.append(entry)
-            continue
-        found = True
-        if not remove:
-            wanted.append(entry)
-        elif kept:
-            wanted.append({**entry, "hooks": kept})
-    undo = f"delete the {COVERAGE_COMMAND} command from hooks.Stop in {path}"
-    if (remove and not found) or (not remove and found):
-        status = UNCHANGED if found else ABSENT
+        moved.append(event)
+        if remove:
+            if wanted:
+                node[event] = wanted
+            else:
+                node.pop(event, None)
+        else:
+            wanted.append({"matcher": "", "hooks": [{"type": "command", "command": command}]})
+            node[event] = wanted
+    undo = f"delete the rosio hook commands from hooks in {path}"
+    if not moved:
+        status = ABSENT if remove else UNCHANGED
         report.actions.append(Action(path, target.mechanism, status, undo=undo))
         return
     if remove:
-        if wanted:
-            node["Stop"] = wanted
-        else:
-            node.pop("Stop", None)
         _drop_empty(doc, target.container)
         status = REMOVED
     else:
-        wanted.append({"matcher": "", "hooks": [{"type": "command", "command": COVERAGE_COMMAND}]})
-        node["Stop"] = wanted
         status = UPDATED if path.is_file() else CREATED
     if not report.dry_run:
         if doc:
             _write(path, dumps(doc))
         else:
             _remove(path)
-    note = "hooks.Stop coverage command"
+    note = f"hooks {', '.join(moved)}"
     report.actions.append(Action(path, target.mechanism, status, note, undo))
 
 

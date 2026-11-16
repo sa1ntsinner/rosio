@@ -24,6 +24,18 @@ Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
 
 * The hover says what a name was read from (config, code, the live system, a bag).
 
+### Assistants
+
+* `rosio install claude-code` registers a SessionStart hook, `rosio hook brief`, which states
+  the profiles, the finding counts and the worst findings of the atlas, and says when a source
+  changed after it was extracted.
+* A UserPromptSubmit hook, `rosio hook prompt`, states what the atlas holds about the nodes,
+  topics, parameters, frames, files and rules a prompt names, from a name index cached outside
+  the workspace.
+* The Stop hook extracts a workspace the session edited again into a temporary directory and
+  stops the session once with the findings the edit added. `rosio-out` is left as it was.
+* `rosio uninstall claude-code` removes all three hooks.
+
 ### Reading
 
 * The fallback configuration no longer offers a launch file that a CMake test command of its

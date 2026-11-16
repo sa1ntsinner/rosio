@@ -82,7 +82,7 @@ the MCP graph tool, and draws it as Graphviz or Mermaid. `migrate` moves a works
 ROS 2 releases. `bundle` carries an
 atlas and the files its findings cite to someone on another machine. `init` writes the
 configuration extraction would fall back to as a `rosio.yaml` to edit. `hook` manages git
-hooks, the merge driver and the Claude Code Stop hook. `stamps`
+hooks, the merge driver and the Claude Code hooks. `stamps`
 checks the header stamps of one recording and needs neither a workspace nor a ROS
 installation, which is why it is a verb of its own and not a flag of `extract`."""
 
@@ -676,12 +676,12 @@ def build_parser() -> argparse.ArgumentParser:
     hook = _sub(
         subparsers,
         "hook",
-        "manage git hooks and the Claude Code Stop hook",
+        "manage git hooks and the Claude Code hooks",
         "Install the git hooks that rebuild the atlas after a commit, a checkout and a "
         "merge, register the merge driver that resolves two rebuilds of atlas.json without "
         "conflict markers, and report what a rebuild costs. A failed rebuild prints one "
-        "line and exits zero. The coverage action runs the Claude Code Stop hook "
-        "registered by rosio install claude-code.",
+        "line and exits zero. The coverage, brief and prompt actions run the Claude Code "
+        "hooks registered by rosio install claude-code.",
         flags=(),
     )
     hook.set_defaults(hook_command=None)
@@ -689,9 +689,28 @@ def build_parser() -> argparse.ArgumentParser:
     _hook_sub(
         hooks,
         "coverage",
-        "nudge once toward source files the session never opened",
+        "state the findings a session's edits added, or nudge toward unopened files",
         "The Claude Code Stop hook registered by rosio install claude-code. Reads hook "
-        "JSON from stdin and nudges once when source coverage is below 80 percent.",
+        "JSON from stdin. A session that edited the workspace is extracted again into a "
+        "temporary directory and stopped once with the findings the edits added; one that "
+        "only read is nudged when source coverage is below 80 percent.",
+        flags=(),
+    )
+    _hook_sub(
+        hooks,
+        "brief",
+        "state the atlas at session start",
+        "The Claude Code SessionStart hook: profiles, finding counts, the worst findings "
+        "and whether a source changed after the atlas. Silent on any failure.",
+        flags=(),
+    )
+    _hook_sub(
+        hooks,
+        "prompt",
+        "state what the atlas holds about names a prompt spells",
+        "The Claude Code UserPromptSubmit hook: up to three nodes, topics, parameters, "
+        "frames, files or rules the prompt names, from a name index cached outside the "
+        "workspace. Prints nothing when no name matches.",
         flags=(),
     )
 
@@ -2233,11 +2252,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_hook(args: argparse.Namespace) -> int:
-    """Manage git hooks and run the Claude Code Stop hook."""
+    """Manage git hooks and run the Claude Code hooks."""
     action = getattr(args, "hook_command", None)
     if not action:
         raise UsageError(
-            "hook takes an action: install, status, uninstall, run, merge or coverage. "
+            "hook takes an action: install, status, uninstall, run, merge, coverage, brief "
+            "or prompt. "
             f"start with {PROG} hook install"
         )
     return _HOOK_ACTIONS[action](args)
@@ -2335,8 +2355,22 @@ def _hook_coverage(_args: argparse.Namespace) -> int:
     return main()
 
 
+def _hook_brief(_args: argparse.Namespace) -> int:
+    from rosio.agent.push import brief_main
+
+    return brief_main()
+
+
+def _hook_prompt(_args: argparse.Namespace) -> int:
+    from rosio.agent.push import prompt_main
+
+    return prompt_main()
+
+
 _HOOK_ACTIONS: dict[str, Callable[[argparse.Namespace], int]] = {
     "coverage": _hook_coverage,
+    "brief": _hook_brief,
+    "prompt": _hook_prompt,
     "install": _hook_install,
     "status": _hook_status,
     "uninstall": _hook_uninstall,

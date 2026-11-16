@@ -1,5 +1,6 @@
-"""Stop hook: a session that changed code reviews its diff once against coding.md, and one that
-only read is nudged toward the packages it never opened."""
+"""Stop hook: a session that changed code is told the findings its edits added and reviews its
+diff once against coding.md, and one that only read is nudged toward the packages it never
+opened."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from rosio.agent import push
 from rosio.model import dumps_line
 
 SKIP = {".git", "rosio-out", "test", "tests", "build", "install"}
@@ -108,8 +110,14 @@ def _run() -> None:
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or ".")
     changed = edited(data["transcript_path"], root)
     if changed:
+        try:
+            measured = "" if data.get("stop_hook_active") else push.stop_check(root, changed, text)
+        except Exception as exc:
+            measured = ""
+            print(f"rosio stop check skipped: {' '.join(str(exc).splitlines())}", file=sys.stderr)
+        parts = [measured] if measured else []
         if REVIEW not in text:
-            reason = (
+            parts.append(
                 f"{REVIEW} {', '.join(changed[:10])}. Before you finish, read "
                 ".claude/skills/rosio/coding.md and check the diff against it: every path that "
                 "hits this same defect is fixed, and another defect you found is named in the "
@@ -123,7 +131,8 @@ def _run() -> None:
                 "write only what a command printed in this session, and not run for every step "
                 "you did not run: a false claim is worse than not run. Do not recite this list."
             )
-            print(dumps_line({"decision": "block", "reason": reason}))
+        if parts:
+            print(dumps_line({"decision": "block", "reason": "\n\n".join(parts)}))
         return
     seen = touched(data["transcript_path"])
     rows, unread, total, read = [], [], 0, 0

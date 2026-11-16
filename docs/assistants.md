@@ -50,6 +50,24 @@ a search instead of reading whole packages. The skill tells an agent to read it 
 bugs or reviewing a change, so it costs nothing on other tasks. `coding.md` beside it holds the
 habits for writing, changing and debugging ROS 2 code, read before an agent edits code.
 
+## Claude Code hooks
+
+`rosio install claude-code` also registers three hooks in `.claude/settings.json`. Each prints
+what rosio measured, and prints nothing and exits zero when there is no atlas or anything fails.
+
+* `rosio hook brief`, at session start: the profiles, the finding counts by severity, the worst
+  five error and warn findings as `path:line rule title`, and a line when a source file changed
+  after `rosio-out/atlas.json` was written.
+* `rosio hook prompt`, on each prompt: for up to three node, topic, service, action, parameter,
+  frame, file or rule names the prompt spells exactly, where it is defined, its publishers and
+  subscribers with QoS, the value a parameter has and the line that sets it, and the findings
+  about it. It reads a name index cached under the system temporary directory, keyed by the
+  atlas's size and modification time.
+* `rosio hook coverage`, when a session stops: if the session edited a source, launch,
+  parameter, robot model or build file, the workspace is extracted again into a temporary
+  directory and the session is stopped once with each finding the edit added, its line and the
+  exact replacement when the finding carries one. `rosio-out` stays as it was.
+
 ## Privacy
 
 Everything runs locally. Code, launch files, parameters and recordings are parsed on your machine

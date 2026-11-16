@@ -1,13 +1,13 @@
 """The table of assistants rosio can install itself into, one row per assistant.
 
-The mechanisms cover files the tool reads, MCP registration and a Stop hook:
+The mechanisms cover files the tool reads, MCP registration and hooks:
 
     skill         a self contained file the tool loads on demand, ours end to end
     reference     a file beside the skill that the skill tells the reader to open
     rules         a self contained rules file, ours end to end
     instructions  a managed section inside a file the user also writes in
     mcp           a server entry merged into a json or toml config the user also writes in
-    hook          a Stop command merged into the tool's json settings
+    hook          Stop, SessionStart and UserPromptSubmit commands merged into json settings
 
 Proof is per scope, because a target carries a project path and a user path and those are two
 claims. `proven` lists the scopes where somebody started that tool and watched it read the
@@ -205,7 +205,7 @@ PLATFORMS: tuple[Platform, ...] = (
                 user=".claude/settings.json",
                 fmt="json",
                 container="hooks",
-                note="the Stop hook has not been proven in a running Claude Code session",
+                note="the hooks have not been proven in a running Claude Code session",
             ),
             Target(
                 mechanism="skill",

@@ -2138,8 +2138,12 @@ point and it is `rosio drift`, never `extract`.
   folded into `install`, which registers this tool with an assistant: the two share no flag,
   `--scope project|user` means nothing to a git hook and `--python` means nothing to an
   assistant, and one `--list` answering about both would answer neither well.
-  `hook coverage` runs the Claude Code Stop hook that `install claude-code` registers,
-  nudging once toward source files the session never opened.
+  `hook coverage` runs the Claude Code Stop hook that `install claude-code` registers: a
+  session that edited the workspace is extracted again into a temporary directory and stopped
+  once with the findings its edits added, and one that only read is nudged once toward source
+  files it never opened. `hook brief` and `hook prompt` are the SessionStart and
+  UserPromptSubmit hooks it registers beside it, which state the atlas and what it holds about
+  the names a prompt spells. All three print what rosio measured and exit zero on any failure.
   `explain` is the verb for one finding in full, and `diff` compares two
   atlases. `query` and `path` keep the names every user of this category already knows.
   `drift` takes `--fail-on {error,warn,info,never}` for the CI gate and
@@ -2249,7 +2253,8 @@ One owner per module per milestone. Do not edit a module you do not own in your 
 | `rosio/agent/__init__.py` | M6 | the agent package surface, which resolves `serve` lazily so an install never pulls in `mcp` |
 | `rosio/agent/platforms.py` | M6 | the table of assistants, one row per file, with the verified flag |
 | `rosio/agent/install.py` | M6 | the install and uninstall writers, idempotent, no silent overwrite |
-| `rosio/agent/coverage.py` | M6 | Claude Code Stop hook, one nudge toward unopened source files |
+| `rosio/agent/coverage.py` | M6 | Claude Code Stop hook, the findings an edit added, one nudge toward unopened source files |
+| `rosio/agent/push.py` | M6 | Claude Code SessionStart and UserPromptSubmit hooks and the Stop re extraction |
 | `rosio/agent/templates/` | M6 | the four files the installers copy into a user's repository |
 | `rosio/serve/__init__.py` | M6 | the serve package surface |
 | `rosio/serve/tools.py` | M6 | the thirteen tools as plain functions, eleven over a loaded atlas, `migrate` over the sources and `check`, which extracts the served workspace again, no mcp involved |

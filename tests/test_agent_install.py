@@ -35,15 +35,18 @@ def test_coverage_hook_install_is_idempotent_and_keeps_user_stop_entries(tmp_pat
     config = base / ".claude/settings.json"
     config.parent.mkdir(parents=True)
     own = {"matcher": "", "hooks": [{"type": "command", "command": "my-check"}]}
-    original = {"hooks": {"Stop": [own], "SessionStart": []}, "permissions": {"allow": []}}
+    original = {"hooks": {"Stop": [own], "PreToolUse": []}, "permissions": {"allow": []}}
     config.write_text(json.dumps(original), encoding="utf-8")
     ins.install("claude-code", scope, root=root, home=home)
     again = ins.install("claude-code", scope, root=root, home=home)
     assert statuses(again)[str(config)] == ins.UNCHANGED
-    assert json.loads(config.read_text(encoding="utf-8"))["hooks"]["Stop"] == [
+    hooks = json.loads(config.read_text(encoding="utf-8"))["hooks"]
+    assert hooks["Stop"] == [
         own,
         {"matcher": "", "hooks": [{"type": "command", "command": "rosio hook coverage"}]},
     ]
+    assert hooks["UserPromptSubmit"][0]["hooks"][0]["command"] == "rosio hook prompt"
+    assert hooks["SessionStart"][0]["hooks"][0]["command"] == "rosio hook brief"
     ins.uninstall("claude-code", scope, root=root, home=home)
     assert json.loads(config.read_text(encoding="utf-8")) == original
 
@@ -143,6 +146,28 @@ def test_coverage_hook_nudges_once_for_unopened_sources(tmp_path, monkeypatch, c
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(data)))
     assert cli.main(["hook", "coverage"]) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_session_and_prompt_hooks_state_the_atlas(tmp_path, monkeypatch):
+    import tempfile
+
+    from rosio.agent import push
+    from rosio.config import DEFAULT_OUT_DIR
+    from tests.test_serve import build
+
+    assert push.DEFAULT_OUT_DIR == DEFAULT_OUT_DIR
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
+    assert "rosio extract . --out rosio-out" in push.briefing(tmp_path)
+    target = tmp_path / push.ATLAS
+    target.parent.mkdir()
+    target.write_bytes(build().to_bytes())
+    brief = push.briefing(tmp_path)
+    assert "findings: 1 warn" in brief and "param.shadowed" in brief
+    assert len(brief.encode("utf-8")) <= push.BRIEF_BYTES
+    said = push.prompt_slice(tmp_path, "why is FollowPath.plugin odd on /controller_server?")
+    assert "node /controller_server" in said and "wins nothing" not in said
+    assert "parameter /controller_server FollowPath.plugin" in said
+    assert push.prompt_slice(tmp_path, "tidy the readme") == ""
 
 
 # the table
