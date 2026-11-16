@@ -20,6 +20,12 @@ inputs:
   args:
     description: extra arguments for rosio extract
     default: ""
+  baseline:
+    description: an atlas file whose findings are left out of the annotations, the summary and the gate
+    default: ""
+  base-ref:
+    description: a git ref, the target branch say, to extract as the baseline when baseline is empty
+    default: ""
 
 runs:
   using: composite
@@ -48,6 +54,8 @@ runs:
       env:
         ROSIO_PATH: ${{ inputs.path }}
         ROSIO_ARGS: ${{ inputs.args }}
+        ROSIO_BASELINE: ${{ inputs.baseline }}
+        ROSIO_BASE_REF: ${{ inputs.base-ref }}
       run: |
         # A job that runs in a ROS container has a setup file, and the launch files are walked.
         setup=$(ls /opt/ros/*/setup.bash 2>/dev/null | head -n 1)
@@ -57,6 +65,17 @@ runs:
         # the waivers key of the workspace configuration, when there is one
         if [ -f "$ROSIO_PATH/rosio.yaml" ]; then
           echo "ROSIO_DRIFT_CONFIG=--config=$ROSIO_PATH/rosio.yaml" >> "$GITHUB_ENV"
+        fi
+        if [ -z "$ROSIO_BASELINE" ] && [ -n "$ROSIO_BASE_REF" ]; then
+          # a container job runs as another user than the one that owns the checkout
+          git config --global --add safe.directory "$PWD"
+          git fetch --quiet --no-tags --depth=1 origin "$ROSIO_BASE_REF"
+          git worktree add --quiet --detach "$RUNNER_TEMP/rosio-base" FETCH_HEAD
+          rosio extract "$RUNNER_TEMP/rosio-base/$ROSIO_PATH" --out "$RUNNER_TEMP/rosio-base-out" --quiet $ROSIO_ARGS
+          ROSIO_BASELINE="$RUNNER_TEMP/rosio-base-out/atlas.json"
+        fi
+        if [ -n "$ROSIO_BASELINE" ]; then
+          echo "ROSIO_DRIFT_BASELINE=--baseline=$ROSIO_BASELINE" >> "$GITHUB_ENV"
         fi
 
     - name: rosio drift, sarif
@@ -71,9 +90,15 @@ runs:
         sarif_file: ${{ runner.temp }}/rosio.sarif
         category: rosio
 
+    - name: rosio drift, summary
+      shell: bash
+      run: |
+        rosio drift --atlas "$RUNNER_TEMP/rosio-out/atlas.json" $ROSIO_DRIFT_CONFIG $ROSIO_DRIFT_BASELINE --format markdown \
+          | tee "$RUNNER_TEMP/rosio-summary.md" >> "$GITHUB_STEP_SUMMARY"
+
     - name: rosio drift
       shell: bash
       env:
         ROSIO_FAIL_ON: ${{ inputs.fail-on }}
       run: |
-        rosio drift --atlas "$RUNNER_TEMP/rosio-out/atlas.json" $ROSIO_DRIFT_CONFIG --format github --fail-on "$ROSIO_FAIL_ON"
+        rosio drift --atlas "$RUNNER_TEMP/rosio-out/atlas.json" $ROSIO_DRIFT_CONFIG $ROSIO_DRIFT_BASELINE --format github --fail-on "$ROSIO_FAIL_ON"

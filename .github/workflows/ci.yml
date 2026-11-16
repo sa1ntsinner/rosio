@@ -120,6 +120,7 @@ jobs:
           rosio drift --atlas "$RUNNER_TEMP/rosio-out/atlas.json" --format github \
             | grep -q "file=examples/rover_ws/src/rover_control/rover_control/safety_stop.py,line="
           rosio drift --atlas "$RUNNER_TEMP/rosio-out/atlas.json" --format sarif > /dev/null
+          grep -q "safety_stop.py" "$RUNNER_TEMP/rosio-summary.md"
 
   rust:
     name: rust ${{ matrix.os }}

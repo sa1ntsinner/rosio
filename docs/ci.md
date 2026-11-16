@@ -22,10 +22,16 @@ jobs:
 
 Inputs, all optional: `path` (the workspace, default `.`), `fail-on` (default `error`), `version`
 (the rosio release to install, default `latest`), `sarif` (default `true`, uploads the findings to
-code scanning) and `args` (more arguments for `rosio extract`). The action installs
-`rosio[cpp]`, runs `rosio extract`, uploads the SARIF file, then runs
-`rosio drift --format github --fail-on <fail-on>`, which fails the step. Set `sarif: false` when
-code scanning is not enabled for the repository.
+code scanning), `args` (more arguments for `rosio extract`), `baseline` (an atlas file whose
+findings are left out) and `base-ref` (a git ref to extract as the baseline). The action installs
+`rosio[cpp]`, runs `rosio extract`, uploads the SARIF file, writes the job summary with
+`rosio drift --format markdown`, then runs `rosio drift --format github --fail-on <fail-on>`,
+which fails the step. Set `sarif: false` when code scanning is not enabled for the repository.
+
+The summary sits on the run page of the pull request: the counts by severity, then one line per
+error and warn finding with the file and line to edit, the rule and the finding's sentence, thirty
+at most. Waived findings and findings the baseline holds are left out and counted. The same text
+is kept in `$RUNNER_TEMP/rosio-summary.md` for a later step that posts it as a comment.
 
 The action sources the setup file under `/opt/ros` when the job has one, which is what the
 `container` line gives it, and installs the packages your launch files import the way your build
@@ -34,11 +40,12 @@ models, plugin manifests and interfaces, but no launch file is walked: every lau
 a `launch.unloadable` finding at error, and the nodes and parameters a launch file composes are
 missing from the atlas. Use the container.
 
-## The two formats
+## The formats
 
 ```bash
 rosio drift --format github --fail-on error
 rosio drift --format sarif > rosio.sarif
+rosio drift --format markdown >> "$GITHUB_STEP_SUMMARY"
 ```
 
 `github` prints one workflow command per finding, `::error`, `::warning` or `::notice` by
@@ -58,7 +65,51 @@ rosio drift --baseline main-atlas.json --fail-on error
 `--baseline` takes another atlas, the target branch's for instance, and leaves out every finding
 whose id it holds, so the gate grades only what is new. The text output says how many it held
 back. `rosio diff` compares two atlases in full, and `rosio diff --rev main --rev HEAD` builds both
-from git revisions.
+from git revisions, but it keeps neither atlas, so a baseline file is one more extract of the base.
+
+In the action, `base-ref` does that: it fetches the ref, checks it out beside the pull request with
+`git worktree add`, extracts it, and passes the atlas as `--baseline` to the annotations, the
+summary and the gate. The SARIF upload keeps every finding, because code scanning tracks which
+alerts a pull request opens by itself.
+
+```yaml
+      - uses: sa1ntsinner/rosio@main
+        with:
+          base-ref: ${{ github.base_ref }}
+```
+
+Finding ids carry no path, so an atlas of the base extracted in another directory holds the same
+ids for the same findings. Elsewhere it is two extracts:
+
+```bash
+git worktree add --detach ../base origin/main
+rosio extract ../base --out ../base-out
+rosio extract .
+rosio drift --baseline ../base-out/atlas.json --fail-on error
+```
+
+## Before committing
+
+The repository is a [pre-commit](https://pre-commit.com) hook source. The hook `rosio-drift`
+extracts the repository into `rosio-out` and runs `rosio drift --fail-on error`, printing only
+the errors, when a commit touches a launch file, parameters, a robot model or a C++ or python
+source.
+
+```yaml
+repos:
+  - repo: https://github.com/sa1ntsinner/rosio
+    rev: main
+    hooks:
+      - id: rosio-drift
+```
+
+Launch files are walked only where ROS is sourced, so run `git commit` from a shell that sourced
+`/opt/ros/<release>/setup.bash`. Without it every launch entry point is a `launch.unloadable`
+finding at error and the hook fails. The hook installs rosio in an environment of its own, which
+cannot import the ROS python packages, so it takes its own directory off `PATH` before the walk:
+the launch files then run under the `python3` the setup file put there, as `ros2 launch` runs
+them. An activated virtual environment ahead of it on `PATH` hides that `python3` the same way,
+so start `git commit` from a shell that has none.
 
 ## Waivers
 

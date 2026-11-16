@@ -375,10 +375,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     drift.add_argument(
         "--format",
-        choices=("text", "json", "github", "sarif"),
+        choices=("text", "json", "github", "sarif", "markdown"),
         default="text",
         help="text, json (as --json), github workflow commands that annotate the pull request, "
-        "or SARIF 2.1.0 for code scanning, default text",
+        "SARIF 2.1.0 for code scanning, or a short markdown summary for a pull request, "
+        "default text",
     )
     drift.add_argument(
         "--baseline",
@@ -1663,6 +1664,11 @@ def cmd_drift(args: argparse.Namespace) -> int:
         reasons = {item.key: item.reason for item in waivers}
         waived = {finding: reasons[key] for finding, key in matched.items()}
         print(dumps(query.drift_sarif(atlas, shown, waived)), end="")
+        code = EXIT_OK
+    elif args.format == "markdown":
+        kept = [item for item in shown if item.id not in matched]
+        lines = query.drift_markdown(atlas, kept, waived=len(shown) - len(kept), held=held)
+        print("\n".join(lines))
         code = EXIT_OK
     else:
         code = _answer(args, answer)

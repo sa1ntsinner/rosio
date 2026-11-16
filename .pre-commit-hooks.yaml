@@ -1,0 +1,15 @@
+- id: rosio-drift
+  name: rosio drift
+  description: extract the repository and fail on error findings
+  language: python
+  # pip runs in this repository, so the extra comes from pyproject.toml with its range
+  additional_dependencies: [".[cpp]"]
+  # The launch walk runs the python3 on PATH, which has to be the one ROS sources, not the
+  # interpreter of this hook, so the hook's own directory is taken off PATH first.
+  entry: >-
+    python -c "import os, sys; from rosio.cli import main;
+    here = os.path.dirname(sys.executable);
+    os.environ['PATH'] = os.pathsep.join(p for p in os.environ['PATH'].split(os.pathsep) if p != here);
+    sys.exit(main(['extract', '.', '--quiet']) or main(['drift', '--fail-on', 'error', '--min-severity', 'error']))"
+  pass_filenames: false
+  files: (\.(py|launch|xml|yaml|yml|xacro|urdf|sdf|c|cc|cpp|cxx|h|hh|hpp|hxx|ipp|msg|srv|action)|CMakeLists\.txt)$

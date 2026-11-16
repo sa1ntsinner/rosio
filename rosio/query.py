@@ -2504,6 +2504,43 @@ def drift_github(atlas: Atlas, findings: Sequence[Finding]) -> list[str]:
     return lines
 
 
+def drift_markdown(
+    atlas: Atlas, findings: Sequence[Finding], *, waived: int = 0, held: int = 0, cap: int = 30
+) -> list[str]:
+    """A short summary for a pull request: counts by severity, then one line per error and
+    warn finding with the line to edit, the rule and the sentence."""
+    counts = dict.fromkeys(sorted(SEVERITY_ORDER, key=SEVERITY_ORDER.__getitem__), 0)
+    for item in findings:
+        counts[item.severity] = counts.get(item.severity, 0) + 1
+    summary = ", ".join(f"{count} {name}" for name, count in counts.items() if count)
+    left_out = [
+        text
+        for text in (
+            f"{waived} waived" if waived else "",
+            f"{held} the baseline holds" if held else "",
+        )
+        if text
+    ]
+    lines = ["### rosio drift", ""]
+    lines.append(
+        f"{plural(len(findings), 'finding')}"
+        + (f": {summary}" if summary else "")
+        + (f". Not counted: {', '.join(left_out)}" if left_out else "")
+        + "."
+    )
+    graded = [item for item in sorted(findings, key=Finding.sort_key) if item.severity != "info"]
+    if graded:
+        lines.append("")
+    for item in graded[:cap]:
+        path, line = checkout_site(atlas, item)
+        where = f"{path}:{line}" if path and line is not None else path
+        where = where or site(item.where[0] if item.where else None) or "not tied to a file"
+        lines.append(f"* `{where}` {item.rule}: {item.spoken}")
+    if len(graded) > cap:
+        lines.append(f"* and {len(graded) - cap} more")
+    return lines
+
+
 def drift_sarif(atlas: Atlas, findings: Sequence[Finding], waived: Mapping[str, str]) -> dict:
     """SARIF 2.1.0 for code scanning. `waived` maps a finding id to its waiver reason, which
     becomes an external suppression rather than a missing result."""
@@ -2548,6 +2585,7 @@ __all__ = [
     "diff",
     "drift",
     "drift_github",
+    "drift_markdown",
     "drift_sarif",
     "explain",
     "file_label",

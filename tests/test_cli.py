@@ -670,6 +670,31 @@ def test_the_sarif_format_carries_fingerprints_and_waivers(tmp_path: Path, capsy
     assert second["level"] == "warning" and "suppressions" not in second
 
 
+def test_the_markdown_format_lists_the_lines_to_edit_and_counts_the_waived(tmp_path: Path, capsys):
+    target = _located_atlas(tmp_path)
+    waivers = _waiver_file(tmp_path, (_finding("param.shadowed").id, "accepted"))
+
+    main(["drift", "--atlas", str(target), "--format", "markdown", "--waivers", str(waivers)])
+    lines = capsys.readouterr().out.splitlines()
+
+    assert lines[2] == "1 finding: 1 error. Not counted: 1 waived."
+    assert lines[4].startswith(
+        "* `ws/src/lx_bringup/config/nav2_overrides.yaml:154` param.type_changed: 100% at a:b,"
+    )
+    assert "param.shadowed" not in "\n".join(lines)
+
+
+def test_the_pre_commit_hook_runs_the_cli_of_this_package():
+    import yaml
+
+    (hook,) = yaml.safe_load(
+        (Path(__file__).parents[1] / ".pre-commit-hooks.yaml").read_text(encoding="utf-8")
+    )
+    assert hook["id"] == "rosio-drift" and hook["pass_filenames"] is False
+    assert "from rosio.cli import main" in hook["entry"]
+    assert "'extract'" in hook["entry"] and "'error'" in hook["entry"]
+
+
 def test_a_baseline_holds_back_the_findings_it_already_has(
     atlas_file: Path, tmp_path: Path, capsys
 ):
