@@ -2330,6 +2330,7 @@ def _yield_to_named(builder: model.AtlasBuilder, old_id: str, new_id: str) -> No
 
 
 _ACTION_ROW = re.compile(r"(?:^|\|)([A-Za-z]\w*\([^()|]*\))\.(?:parameters|arguments)$")
+_LAST_STEP = re.compile(r"([A-Za-z]\w*\([^()|]*\))$")
 _SITE_DIGEST = re.compile(r"@[0-9a-z]+(?=\))")
 
 
@@ -2339,27 +2340,33 @@ def _action_key(step: str) -> str:
     return f"{kind}({inside.rstrip(')').rpartition('/')[2]})"
 
 
-def _process_actions(atlas: model.Atlas, node_id: str) -> set[str]:
-    """The launch actions that start a process, spelled the way a candidate locator ends."""
+def _process_actions(atlas: model.Atlas, node_id: str) -> dict[str, set[str]]:
+    """The launch actions that start a process, per profile, spelled the way a locator ends.
+
+    A site inside an `OpaqueFunction` or an include is the last step of its trail.
+    """
     entity = atlas.entities.get(node_id)
-    out: set[str] = set()
+    out: dict[str, set[str]] = {}
     for fact in entity.facts if entity is not None else ():
         if fact.layer != DECLARED:
             continue
         for source in fact.evidence:
-            out.add(_action_key(source.locator.rpartition("|")[2]))
+            step = _LAST_STEP.search(source.locator)
+            if step is not None:
+                out.setdefault(fact.profile, set()).add(_action_key(step.group(1)))
     return out
 
 
 def _own_process_rows(
-    builder: model.AtlasBuilder, actions: set[str], new_ids: Sequence[str]
+    builder: model.AtlasBuilder, actions: dict[str, set[str]], new_ids: Sequence[str]
 ) -> None:
     """Keep, in a chain followed under a name the source states, only this process's rows.
 
     Every process a launch site starts unnamed in one namespace followed a block keyed on that
     name as a chain of its own, so the chain holds the inline values of every such process,
     and the same file rows once per process. Only the process that runs the node hands it its
-    own launch values, and a file row is one line read once.
+    own launch values, and a file row is one line read once. A profile the process does not
+    run in keeps its chain, which another process states.
     """
     if not actions:
         return
@@ -2372,11 +2379,14 @@ def _own_process_rows(
                 (row for row in entity.candidates if row.profile == profile),
                 key=lambda row: row.rank,
             )
+            if profile not in actions:
+                rows.extend(chain)
+                continue
             kept: list[model.Candidate] = []
             seen: set[tuple[Any, ...]] = set()
             for row in chain:
                 action = _ACTION_ROW.search(row.source.locator)
-                if action is not None and _action_key(action.group(1)) not in actions:
+                if action is not None and _action_key(action.group(1)) not in actions[profile]:
                     continue
                 key = (row.mechanism, row.source.file, row.source.locator, repr(row.value))
                 if key in seen:

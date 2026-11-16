@@ -455,6 +455,38 @@ def test_supersession_cascades_to_the_parameters_of_that_node(builder):
     assert builder.atlas.entities[new].effective[REAL]["value"].value is False
 
 
+def test_a_process_keeps_the_launch_rows_of_its_own_site_and_of_other_profiles(builder):
+    launch = ids.build_file(PKG, "launch/bridge.launch.py")
+    builder.node(launch)
+    builder.fact(
+        synthetic_id(),
+        join.DECLARED,
+        profile=REAL,
+        values={"pkg": PKG},
+        evidence=[model.Source(file=launch, locator="OpaqueFunction(setup)/Node(io_bridge@1a2b)")],
+    )
+    param = ids.build_param("node:/io_bridge", "rate")
+    builder.set_param(
+        param,
+        state=model.ParamState.EFFECTIVE.value,
+        candidates=[
+            model.Candidate(
+                value=5,
+                value_type="int",
+                mechanism=model.Mechanism.LAUNCH_INLINE_DICT.value,
+                source=model.Source(file=launch, locator=f"Node({locator}).parameters"),
+                rank=0,
+                wins=True,
+                profile=profile,
+            )
+            for profile, locator in ((REAL, "io_bridge"), (SIM, "relay"))
+        ],
+    )
+    actions = join._process_actions(builder.atlas, synthetic_id())
+    join._own_process_rows(builder, actions, ["node:/io_bridge"])
+    assert {row.profile for row in builder.atlas.entities[param].candidates} == {REAL, SIM}
+
+
 def test_a_name_launch_stated_is_never_replaced_by_the_code(builder):
     other = model.AtlasBuilder()
     _profile(other, "nx_navigation")
