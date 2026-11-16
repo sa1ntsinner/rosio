@@ -4503,6 +4503,7 @@ def _member_constructions(units: Sequence[Unit]) -> None:
 
 
 _MEMBER_TYPES = {"double": float, "int": int, "int64_t": int, "bool": bool, "std::string": str}
+_CONTAINER = re.compile(r"(?:std::)?(?:vector|array|set|list|deque)\s*<")
 
 
 def _member_defaults(units: Sequence[Unit]) -> None:
@@ -4543,10 +4544,34 @@ def _member_defaults(units: Sequence[Unit]) -> None:
                 unit.params[position] = replace(
                     item, default=float(item.default), value_type="double"
                 )
+        # `ids_{"FollowPath"}` fills a `std::vector<std::string> ids_` with one element
+        for position, item in enumerate(unit.params):
+            if (
+                item.default_state == "known"
+                and not isinstance(item.default, list)
+                and not item.type_stated
+                and item.owner_class
+                and item.default_expr.removeprefix("this->").isidentifier()
+                and _CONTAINER.match(
+                    _member_type(
+                        units,
+                        unit.pkg,
+                        item.owner_class,
+                        item.default_expr.removeprefix("this->"),
+                        raw=True,
+                    )
+                )
+            ):
+                unit.params[position] = replace(
+                    item, default=None, default_state="unknown", value_type=""
+                )
 
 
-def _member_type(units: Sequence[Unit], pkg: str, owner: str, member: str) -> str:
-    """The scalar type a class of the package declares one member with, when only one."""
+def _member_type(
+    units: Sequence[Unit], pkg: str, owner: str, member: str, *, raw: bool = False
+) -> str:
+    """The scalar type a class of the package declares one member with, when only one, or
+    with `raw` the type as spelled."""
     tail = _type_tail(owner)
     types: set[str] = set()
     for unit in units:
@@ -4566,7 +4591,8 @@ def _member_type(units: Sequence[Unit], pkg: str, owner: str, member: str) -> st
                 child.type == "field_identifier" and _flat(child, unit.source) == member
                 for child in node.named_children
             ):
-                types.add(SCALAR_TYPES.get(_flat(_child(node, "type"), unit.source), ""))
+                spelled = _flat(_child(node, "type"), unit.source)
+                types.add(spelled if raw else SCALAR_TYPES.get(spelled, ""))
     return next(iter(types)) if len(types) == 1 else ""
 
 

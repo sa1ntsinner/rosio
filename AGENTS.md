@@ -1801,7 +1801,11 @@ parameter readings. A declare wrapper that is a method defined outside its class
 function, so each call declares the name it passes and its body is no `param_name` blind spot
 that hid every key of the node; a local the calling function assigns (`auto getParam =
 handler->getParamGetter(ns)`) is not the wrapper of the same name. The parameter records,
-states and `param_name` rate of such nodes moved.
+states and `param_name` rate of such nodes moved. A default that names a member the class
+declares as a container (`std::vector<std::string> default_ids_`) is no scalar literal, even
+where the constructor braces it with one (`default_ids_{"FollowPath"}`), so nav2's plugin
+selector lists no longer read as string parameters and `param.type_changed` stopped firing on
+them.
 
 A reader pinned to `1.0` still loads a `1.36` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re

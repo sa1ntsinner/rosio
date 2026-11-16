@@ -452,3 +452,20 @@ def test_an_unqualified_class_is_looked_up_in_the_enclosing_namespaces_first():
     ]
     reach = join._Reach(model.Atlas(), found)
     assert reach.of({("a", "Node")}) == {("a", "Node"), ("b", "Data")}
+
+
+def test_a_vector_member_braced_with_one_string_is_no_string_default():
+    header = cpp.parse_text(
+        "namespace n { class S : public rclcpp::Node { S(); std::vector<std::string> ids_; }; }",
+        pkg="p",
+        relpath="include/p/s.hpp",
+    )
+    source = cpp.parse_text(
+        'namespace n { S::S() : rclcpp::Node("s"), ids_{"FollowPath"} {'
+        ' declare_parameter("plugins", ids_); } }',
+        pkg="p",
+        relpath="src/s.cpp",
+    )
+    cpp.analyse([header, source])
+    (site,) = source.params
+    assert (site.default, site.default_state, site.value_type) == (None, "unknown", "")
