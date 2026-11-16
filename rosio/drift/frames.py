@@ -503,8 +503,22 @@ def frame_orphan_root(atlas: Atlas) -> list[Finding]:
     children: set[str] = set()
     sources: dict[str, set[str]] = {}
     played = _in_play(atlas, _tf_rows(atlas))
+    loaded = _loaded_models(atlas)
+    # The profiles a frame is live in, None for every profile. Two trees no profile runs
+    # together are two systems, not one system with a second root.
+    live: dict[str, set[str] | None] = {}
+
+    def run_in(frames: tuple[str, ...], profiles: set[str] | None) -> None:
+        for frame in frames:
+            held = live.get(frame, set())
+            live[frame] = None if held is None or profiles is None else held | profiles
+
     for row in played:
         links.append((row.child, row.parent))
+        if row.profile != model.ANY_PROFILE:
+            run_in((row.child, row.parent), {row.profile})
+        else:
+            run_in((row.child, row.parent), set(loaded[row.model]) if row.model in loaded else None)
         # A profile that expands a model with its own xacro arguments runs that tree instead
         # of the default one, so the two expansions are two robots here and never one robot
         # with a second root.
@@ -518,6 +532,7 @@ def frame_orphan_root(atlas: Atlas) -> list[Finding]:
     for pair in _static_pairs(atlas):
         child, parent = ids.build_frame(pair.child), ids.build_frame(pair.parent)
         links.append((child, parent))
+        run_in((child, parent), None if pair.profile == model.ANY_PROFILE else {pair.profile})
         # A publisher whose remaps send /tf elsewhere feeds a tree of its own, another robot.
         tree = trees.get((pair.node, pair.profile), _TF_TOPICS)
         source = SYSTEM_SOURCE if tree == _TF_TOPICS else f"tf {' '.join(tree)}"
@@ -534,10 +549,23 @@ def frame_orphan_root(atlas: Atlas) -> list[Finding]:
         home, *others = family
         anchor = _root_of(home, children)
         for group in others:
+            mine, theirs = _live_in(live, group), _live_in(live, home)
+            if mine is not None and theirs is not None and not mine & theirs:
+                continue
             found = _orphan_finding(atlas, group, home, anchor, children, _guarded(played, group))
             if found is not None:
                 findings.append(found)
     return findings
+
+
+def _live_in(live: dict[str, set[str] | None], group: Sequence[str]) -> set[str] | None:
+    out: set[str] = set()
+    for frame in group:
+        held = live.get(frame)
+        if held is None:
+            return None
+        out |= held
+    return out
 
 
 def _in_play(atlas: Atlas, rows: list[_Tf]) -> list[_Tf]:

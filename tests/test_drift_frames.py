@@ -490,6 +490,20 @@ def test_orphan_root_still_fires_inside_the_expansion_one_profile_loads():
     assert [item.subject for item in found] == ["frame:tb3/laser_mount"]
 
 
+def test_orphan_root_is_silent_on_two_trees_no_profile_runs_together():
+    """Each demo launch file of one package starts a tree of its own."""
+    builder = _builder()
+    for name, profile, parent, child in (
+        ("/camera_tie", NAV, "camera_link", "camera/link"),
+        ("/lidar_tie", SIM, "map", "lidar/link"),
+    ):
+        argv = ["--frame-id", parent, "--child-frame-id", child]
+        for frame in (parent, child):
+            builder.node(ids.build_frame(frame))
+        _node(builder, name, profile, {"executable": "static_transform_publisher", "argv": argv})
+    assert frame_rules.frame_orphan_root(builder.build()) == []
+
+
 def test_orphan_root_keeps_its_id_across_two_runs():
     first = _ids(frame_rules.frame_orphan_root(_orphan_atlas(tied=False).build()))
     second = _ids(frame_rules.frame_orphan_root(_orphan_atlas(tied=False).build()))
