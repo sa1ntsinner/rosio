@@ -1765,6 +1765,13 @@ of the missing path. `frame.orphan_root` compares two trees only when a profile 
 fallback profile for a launch file outside every package names `@repo`, where it named `repo`
 and never loaded.
 
+Inside `1.35`, with no new key, a fourth run over public repositories moved several readings.
+`frame.orphan_root` is silent where `frame.no_publisher` is: when every profile that runs both
+trees starts a node whose code was not read or stopped its launch walk before naming every
+node, because such a node may broadcast the tie. A code broadcast no profile was seen to start
+runs, when a walk stopped, only in the profiles rosio could not see, so xarm's object
+broadcaster, which a launch file that raised starts beside a camera driver, is no second root.
+
 A reader pinned to `1.0` still loads a `1.35` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re
 emitted rather than dropped or refused. `rosio/model.py` states the same list beside

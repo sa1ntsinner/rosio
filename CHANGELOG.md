@@ -56,7 +56,9 @@ Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
 * A mesh under a directory the reader may not enter is a missing mesh and no longer ends the
   robot model pass.
 * A fallback profile for a launch file outside every package loads.
-* `frame.orphan_root` is silent on two transform trees no profile runs together.
+* `frame.orphan_root` is silent on two transform trees no profile runs together, and where
+  every profile that runs them starts a node whose code was not read or stopped its launch
+  walk, as `frame.no_publisher` is.
 * A C++ parameter whose default is a member initialized with an integer literal takes the
   type its class declares the member with, so a `double` member no longer reads as an integer
   parameter and `param.type_changed` stays silent on it.

@@ -539,6 +539,14 @@ def test_orphan_root_keeps_its_id_when_the_tie_gains_a_guard():
     assert plain == guarded == again and len(plain) == 1
 
 
+def test_orphan_root_is_silent_on_code_only_a_profile_whose_walk_stopped_may_start():
+    """xarm's object broadcaster runs beside a camera driver in a launch file that raised, and
+    the driver, which nobody read, broadcasts the tie."""
+    builder = _orphan_atlas(tied=False)
+    builder.add_run(DECLARED, profile=NAV, input_digest="deadbeef", exceptions=[_RAISED_ROW])
+    assert frame_rules.frame_orphan_root(builder.build()) == []
+
+
 # ---------------------------------------------------------------------------
 # frame.not_in_urdf
 

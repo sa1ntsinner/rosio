@@ -502,8 +502,13 @@ def frame_orphan_root(atlas: Atlas) -> list[Finding]:
     links: list[tuple[str, str]] = []
     children: set[str] = set()
     sources: dict[str, set[str]] = {}
-    played = _in_play(atlas, _tf_rows(atlas))
+    rows = _tf_rows(atlas)
+    played = _in_play(atlas, rows)
     loaded = _loaded_models(atlas)
+    # A profile that starts a node whose code was not read, or whose walk stopped, may
+    # broadcast the missing tie, as frame.no_publisher and frame.not_in_urdf assume.
+    unseen = _unread_launched(atlas) | _walk_stopped(atlas)
+    bound = {row.fact.values.get("symbol") for row in rows if row.profile != model.ANY_PROFILE}
     # The profiles a frame is live in, None for every profile. Two trees no profile runs
     # together are two systems, not one system with a second root.
     live: dict[str, set[str] | None] = {}
@@ -517,6 +522,11 @@ def frame_orphan_root(atlas: Atlas) -> list[Finding]:
         links.append((row.child, row.parent))
         if row.profile != model.ANY_PROFILE:
             run_in((row.child, row.parent), {row.profile})
+        elif (
+            unseen and row.source in _CODE_BROADCASTS and row.fact.values.get("symbol") not in bound
+        ):
+            # Code no profile was seen to start runs, if anywhere, where the walk could not see.
+            run_in((row.child, row.parent), set(unseen))
         else:
             run_in((row.child, row.parent), set(loaded[row.model]) if row.model in loaded else None)
         # A profile that expands a model with its own xacro arguments runs that tree instead
@@ -551,6 +561,9 @@ def frame_orphan_root(atlas: Atlas) -> list[Finding]:
         for group in others:
             mine, theirs = _live_in(live, group), _live_in(live, home)
             if mine is not None and theirs is not None and not mine & theirs:
+                continue
+            both = mine & theirs if mine is not None and theirs is not None else mine or theirs
+            if both and both <= unseen:
                 continue
             found = _orphan_finding(atlas, group, home, anchor, children, _guarded(played, group))
             if found is not None:
@@ -1262,6 +1275,23 @@ def _unread_launched(atlas: Atlas) -> set[str]:
                 continue
             if not whole(node.id, fact.profile):
                 out.add(fact.profile)
+    return out
+
+
+_CODE_BROADCASTS = frozenset({"cpp_broadcast", "py_broadcast"})
+
+
+def _walk_stopped(atlas: Atlas) -> set[str]:
+    """Profiles whose launch walk raised before it named every node, so any node may be missing."""
+    out: set[str] = set()
+    for run in atlas.by_kind(model.NodeKind.RUN.value):
+        profile = str(run.attrs.get("profile") or "")
+        rows = run.attrs.get("exceptions") or []
+        if profile and any(
+            row.get("note") == "launch.raised" and not row.get("kept") for row in rows
+        ):
+            prefix = f"{model.NodeKind.PROFILE.value}{ids.KIND_SEP}"
+            out.add(profile if profile.startswith(prefix) else ids.build_profile(profile))
     return out
 
 
