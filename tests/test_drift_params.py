@@ -712,6 +712,7 @@ def _undeclared_atlas(
     plugins: int = 0,
     locator: str = "",
     mechanism: str = model.Mechanism.YAML_BASE.value,
+    shared: str = "",
 ) -> model.Atlas:
     builder = _builder()
     for other in declared:
@@ -752,6 +753,24 @@ def _undeclared_atlas(
             )
         ],
     )
+    if shared:
+        # Another node handed the same dict, whose code declares the key.
+        other = ids.build_node(shared)
+        builder.node(other, name_source=model.NameSource.LITERAL.value)
+        builder.fact(other, CODED, profile=PROFILE, values={"coded_sources": [source_file]})
+        builder.fact(
+            ids.build_param(other, name), CODED, profile=PROFILE, values={"declared_in_code": True}
+        )
+        _param(
+            builder,
+            name,
+            [
+                _candidate(
+                    1.0, mechanism, _source(BASE, f"Node({shared[1:]}).parameters", 12), wins=True
+                )
+            ],
+            owner=other,
+        )
     if read:
         symbol = ids.build_sym("demo_pkg", "src/demo_server.cpp", "DemoServer::on_timer")
         builder.node(symbol)
@@ -782,6 +801,15 @@ def test_param_set_undeclared_asks_to_remove_a_key_from_a_launch_dict_not_its_li
     (found,) = _run(atlas, "param.set_undeclared")
     assert "remove max_speed from the dictionary passed at" in found.fix
     assert "delete the line" not in found.fix.lower() + found.say.lower()
+
+
+def test_param_set_undeclared_is_silent_on_a_dict_key_another_node_handed_it_declares():
+    atlas = _undeclared_atlas(
+        mechanism=model.Mechanism.LAUNCH_INLINE_DICT.value,
+        locator="Node(demo_server).parameters",
+        shared="/slam",
+    )
+    assert _run(atlas, "param.set_undeclared") == []
 
 
 def test_param_set_undeclared_names_the_node_source_first_and_counts_in_plain_words():

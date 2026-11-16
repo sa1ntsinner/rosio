@@ -456,6 +456,14 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
                 (parsed.owner, join.REACHED), set()
             ):
                 needed.add((parsed.name, row.source.file, row.source.locator))
+            # One dict object handed to several actions is one line per key, whatever action
+            # locator each node cites: the key is needed when another node declares it or
+            # builds a name at run time that could be it.
+            if _dict_line(row) and join.reading(atlas, node, row.profile, blind, declared) in (
+                join.DECLARED_STATE,
+                join.UNKNOWN_STATE,
+            ):
+                needed.add((parsed.name, row.source.file, _dict_line(row)))
     lines: dict[tuple[str, str, int], list[_Ignored]] = defaultdict(list)
     for node in _params(atlas):
         owner_id = ids.parse_param(node.id).owner
@@ -471,6 +479,8 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
             if winner is None:
                 continue
             if (name, winner.source.file, winner.source.locator) in needed:
+                continue
+            if _dict_line(winner) and (name, winner.source.file, _dict_line(winner)) in needed:
                 continue
             near = _nearest_name(name, join.declared_in(declared, owner_id, profile))
             source = winner.source
@@ -488,6 +498,13 @@ def set_undeclared(atlas: model.Atlas) -> list[model.Finding]:
         names = [] if rows[0].winner.mechanism in _HANDED else sorted({row.name for row in rows})
         merged[ids.digest(source.file, source.locator, *names)].extend(rows)
     return [_undeclared_line(disc, merged[disc]) for disc in sorted(merged)]
+
+
+def _dict_line(row: model.Candidate) -> str:
+    """The line an inline dict writes a key on, which every action handed that dict cites."""
+    if row.mechanism != model.Mechanism.LAUNCH_INLINE_DICT.value or not row.source.line_hint:
+        return ""
+    return f"dict line {row.source.line_hint}"
 
 
 _HANDED = frozenset(
