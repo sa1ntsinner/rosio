@@ -337,6 +337,12 @@ def _frontend_includes(text: str, suffix: str, started_only: bool = False) -> li
     return [value for value in out if value]
 
 
+def include_only(entries: Sequence[Entrypoint]) -> set[int]:
+    """The ids of the entry points `_include_only` leaves out, over one tree of launch files."""
+    included = _included([ProfileSpec(slug="all", entrypoints=tuple(entries))])
+    return {id(entry) for entry in entries if _include_only(entry, included)}
+
+
 def _include_only(
     entry: Entrypoint, included: Mapping[tuple[str, Path], Sequence[Entrypoint]]
 ) -> bool:

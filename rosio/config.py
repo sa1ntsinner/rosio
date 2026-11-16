@@ -331,7 +331,12 @@ def default_config(workspace: Any, packages: Sequence[str] = ()) -> Config:
     """
     ws = _as_workspace(workspace)
     roots = tuple(RootSpec(kind=spec.kind, path=spec.path) for spec in ws.roots)
+    from rosio.scaffold import include_only
+
     rows = _launch_profiles(ws)
+    # A file only ever included by one that passes the arguments it needs only raises alone.
+    dropped = include_only([entry for _slug, _label, entry in rows])
+    rows = [row for row in rows if id(row[2]) not in dropped]
     if packages:
         wanted = set(packages)
         missing = sorted(wanted - {entry.pkg for _slug, _label, entry in rows})

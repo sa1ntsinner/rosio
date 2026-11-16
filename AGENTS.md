@@ -1771,6 +1771,11 @@ trees starts a node whose code was not read or stopped its launch walk before na
 node, because such a node may broadcast the tie. A code broadcast no profile was seen to start
 runs, when a walk stopped, only in the profiles rosio could not see, so xarm's object
 broadcaster, which a launch file that raised starts beside a camera driver, is no second root.
+A python launch file needs an argument when it declares one with no default, and now also when
+it reads a `LaunchConfiguration` with no default that it declares nowhere, which raises alone.
+The fallback configuration `rosio extract` reads, and not only `rosio init`, leaves out a file
+another launch file includes when it needs an argument that includer does not need itself:
+the includer passes it, so it is how the file runs. Those profiles and their run ids are gone.
 
 A reader pinned to `1.0` still loads a `1.35` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re

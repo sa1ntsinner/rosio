@@ -80,6 +80,25 @@ def test_an_included_launch_file_that_needs_arguments_is_not_offered(workspace: 
     assert "  #     description_file: ''" in text
 
 
+def test_a_file_reading_a_configuration_only_its_includer_sets_is_no_fallback_profile(
+    workspace: Path,
+) -> None:
+    """xarm's `_robot_moveit_common2.launch.py` reads moveit_config_dump with no default and
+    declares nothing, so alone it only raises."""
+    launch = workspace / "src" / "lx_bringup" / "launch" / "plain_node.launch.py"
+    launch.with_name("common.launch.py").write_text(
+        "from launch import LaunchDescription\n"
+        "from launch.substitutions import LaunchConfiguration\n"
+        "def generate_launch_description():\n"
+        "    dump = LaunchConfiguration('dump')\n"
+        "    return LaunchDescription([])\n",
+        encoding="utf-8",
+    )
+    launch.with_name("top.launch.py").write_text(_including("common.launch.py"))
+    targets = [p.entrypoints[0].target for p in default_config(str(workspace)).profiles]
+    assert "top.launch.py" in targets and "common.launch.py" not in targets
+
+
 def _including(name: str, through_variable: bool = False, package: str = "lx_bringup") -> str:
     source = f'os.path.join(get_package_share_directory("{package}"), "launch", "{name}")'
     return (

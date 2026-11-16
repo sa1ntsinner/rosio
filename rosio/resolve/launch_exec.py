@@ -1079,26 +1079,38 @@ def environment_reads(source: str) -> tuple[str, ...]:
 
 
 def required_arguments(source: str) -> tuple[str, ...]:
-    """The launch arguments a python launch file declares with no default, in source order.
+    """The launch arguments a python launch file declares with no default, and those it reads
+    with `LaunchConfiguration` with no default and declares nowhere, in source order.
 
-    `ros2 launch` refuses the file until each one is given, so a file that has them is either
-    started with arguments or only ever included by another launch file that passes them.
+    `ros2 launch` refuses the file until each one is given, or raises on the read, so a file
+    that has them is either started with arguments or only ever included by another launch
+    file that passes them.
     """
     try:
         tree = parse_python(source)
     except SyntaxError:
         return ()
     found: list[tuple[int, int, str]] = []
+    declared: set[str] = set()
+    reads: list[tuple[int, int, str]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or _call_name(node.func) != "DeclareLaunchArgument":
+        if not isinstance(node, ast.Call):
             continue
-        name = _arg(node, "name", 0)
-        if (
-            _arg(node, "default_value", 1) is None
-            and isinstance(name, ast.Constant)
-            and isinstance(name.value, str)
-        ):
-            found.append((node.lineno, node.col_offset, name.value))
+        kind = _call_name(node.func)
+        if kind == "DeclareLaunchArgument":
+            name, default = _arg(node, "name", 0), _arg(node, "default_value", 1)
+        elif kind == "LaunchConfiguration":
+            name, default = _arg(node, "variable_name", 0), _arg(node, "default", 1)
+        else:
+            continue
+        if not isinstance(name, ast.Constant) or not isinstance(name.value, str):
+            continue
+        if kind == "DeclareLaunchArgument":
+            declared.add(name.value)
+        if default is None:
+            row = (node.lineno, node.col_offset, name.value)
+            (found if kind == "DeclareLaunchArgument" else reads).append(row)
+    found += [row for row in reads if row[2] not in declared]
     return tuple(dict.fromkeys(text for _line, _col, text in sorted(found)))
 
 

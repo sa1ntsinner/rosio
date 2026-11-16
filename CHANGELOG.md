@@ -39,7 +39,9 @@ Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
 ### Reading
 
 * The fallback configuration no longer offers a launch file that a CMake test command of its
-  package runs.
+  package runs, nor, in `rosio extract` as in `rosio init`, one only an including launch file
+  can start because it passes the arguments the file needs. A `LaunchConfiguration` read with
+  no default that the file declares nowhere counts as such an argument.
 * A xacro file whose root element is not `robot`, or that only defines macros, is read as a
   file other models include and not as a model of its own.
 * A file the package's CMake writes into the build directory and installs into its share is
