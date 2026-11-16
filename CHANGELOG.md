@@ -46,6 +46,8 @@ Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
   file other models include and not as a model of its own.
 * A file the package's CMake writes into the build directory and installs into its share is
   reported once by `build.unbuilt` instead of `launch.raised` per launch file.
+* A xacro include path that an empty argument spells is no longer called an unbuilt package:
+  the refusal names the empty argument, and only a profile that loads the model reports it.
 * A process a launch site starts inside an `OpaqueFunction` or an include keeps its own inline
   launch values.
 * `param.set_undeclared` is silent on a key of a python dict several launch actions are handed

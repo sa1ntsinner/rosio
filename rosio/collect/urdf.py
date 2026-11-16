@@ -1081,7 +1081,19 @@ class UrdfCollector:
             except CollectorError as exc:
                 exceptions.append(_exception_row(ctx, path, exc))
                 moved = after_build(ws, str(exc))
-                if moved:
+                empty = _emptied(scan, args, moved, ws.share) if moved else []
+                if empty:
+                    needs = ids.parse_file(moved["needs"][0]).relpath
+                    refusals.append(
+                        (
+                            path,
+                            "xacro_failed",
+                            f"the argument {', '.join(empty)} has an empty default, so an "
+                            f"include names {needs}, which no tree holds (the source holds "
+                            f"{' or '.join(moved['found_elsewhere'])})",
+                        )
+                    )
+                elif moved:
                     refusals.append((path, BUILT_ONLY, str(exc)))
                     self._moved[path] = moved
                 else:
@@ -1584,6 +1596,54 @@ def _declared_in_includes(scan: XacroFile, resolve_package: PackageResolver | No
         declared.update(name for name, _default in included.args)
         pending.extend(include.resolved for include in included.includes if include.resolved)
     return declared
+
+
+_SUBSTITUTION = re.compile(r"\$\{(\w+)\}|\$\(arg (\w+)\)")
+_INCLUDE_FILENAME = re.compile(r"<xacro:include\s+filename=\"([^\"]+)\"")
+
+
+def _emptied(
+    scan: XacroFile,
+    args: Sequence[tuple[str, str]],
+    moved: Mapping[str, Any],
+    resolve_package: PackageResolver | None,
+) -> list[str]:
+    """The empty arguments that spell the missing include path, read from the include
+    filenames of the model and of the files it includes: `arms/${arm}/${dof}dof/...` with an
+    empty dof names `arms/gen3/dof/...`, which is no file a build puts anywhere."""
+    passed = dict(args)
+    empty = {name for name, default in scan.args if default == "" and name not in passed}
+    empty |= {name for name, value in args if value == ""}
+    if not empty:
+        return []
+    missing = ids.parse_file(moved["needs"][0]).relpath
+    found: set[str] = set()
+    pending, seen = [scan], set()
+    while pending and len(seen) < INCLUDE_LIMIT:
+        current = pending.pop()
+        try:
+            text = Path(current.path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        # An include inside a macro body, which the scan does not walk, counts as well.
+        for raw in _INCLUDE_FILENAME.findall(text):
+            tail = re.sub(r"^\$\(find [^)]+\)/", "", raw)
+            names, pattern, start = [], "", 0
+            for match in _SUBSTITUTION.finditer(tail):
+                names.append(match.group(1) or match.group(2))
+                pattern += re.escape(tail[start : match.start()]) + "([^/]*)"
+                start = match.end()
+            hit = re.fullmatch(pattern + re.escape(tail[start:]), missing)
+            if hit:
+                found |= {name for i, name in enumerate(names, 1) if name in empty and not hit[i]}
+        for include in current.includes:
+            if include.resolved and include.resolved not in seen:
+                seen.add(include.resolved)
+                try:
+                    pending.append(scan_xacro(include.resolved, resolve_package=resolve_package))
+                except CollectorError:
+                    continue
+    return sorted(found)
 
 
 def _describes(ws: Any, path: str) -> bool:

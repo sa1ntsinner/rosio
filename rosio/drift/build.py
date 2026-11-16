@@ -1415,7 +1415,9 @@ XACRO_DEFAULTS = frozenset({"xacro_failed", "xacro_argument_missing"})
 """Refusals of a model expanded with its own defaults, which a launch line passing arguments
 makes moot."""
 
-_EMPTY_ARGUMENT = re.compile(r"'_\w*' is not a valid package name")
+_EMPTY_ARGUMENT = re.compile(
+    r"'_\w*' is not a valid package name|^the argument [\w, ]+ has an empty default"
+)
 _MISSING_PACKAGE = re.compile(r"package '([^']+)' (?:is )?not found")
 
 

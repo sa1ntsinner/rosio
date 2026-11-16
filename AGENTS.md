@@ -1776,6 +1776,12 @@ it reads a `LaunchConfiguration` with no default that it declares nowhere, which
 The fallback configuration `rosio extract` reads, and not only `rosio init`, leaves out a file
 another launch file includes when it needs an argument that includer does not need itself:
 the includer passes it, so it is how the file runs. Those profiles and their run ids are gone.
+A xacro model whose include path an argument with an empty value spells
+(`arms/${arm}/${dof}dof/...` reading `arms/gen3/dof/...`) is refused as `xacro_failed` with a
+detail naming the argument, and no longer as `file_after_build`, so `build.unbuilt` stops
+calling the package unbuilt and `extract.input_refused` treats it as the template waiting for its
+argument it is: silent unless a profile loads it with its defaults. The id of that blind spot
+moved with its expression.
 
 A reader pinned to `1.0` still loads a `1.35` file: `Atlas.from_json` compares the major
 alone, and the keys and the enum members that build never heard of are preserved and re

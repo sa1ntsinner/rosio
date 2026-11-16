@@ -118,6 +118,25 @@ def test_a_non_robot_document_is_refused() -> None:
         urdf_collect.parse_urdf_text("<sdf><world/></sdf>", path="x.urdf")
 
 
+def test_an_include_path_an_empty_argument_spells_names_the_argument(tmp_path: Path) -> None:
+    """ros2_kortex: `arms/${arm}/${dof}dof/...` with dof empty is no unbuilt package."""
+    xacro = 'xmlns:xacro="http://www.ros.org/wiki/xacro"'
+    (tmp_path / "lib.xacro").write_text(
+        f'<robot {xacro}><xacro:macro name="arm" params="dof">'
+        '<xacro:include filename="$(find kx)/arms/${dof}dof/m.xacro"/>'
+        "</xacro:macro></robot>"
+    )
+    model_file = tmp_path / "gen3.xacro"
+    model_file.write_text(
+        f'<robot name="r" {xacro}><xacro:arg name="dof" default=""/>'
+        '<xacro:include filename="lib.xacro"/><xacro:arm dof="$(arg dof)"/></robot>'
+    )
+    scan = urdf_collect.scan_xacro(str(model_file))
+    moved = {"needs": ["file:kx|arms/dof/m.xacro"]}
+    assert urdf_collect._emptied(scan, (), moved, None) == ["dof"]
+    assert urdf_collect._emptied(scan, (("dof", "7"),), moved, None) == []
+
+
 def test_discovery_filters_by_extension(static_root: Path, ws: Workspace, expected) -> None:
     want = expected("xacro.json")["discovery"]
     urdfs = [str(Path(path).relative_to(static_root)) for path in ws.source_files([".urdf"])]
