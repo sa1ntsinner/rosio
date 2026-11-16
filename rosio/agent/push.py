@@ -1,5 +1,6 @@
-"""What the Claude Code hooks state: a briefing when a session starts, a slice of the atlas for
-the names a prompt spells, and the findings an edit added when a session that edited stops.
+"""What the Claude Code and Codex hooks state: a briefing when a session starts, a slice of the
+atlas for the names a prompt spells, and the findings an edit added when a session that edited
+stops. Both assistants hand the same stdin fields and add plain stdout as context.
 
 Every function here returns text or nothing, and the hooks print it as it is. A hook that
 cannot answer, because there is no atlas or rosio broke, says nothing and exits zero.

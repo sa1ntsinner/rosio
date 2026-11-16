@@ -38,6 +38,11 @@ Atlas schema `1.35`, additive: a reader of a `1.34` file loads it.
   When the atlas was already older than the sources as the session began, it says so and
   calls those findings not in the atlas rather than added by the edits.
 * `rosio uninstall claude-code` removes all three hooks.
+* `rosio install codex` registers the same three hooks in `.codex/hooks.json`, keeping any
+  hooks already there, and `rosio uninstall codex` removes only them. The Stop hook reads the
+  files a Codex session patched from its rollout, and counts every file git reports changed
+  when a session hands no transcript. Codex runs project hooks only in a trusted project once
+  `/hooks` approves them.
 
 ### Reading
 

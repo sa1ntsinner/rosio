@@ -1296,6 +1296,7 @@ def test_install_writes_the_files_and_uninstall_takes_them_back(tmp_path: Path, 
     assert written == [
         ".agents/skills/rosio/coding.md",
         ".agents/skills/rosio/review.md",
+        ".codex/hooks.json",
         "AGENTS.md",
     ]
 

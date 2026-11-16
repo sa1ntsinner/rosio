@@ -41,27 +41,43 @@ def packages(root: Path) -> list[Path]:
     )
 
 
-def edited(transcript: str, root: Path) -> list[str]:
-    paths = set()
+OWN = (".claude", ".codex", ".agents", "rosio-out")
+
+
+def calls(transcript: str | None):
+    """Each tool call of a session as (name, input), from a Claude Code transcript or a Codex
+    rollout, whose `arguments` or `input` is the call's text."""
+    if not transcript or not Path(transcript).is_file():
+        return
     with Path(transcript).open(encoding="utf-8") as stream:
         for line in stream:
             try:
                 message = json.loads(line)
             except ValueError:
                 continue
-            if message.get("type") != "assistant":
+            if message.get("type") == "assistant":
+                for content in message.get("message", {}).get("content", []):
+                    if content.get("type") == "tool_use":
+                        yield content.get("name"), content.get("input", {})
+            elif message.get("type") == "response_item":
+                item = message.get("payload") or {}
+                if item.get("type") in ("function_call", "custom_tool_call"):
+                    yield item.get("name"), item.get("arguments") or item.get("input") or ""
+
+
+def edited(transcript: str | None, root: Path) -> list[str]:
+    paths = set()
+    for name, args in calls(transcript):
+        if name in EDITS and isinstance(args, dict):
+            path = Path(args.get("file_path", ""))
+            try:
+                rel = path.resolve().relative_to(root.resolve())
+            except ValueError:
                 continue
-            for content in message.get("message", {}).get("content", []):
-                if content.get("type") == "tool_use" and content.get("name") in EDITS:
-                    path = Path(content.get("input", {}).get("file_path", ""))
-                    try:
-                        rel = path.resolve().relative_to(root.resolve())
-                    except ValueError:
-                        continue
-                    own = rel.parts and rel.parts[0] not in (".claude", "rosio-out")
-                    if own and rel.suffix != ".md":
-                        paths.add(rel.as_posix())
-    # agents also edit through the shell, so a changed file the session named counts too
+            if rel.parts and rel.parts[0] not in OWN and rel.suffix != ".md":
+                paths.add(rel.as_posix())
+    # agents also edit through the shell, so a changed file the session named counts too, and
+    # every changed file when there is no transcript to name it
     seen = touched(transcript)
     git = ["git", "-C", str(root)]
     changed = ["diff", "--name-only", "--relative", "HEAD"]
@@ -74,41 +90,38 @@ def edited(transcript: str, root: Path) -> list[str]:
             parts = Path(rel).parts
             if (
                 parts
-                and parts[0] not in (".claude", "rosio-out")
+                and parts[0] not in OWN
                 and Path(rel).suffix != ".md"
                 and Path(rel).name not in ("CLAUDE.md", ".mcp.json", "rosio.yaml")
-                and Path(rel).name in seen
+                and (seen is None or Path(rel).name in seen)
             ):
                 paths.add(Path(rel).as_posix())
     return sorted(paths)
 
 
-def touched(transcript: str) -> str:
-    text = []
-    with Path(transcript).open(encoding="utf-8") as stream:
-        for line in stream:
-            try:
-                message = json.loads(line)
-            except ValueError:
-                continue
-            if message.get("type") != "assistant":
-                continue
-            for content in message.get("message", {}).get("content", []):
-                if content.get("type") == "tool_use":
-                    text.append(dumps_line(content.get("input", {})))
+def touched(transcript: str | None) -> str | None:
+    """The text of every tool call, or None when there is no transcript to read."""
+    if not transcript or not Path(transcript).is_file():
+        return None
+    text = [args if isinstance(args, str) else dumps_line(args) for _, args in calls(transcript)]
     return "\n".join(text)
 
 
 def _run() -> None:
     data = json.load(sys.stdin)
+    transcript = data.get("transcript_path")
     # a transcript records one hook message several times, so count by its number
-    text = Path(data["transcript_path"]).read_text(encoding="utf-8")
+    held = transcript and Path(transcript).is_file()
+    text = Path(transcript).read_text(encoding="utf-8") if held else ""
     said = re.findall(r"\(reminder (\d+) of", text)
     nudges = max(map(int, said), default=0)
     if nudges >= NUDGES or (data.get("stop_hook_active") and not nudges):
         return
-    root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or ".")
-    changed = edited(data["transcript_path"], root)
+    # only Codex hands a turn id, and it reads the skill files from the portable directory
+    codex = "turn_id" in data
+    skill = ".agents/skills/rosio" if codex else ".claude/skills/rosio"
+    root = Path((not codex and os.environ.get("CLAUDE_PROJECT_DIR")) or data.get("cwd") or ".")
+    changed = edited(transcript, root)
     if changed:
         try:
             measured = (
@@ -123,7 +136,7 @@ def _run() -> None:
         if REVIEW not in text:
             parts.append(
                 f"{REVIEW} {', '.join(changed[:10])}. Before you finish, read "
-                ".claude/skills/rosio/coding.md and check the diff against it: every path that "
+                f"{skill}/coding.md and check the diff against it: every path that "
                 "hits this same defect is fixed, and another defect you found is named in the "
                 "report rather than fixed here; a small deterministic test, no sleeps or timing, "
                 "that runs the fixed line and fails without the change, every name it calls "
@@ -138,7 +151,9 @@ def _run() -> None:
         if parts:
             print(dumps_line({"decision": "block", "reason": "\n\n".join(parts)}))
         return
-    seen = touched(data["transcript_path"])
+    seen = touched(transcript)
+    if seen is None:
+        return
     rows, unread, total, read = [], [], 0, 0
     for package in packages(root):
         files = sources(package)
@@ -162,7 +177,7 @@ def _run() -> None:
         f"(reminder {nudges + 1} of {NUDGES}). Per package, files opened of files held: "
         f"{'; '.join(rows[:40])}. Large files not opened: {names}. If this is a bug hunt "
         "or a review, it is not finished: read these files end to end the way "
-        ".claude/skills/rosio/review.md asks, handing groups of packages to subagents when you "
+        f"{skill}/review.md asks, handing groups of packages to subagents when you "
         "can start them, and add each bug you confirm to the report. Otherwise finish now."
     )
     print(dumps_line({"decision": "block", "reason": reason}))

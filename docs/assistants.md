@@ -50,9 +50,10 @@ a search instead of reading whole packages. The skill tells an agent to read it 
 bugs or reviewing a change, so it costs nothing on other tasks. `coding.md` beside it holds the
 habits for writing, changing and debugging ROS 2 code, read before an agent edits code.
 
-## Claude Code hooks
+## Claude Code and Codex hooks
 
-`rosio install claude-code` also registers three hooks in `.claude/settings.json`. Each prints
+`rosio install claude-code` also registers three hooks in `.claude/settings.json`, and
+`rosio install codex` registers the same three in `.codex/hooks.json`. Each prints
 what rosio measured, and prints nothing and exits zero when there is no atlas or anything fails.
 
 * `rosio hook brief`, at session start: the profiles, the finding counts by severity, the worst
@@ -66,7 +67,13 @@ what rosio measured, and prints nothing and exits zero when there is no atlas or
 * `rosio hook coverage`, when a session stops: if the session edited a source, launch,
   parameter, robot model or build file, the workspace is extracted again into a temporary
   directory and the session is stopped once with each finding the edit added, its line and the
-  exact replacement when the finding carries one. `rosio-out` stays as it was.
+  exact replacement when the finding carries one. `rosio-out` stays as it was. A file counts as
+  edited when the session's transcript names it and git reports it changed, or when git reports
+  it changed and there is no transcript.
+
+Codex runs a project hook only in a trusted project, and only after you approve it in `/hooks`
+(or for one run under `codex exec --dangerously-bypass-hook-trust`). It asks again after
+every edit to `.codex/hooks.json`, because the approval is kept per hook content.
 
 ## Privacy
 

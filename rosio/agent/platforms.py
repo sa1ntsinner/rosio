@@ -20,9 +20,10 @@ as unverified with the note naming the half that holds. `proof` states the same 
 phrase and is carried in the table, because a bool over two paths cannot say that one of them
 was watched and the other was read in a manual.
 
-Four rows carry proof today, all against a tool installed on the machine that wrote this
-table: two Claude Code rows and two Codex CLI rows, and on the user scope in every case. Every
-other row is somebody reading a manual.
+Six rows carry proof today, all against a tool installed on the machine that wrote this
+table: two Claude Code rows on the user scope, and four Codex CLI rows, its hooks, its
+`coding.md` and its AGENTS.md on the project scope and its AGENTS.md and MCP entry on the user
+scope. Every other row is somebody reading a manual.
 """
 
 from __future__ import annotations
@@ -257,6 +258,18 @@ PLATFORMS: tuple[Platform, ...] = (
         title="Codex CLI",
         targets=(
             Target(
+                mechanism="hook",
+                project=".codex/hooks.json",
+                user=".codex/hooks.json",
+                fmt="json",
+                container="hooks",
+                proven=("project",),
+                note="the project file was watched firing all three hooks in codex exec 0.166.0, "
+                "the user path is from the documentation; Codex runs a project hook only once "
+                "the project is trusted and the hook is approved in /hooks, or under "
+                "--dangerously-bypass-hook-trust",
+            ),
+            Target(
                 mechanism="reference",
                 project=_PORTABLE_REVIEW,
                 user=_PORTABLE_REVIEW,
@@ -269,17 +282,17 @@ PLATFORMS: tuple[Platform, ...] = (
                 project=_PORTABLE_CODING,
                 user=_PORTABLE_CODING,
                 template="coding.md",
-                note="habits for writing, changing and debugging ROS 2 code, which the skill "
-                "names by this path",
+                proven=("project",),
+                note="habits for writing, changing and debugging ROS 2 code, which the Stop hook "
+                "names by this path; a Codex session was watched opening the project file",
             ),
             Target(
                 mechanism="instructions",
                 project="AGENTS.md",
                 user=".codex/AGENTS.md",
                 template="instructions.md",
-                proven=("user",),
-                note="the user scope file was watched being read, no project scope file has "
-                "been read back",
+                proven=("project", "user"),
+                note="both files were watched being read by a running Codex",
             ),
             Target(
                 mechanism="mcp",

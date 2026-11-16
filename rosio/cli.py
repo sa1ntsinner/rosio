@@ -676,12 +676,12 @@ def build_parser() -> argparse.ArgumentParser:
     hook = _sub(
         subparsers,
         "hook",
-        "manage git hooks and the Claude Code hooks",
+        "manage git hooks and the Claude Code and Codex hooks",
         "Install the git hooks that rebuild the atlas after a commit, a checkout and a "
         "merge, register the merge driver that resolves two rebuilds of atlas.json without "
         "conflict markers, and report what a rebuild costs. A failed rebuild prints one "
-        "line and exits zero. The coverage, brief and prompt actions run the Claude Code "
-        "hooks registered by rosio install claude-code.",
+        "line and exits zero. The coverage, brief and prompt actions run the assistant "
+        "hooks registered by rosio install claude-code and rosio install codex.",
         flags=(),
     )
     hook.set_defaults(hook_command=None)
@@ -690,7 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
         hooks,
         "coverage",
         "state the findings a session's edits added, or nudge toward unopened files",
-        "The Claude Code Stop hook registered by rosio install claude-code. Reads hook "
+        "The Stop hook registered by rosio install claude-code or codex. Reads hook "
         "JSON from stdin. A session that edited the workspace is extracted again into a "
         "temporary directory and stopped once with the findings the edits added; one that "
         "only read is nudged when source coverage is below 80 percent.",
@@ -700,7 +700,7 @@ def build_parser() -> argparse.ArgumentParser:
         hooks,
         "brief",
         "state the atlas at session start",
-        "The Claude Code SessionStart hook: profiles, finding counts, the worst findings "
+        "The SessionStart hook: profiles, finding counts, the worst findings "
         "and whether a source changed after the atlas. Silent on any failure.",
         flags=(),
     )
@@ -708,7 +708,7 @@ def build_parser() -> argparse.ArgumentParser:
         hooks,
         "prompt",
         "state what the atlas holds about names a prompt spells",
-        "The Claude Code UserPromptSubmit hook: up to three nodes, topics, parameters, "
+        "The UserPromptSubmit hook: up to three nodes, topics, parameters, "
         "frames, files or rules the prompt names, from a name index cached outside the "
         "workspace. Prints nothing when no name matches.",
         flags=(),

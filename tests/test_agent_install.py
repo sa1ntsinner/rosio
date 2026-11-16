@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,16 +30,21 @@ def statuses(report) -> dict[str, str]:
 
 
 @pytest.mark.parametrize("scope", plat.SCOPES)
-def test_coverage_hook_install_is_idempotent_and_keeps_user_stop_entries(tmp_path, scope):
+@pytest.mark.parametrize(
+    ("platform", "path"), [("claude-code", ".claude/settings.json"), ("codex", ".codex/hooks.json")]
+)
+def test_coverage_hook_install_is_idempotent_and_keeps_user_stop_entries(
+    tmp_path, scope, platform, path
+):
     root, home = tmp_path / "project", tmp_path / "home"
     base = root if scope == "project" else home
-    config = base / ".claude/settings.json"
+    config = base / path
     config.parent.mkdir(parents=True)
     own = {"matcher": "", "hooks": [{"type": "command", "command": "my-check"}]}
     original = {"hooks": {"Stop": [own], "PreToolUse": []}, "permissions": {"allow": []}}
     config.write_text(json.dumps(original), encoding="utf-8")
-    ins.install("claude-code", scope, root=root, home=home)
-    again = ins.install("claude-code", scope, root=root, home=home)
+    ins.install(platform, scope, root=root, home=home)
+    again = ins.install(platform, scope, root=root, home=home)
     assert statuses(again)[str(config)] == ins.UNCHANGED
     hooks = json.loads(config.read_text(encoding="utf-8"))["hooks"]
     assert hooks["Stop"] == [
@@ -47,8 +53,32 @@ def test_coverage_hook_install_is_idempotent_and_keeps_user_stop_entries(tmp_pat
     ]
     assert hooks["UserPromptSubmit"][0]["hooks"][0]["command"] == "rosio hook prompt"
     assert hooks["SessionStart"][0]["hooks"][0]["command"] == "rosio hook brief"
-    ins.uninstall("claude-code", scope, root=root, home=home)
+    ins.uninstall(platform, scope, root=root, home=home)
     assert json.loads(config.read_text(encoding="utf-8")) == original
+
+
+def test_a_codex_patch_counts_as_changed_and_names_the_portable_skill(
+    tmp_path, monkeypatch, capsys
+):
+    from rosio import cli
+
+    (tmp_path / "package.xml").write_text("<package/>", encoding="utf-8")
+    (tmp_path / "node.py").write_text("a = 1\n", encoding="utf-8")
+    git = ["git", "-C", str(tmp_path), "-c", "user.email=t@t", "-c", "user.name=t"]
+    for step in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "base"]):
+        subprocess.run([*git, *step], check=True)
+    (tmp_path / "node.py").write_text("a = 2\n", encoding="utf-8")
+    patch = "*** Begin Patch\n*** Update File: node.py\n-a = 1\n+a = 2\n*** End Patch"
+    call = {"type": "custom_tool_call", "name": "apply_patch", "input": patch}
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text(
+        json.dumps({"type": "response_item", "payload": call}) + "\n", encoding="utf-8"
+    )
+    data = {"cwd": str(tmp_path), "transcript_path": str(transcript), "turn_id": "t"}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(data)))
+    assert cli.main(["hook", "coverage"]) == 0
+    reason = json.loads(capsys.readouterr().out)["reason"]
+    assert "changed node.py" in reason and ".agents/skills/rosio/coding.md" in reason
 
 
 def test_a_session_that_changed_code_reviews_its_diff_once(tmp_path, monkeypatch, capsys):
@@ -229,8 +259,10 @@ def test_only_the_scopes_a_running_tool_confirmed_are_marked_proven():
     assert proven == {
         ("claude-code", "skill"): ("user",),
         ("claude-code", "instructions"): ("user",),
-        ("codex", "instructions"): ("user",),
+        ("codex", "hook"): ("project",),
+        ("codex", "instructions"): ("project", "user"),
         ("codex", "mcp"): ("user",),
+        ("codex", "reference"): ("project",),
     }
 
 
