@@ -751,6 +751,19 @@ def _bot_install(install: Path) -> Path:
     return share
 
 
+def test_a_mesh_under_a_directory_nobody_may_enter_is_missing(monkeypatch) -> None:
+    def refuse(self: Path) -> bool:
+        raise PermissionError(13, "Permission denied", self.name)
+
+    monkeypatch.setattr(Path, "is_file", refuse)
+    root = urdf_collect.ElementTree.fromstring(
+        '<robot name="r"><link name="a"><visual><geometry>'
+        '<mesh filename="file:///private/ws/base.dae"/></geometry></visual></link></robot>'
+    )
+    (mesh,) = urdf_collect._meshes(root, None)
+    assert mesh.exists is False
+
+
 def test_a_mesh_named_by_its_absolute_path_is_stated_without_it(tmp_path: Path) -> None:
     """`$(find bot)` expands to where this machine installed the package, and that path sat in
     the geometry, so two clones wrote two atlases and the robot view could not draw the mesh."""

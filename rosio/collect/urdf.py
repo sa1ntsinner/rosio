@@ -460,10 +460,10 @@ def _meshes(root: ElementTree.Element, resolve_package: PackageResolver | None) 
             base = resolve_package(package or "")
             if base:
                 path = str(Path(base) / match.group(2))
-                exists = Path(path).is_file()
+                exists = _is_file(path)
         elif _local(filename):
             path = _local(filename)
-            exists = Path(path).is_file()
+            exists = _is_file(path)
         out[filename] = Mesh(filename=filename, package=package, path=path, exists=exists)
     return [out[key] for key in sorted(out)]
 
@@ -865,7 +865,7 @@ def _include(
         resolved = str(Path(base) / tail) if base else None
     else:
         candidate = Path(parent).parent / tail
-        resolved = str(candidate) if candidate.is_file() else None
+        resolved = str(candidate) if _is_file(candidate) else None
     return XacroInclude(raw=raw, package=package, resolved=resolved)
 
 
@@ -1451,6 +1451,14 @@ def _with_mesh_files(
                 row = {**row, "material": {**row["material"], "texture": spelled}}
             out[kind].append(row)
     return out
+
+
+def _is_file(path: str | Path) -> bool:
+    """Whether a file is there, where a directory this process may not enter holds none."""
+    try:
+        return Path(path).is_file()
+    except OSError:
+        return False
 
 
 def _local(filename: str) -> str:
