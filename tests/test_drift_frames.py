@@ -1563,6 +1563,20 @@ def test_launch_raised_names_the_command_a_file_runs_and_why_a_file_exited():
     assert "exited in the import phase (tools not built)" in found.say
 
 
+def test_launch_raised_asks_for_an_empty_choice_and_for_code_a_release_rejects():
+    message = (
+        'DeclareLaunchArgument: Argument "model" provided value "" is not valid. '
+        "Valid options are: ['a', 'b']"
+    )
+    row = dict(_RAISED_ROW, phase="visit", message=message)
+    (found,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert "state model under args" in found.fix
+    message = "Node.__init__() missing 1 required keyword-only argument: 'executable'"
+    row = dict(_RAISED_ROW, phase="describe", exc_type="TypeError", message=message)
+    (found,) = build_rules.launch_raised(_refusal_atlas([row]).build())
+    assert found.fix.startswith("correct the code the message names")
+
+
 def test_launch_raised_names_a_missing_module_and_its_apt_package():
     """The row held `No module named 'controller_manager'` and the fix said to supply an
     argument."""

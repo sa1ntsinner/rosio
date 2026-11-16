@@ -263,6 +263,13 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
             )
         )
         say = _raised_say(first.label, first.exc_type, first.phase, first.message, first.kept)
+        if first.exc_type in _CODE_ERRORS and not sandboxed:
+            # A call the release rejects (`Node(node_executable=...)`, a substitution added to
+            # a string) needs no argument and no environment.
+            fix = (
+                "correct the code the message names, which ros2 launch runs the same way on "
+                "this release"
+            )
         if _REFUSED_COMMAND.search(first.message):
             fix = (
                 "nothing to change for the robot: rosio reads launch files without running the "
@@ -298,7 +305,7 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
                 f"atlas: {fix}."
             )
         elif argument and slugs:
-            name = argument.group(1)
+            name = argument.group(1) or argument.group(2)
             fix = (
                 f"state {name} under args of the entry point of profile {slugs} in rosio.yaml "
                 f"(args: {{{name}: <value>}}), or delete that profile when another launch file "
@@ -380,7 +387,10 @@ def launch_raised(atlas: Atlas) -> list[Finding]:
     return findings
 
 
-_REQUIRED_ARGUMENT = re.compile(r"required launch argument '([^']+)' was not provided")
+_REQUIRED_ARGUMENT = re.compile(
+    r"required launch argument '([^']+)' was not provided"
+    r"|Argument \"([^\"]+)\" provided value \"\" is not valid"
+)
 _UNKNOWN_TAG = re.compile(r"Unrecognized entity of the type: ([\w:.-]+)")
 _MISSING_CONFIGURATION = re.compile(r"launch configuration '([^']+)' does not exist")
 _MISSING_FILE = re.compile(r"No such file or directory: '([^'/]+)'")
@@ -522,6 +532,7 @@ def _raised_say(label: str, exc_type: str, phase: str, message: str, kept: str =
 
 
 _REFUSED_COMMAND = re.compile(r"refused to run the command (.+?) through ")
+_CODE_ERRORS = frozenset({"TypeError", "NameError", "SyntaxError", "IndentationError"})
 
 
 def _where(row: _Row) -> Source:
