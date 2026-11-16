@@ -263,11 +263,17 @@ fn stated_by(layers: &Value) -> String {
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
+        .map(|layer| match layer {
+            "declared" => "config",
+            "coded" => "code",
+            "observed" => "the live system",
+            "recorded" => "a bag",
+            other => other,
+        })
         .collect();
     match named.as_slice() {
         [] => "Known by name only.".into(),
-        [one] => format!("Stated by the {one} layer."),
-        many => format!("Stated by the {} layers.", many.join(", ")),
+        many => format!("Read from {}.", many.join(", ")),
     }
 }
 

@@ -48,7 +48,7 @@ Show the robot model draws a URDF where its joints put each link, with the visua
 shapes and the STL and OBJ meshes it names. Click a link for its joint as the file states it, the line to
 edit, and its pose relative to any other frame of the model.
 
-![TurtleBot3 Burger in the robot model view](https://raw.githubusercontent.com/sa1ntsinner/rosio/main/docs/media/vscode-robot.jpg)
+![The example rover in the robot model view](https://raw.githubusercontent.com/sa1ntsinner/rosio/main/docs/media/vscode-robot.jpg)
 
 ## Also
 
