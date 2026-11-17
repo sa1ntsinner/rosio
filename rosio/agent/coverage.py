@@ -15,7 +15,7 @@ from rosio import verify
 from rosio.agent import push
 from rosio.model import dumps_line
 
-SKIP = {".git", "rosio-out", "test", "tests", "build", "install"}
+SKIP = {".git", "rosio-out", "test", "tests", "build", "install", "log", "node_modules"}
 SRC = {".cpp", ".hpp", ".h", ".cc", ".py"}
 MARK = "rosio: this session opened"
 NUDGES = 3
