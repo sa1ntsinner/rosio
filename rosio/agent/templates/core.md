@@ -25,7 +25,8 @@ To fix a finding:
 3. Run `rosio extract` again. It lists the findings that went and the ones that arrived.
    The fix is done when its finding is gone and nothing new arrived.
 
-Over MCP the same steps are the `drift`, `explain` and `check` tools.
+Over MCP: `drift`, `explain`, `check`. After a code edit, run `rosio verify` (MCP `verify`)
+before saying it works.
 
 In the rosio skill folder (`.claude/skills/rosio/` or `.agents/skills/rosio/`): read
 `review.md` before hunting bugs or reviewing, `coding.md` before writing or debugging code.

@@ -2008,6 +2008,17 @@ def check(source: AtlasSource, *, limit: int | None = None) -> str:
     return _fit(lines, "call drift for the full list")
 
 
+def verify(source: AtlasSource, packages: str = "", since: str = "", test: bool = True) -> str:
+    """Build and test the packages a change touched in the served workspace, as `rosio verify
+    --json` states it. It reads no atlas."""
+    from rosio import verify as built
+    from rosio.model import dumps
+
+    names = _text(packages).replace(",", " ").split()
+    data = built.verify(source.workspace(), packages=names, since=_text(since), test=test)
+    return dumps(data)
+
+
 __all__ = [
     "DEFAULT_LIMIT",
     "MAX_BYTES",
@@ -2028,4 +2039,5 @@ __all__ = [
     "stamps",
     "transform",
     "unresolved",
+    "verify",
 ]

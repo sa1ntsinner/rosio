@@ -2195,7 +2195,7 @@ point and it is `rosio drift`, never `extract`.
   parameters are then the prefix scan `param:<owner body>|` over the sorted entity map.
 * **The verb set is committed here, and it is not closed.** `extract`, `probe`, `drift`,
   `explain`, `param`, `query`, `path`, `diff`, `unresolved`, `render`, `install`,
-  `uninstall`, `serve`, `hook`, `version`, `stamps`, `init`, `bundle`, `migrate`, `graph`. Twenty. It said closed and final at
+  `uninstall`, `serve`, `hook`, `version`, `stamps`, `init`, `bundle`, `migrate`, `graph`, `verify`. Twenty one. It said closed and final at
   fourteen for four milestones and the fifteenth shipped anyway, justified in a docstring of `cli.py`
   where no reader of this file would meet it, so the sentence was not a rule, it was a
   prediction that turned out false and hid a decision. The rule that replaces it is one this
@@ -2205,6 +2205,8 @@ point and it is `rosio drift`, never `extract`.
   `migrate` lists and rewrites what a move between two ROS 2 releases asks of the workspace's own
   packages, then verifies them with a build in the target container. It reads source files and
   three data tables, never an atlas, so it is a verb of its own.
+  `verify` builds and tests the packages holding the files git reports changed and says per
+  package what failed. It runs the build tool and reads no atlas, so it is a verb of its own.
   `graph` gives a terminal, a CI job or an agent without MCP the answer of the MCP `graph`
   tool, from the same selection, and draws it as a Graphviz or Mermaid diagram. It is not
   `query`, which matches words to entities, and not `render`, which writes files.
@@ -2270,6 +2272,7 @@ One owner per module per milestone. Do not edit a module you do not own in your 
 | `rosio/bundle.py` | M8 | portable archives of an atlas, reports and cited files |
 | `rosio/migrate/__init__.py` | M9 | `rosio migrate`: the source packages of a workspace, plan and apply |
 | `rosio/migrate/verify.py` | M9 | copied source builds in the target container, diagnostics and plan matching |
+| `rosio/verify.py` | M9 | `rosio verify`: colcon build and test of the packages a change touched, the failures in a few lines |
 | `rosio/migrate/distros.py` | M9 | what each release ships, read from the measured `data/distros.json` |
 | `rosio/migrate/rules.py` | M9 | the hand written rules of `data/rules.yaml`, checked at load |
 | `rosio/migrate/scan.py` | M9 | the matchers: manifests, CMake calls, includes, C++ identifiers, python imports, parameter yaml |
@@ -2337,7 +2340,7 @@ One owner per module per milestone. Do not edit a module you do not own in your 
 | `rosio/agent/push.py` | M6 | Claude Code SessionStart and UserPromptSubmit hooks and the Stop re extraction |
 | `rosio/agent/templates/` | M6 | the four files the installers copy into a user's repository |
 | `rosio/serve/__init__.py` | M6 | the serve package surface |
-| `rosio/serve/tools.py` | M6 | the thirteen tools as plain functions, eleven over a loaded atlas, `migrate` over the sources and `check`, which extracts the served workspace again, no mcp involved |
+| `rosio/serve/tools.py` | M6 | the fourteen tools as plain functions, eleven over a loaded atlas, `migrate` over the sources, `check`, which extracts the served workspace again, and `verify`, which builds and tests it, no mcp involved |
 | `rosio/serve/server.py` | M6 | the mcp server, both transports, the key check |
 | `rosio/serve/__main__.py` | M6 | `python -m rosio.serve`, the same options as `rosio serve` |
 | `rosio/history.py` | M7 | the git hooks, the rebuild they run and the two revision mode of `diff` |

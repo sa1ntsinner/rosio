@@ -139,7 +139,7 @@ class Options:
 
 
 def bindings(source: tools.AtlasSource) -> list[Any]:
-    """The thirteen functions the server exposes. The signature is the tool schema and the
+    """The fourteen functions the server exposes. The signature is the tool schema and the
     docstring is what a model reads before choosing, so both are part of the product."""
 
     def overview() -> str:
@@ -235,6 +235,13 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         minutes on a large one."""
         return tools.check(store)
 
+    def verify(packages: str = "", since: str = "", test: bool = True) -> str:
+        """After editing code, build the packages holding the changed files with colcon and
+        test them, and say per package what failed: compiler errors as path:line, failed
+        tests with their first message line. Call it before saying a change works. Takes
+        minutes."""
+        return tools.verify(store, packages=packages, since=since, test=test)
+
     store = source
     return [
         overview,
@@ -250,6 +257,7 @@ def bindings(source: tools.AtlasSource) -> list[Any]:
         transform,
         migrate,
         check,
+        verify,
     ]
 
 
@@ -279,6 +287,9 @@ ARGUMENTS = {
     "release installed under /opt/ros",
     "package": "one package of the workspace",
     "workspace": "the workspace directory, default the server's working directory",
+    "packages": "package names to build instead of the changed ones, space separated",
+    "since": "also the files changed since this git revision",
+    "test": "run the tests after the build",
 }
 """What each tool argument means, written into the tool schema. One argument name has one
 meaning across the tools, and it is the command line's word: `only` is `--only`, `source`
@@ -469,12 +480,12 @@ def build(source: tools.AtlasSource) -> Any:
 
 
 def _annotations(name: str) -> Any:
-    """Every tool reads, and `check` rewrites the atlas and nothing else. An assistant that runs
-    unattended asks before a tool without these hints, and with nobody to answer it refused
-    every call."""
+    """Every tool reads, `check` rewrites the atlas and nothing else, and `verify` writes the
+    build tree. An assistant that runs unattended asks before a tool without these hints, and
+    with nobody to answer it refused every call."""
     from mcp.types import ToolAnnotations
 
-    if name == "check":
+    if name in ("check", "verify"):
         return ToolAnnotations(
             readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
         )

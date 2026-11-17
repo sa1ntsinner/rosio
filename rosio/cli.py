@@ -23,7 +23,7 @@ import sys
 from collections.abc import Callable, Sequence
 
 from rosio import LAYER_WORDS, LAYERS, __version__
-from rosio.errors import EXIT_OK, EXIT_USAGE, RosioError, UsageError, exit_code_for
+from rosio.errors import EXIT_ERROR, EXIT_OK, EXIT_USAGE, RosioError, UsageError, exit_code_for
 from rosio.render import plural
 
 PROG = "rosio"
@@ -42,7 +42,7 @@ EPILOG = (
     "then rosio render.\n"
     "Add a recording with extract --bag DIR, and a running system with rosio probe.\n"
     "Every other verb reads atlas.json and never extracts again: pass --atlas FILE or --out DIR.\n"
-    "Exit codes: 0 answered, 1 stamps found an error, 2 not answered or bad usage,\n"
+    "Exit codes: 0 answered, 1 stamps or verify found an error, 2 not answered or bad usage,\n"
     "3 a collector reached nothing, 4 contract, 5 the drift gate tripped."
 )
 
@@ -76,11 +76,13 @@ VERBS = (
     "bundle",
     "migrate",
     "graph",
+    "verify",
 )
-"""The twenty verbs. `graph` gives a terminal, a CI job or an agent without MCP the answer of
-the MCP graph tool, and draws it as Graphviz or Mermaid. `migrate` moves a workspace between
-ROS 2 releases. `bundle` carries an
-atlas and the files its findings cite to someone on another machine. `init` writes the
+"""The twenty one verbs. `verify` builds and tests the packages a change touched and reads no
+atlas, so an agent that says an edit works can be held to what the build tool printed. `graph`
+gives a terminal, a CI job or an agent without MCP the answer of the MCP graph tool, and
+draws it as Graphviz or Mermaid. `migrate` moves a workspace between ROS 2 releases. `bundle`
+carries an atlas and the files its findings cite to someone on another machine. `init` writes the
 configuration extraction would fall back to as a `rosio.yaml` to edit. `hook` manages git
 hooks, the merge driver and the Claude Code hooks. `stamps`
 checks the header stamps of one recording and needs neither a workspace nor a ROS
@@ -877,6 +879,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory to unpack into, default beside the archive and named after it",
     )
     opened.add_argument("--force", action="store_true", help="overwrite existing files")
+
+    built = _sub(
+        subparsers,
+        "verify",
+        "build and test the packages a change touched",
+        "Build the packages holding the files git reports changed with colcon, test them, and "
+        "print per package what failed: compiler and CMake errors as path:line, failed tests "
+        "with their first message line. Needs a sourced ROS environment and colcon.",
+        flags=("json", "quiet"),
+    )
+    built.add_argument(
+        "workspace",
+        nargs="?",
+        default=".",
+        metavar="PATH",
+        help="workspace or a directory inside it, default is the current one",
+    )
+    built.add_argument(
+        "--packages", nargs="+", default=(), metavar="NAME", help="these packages instead"
+    )
+    built.add_argument(
+        "--since", default="", metavar="REV", help="also the files changed since this revision"
+    )
+    built.add_argument("--no-test", action="store_true", help="build only")
+    built.add_argument(
+        "--timeout",
+        type=int,
+        default=1800,
+        metavar="SECONDS",
+        help="limit for each colcon step, default 1800",
+    )
 
     move = _sub(
         subparsers,
@@ -2409,6 +2442,21 @@ def cmd_bundle(args: argparse.Namespace) -> int:
     raise UsageError("bundle takes an action: create or open")
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    from rosio import verify
+    from rosio.query import Answer
+
+    data = verify.verify(
+        args.workspace,
+        packages=args.packages,
+        since=args.since,
+        test=not args.no_test,
+        timeout=args.timeout,
+    )
+    _answer(args, Answer("verify", ok=data["ok"], data=data, lines=verify.lines(data)))
+    return EXIT_OK if data["ok"] else EXIT_ERROR
+
+
 def cmd_migrate(args: argparse.Namespace) -> int:
     """Plan, apply or verify a move over the workspace's source packages."""
     import os
@@ -2481,6 +2529,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "init": cmd_init,
     "bundle": cmd_bundle,
     "migrate": cmd_migrate,
+    "verify": cmd_verify,
 }
 
 IMPLEMENTED = frozenset(HANDLERS)

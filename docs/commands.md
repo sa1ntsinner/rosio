@@ -94,6 +94,7 @@ rosio bundle open [--into DIR] [--force] FILE
 rosio migrate plan [--config FILE] [--from RELEASE] --to RELEASE [PATH]
 rosio migrate apply [--config FILE] [--from RELEASE] --to RELEASE [--force] [PATH]
 rosio migrate verify [--config FILE] [--from RELEASE] --to RELEASE [--image NAME] [PATH]
+rosio verify [--packages NAME [NAME ...]] [--since REV] [--no-test] [--timeout SECONDS] [PATH]  # build and test the packages a change touched
 rosio version
 ```
 
@@ -101,6 +102,10 @@ The output flags `--out DIR`, `--json`, `--quiet`, `--deterministic` and `--no-d
 are left out of the lines above; `rosio <verb> --help` says which of them a verb takes.
 
 Use `rosio probe --stamps --duration 10` to check header stamps in the running system.
+
+`verify` builds the packages holding the files git reports changed with colcon, tests them, and
+prints per package what failed: compiler and CMake errors as `path:line`, failed tests with their
+first message line. It needs a sourced ROS environment and exits 1 when a build or a test failed.
 
 `probe` detects middleware implementations from node and launcher environments and runs one
 isolated child per implementation. Repeat `--rmw NAME` to force the passes, for example

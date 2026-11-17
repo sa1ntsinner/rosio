@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from rosio import verify
 from rosio.agent import push
 from rosio.model import dumps_line
 
@@ -148,6 +149,12 @@ def _run() -> None:
                 "write only what a command printed in this session, and not run for every step "
                 "you did not run: a false claim is worse than not run. Do not recite this list."
             )
+            built = verify.touched_packages(root, [root / path for path in changed])
+            if built:
+                parts.append(
+                    f"rosio: packages changed {', '.join(built)}. Run rosio verify to build and "
+                    "test them before saying the change works."
+                )
         if parts:
             print(dumps_line({"decision": "block", "reason": "\n\n".join(parts)}))
         return

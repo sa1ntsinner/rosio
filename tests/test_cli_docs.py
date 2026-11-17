@@ -20,8 +20,8 @@ from rosio.serve import tools
 ROOT = Path(__file__).resolve().parents[1]
 
 WORD_NUMBERS = {
-    "thirteen": 13,
-    "twenty": 20,
+    "fourteen": 14,
+    "twenty one": 21,
     "forty eight": 48,
     "forty nine": 49,
     "fifty nine": 59,
@@ -41,8 +41,9 @@ SERVED_TOOLS = (
     "transform",
     "migrate",
     "check",
+    "verify",
 )
-"""The thirteen the server exposes, in the order `serve/server.py` returns them."""
+"""The fourteen the server exposes, in the order `serve/server.py` returns them."""
 
 
 USER_DOCS = (
@@ -145,10 +146,10 @@ def test_the_readme_command_reference_is_the_parser(monkeypatch):
 def test_the_contract_verb_bullet_matches_the_cli():
     text = doc("AGENTS.md")
     bullet = text[text.index("**The verb set is committed here") :]
-    bullet = bullet[: bullet.index("Twenty.")]
+    bullet = bullet[: bullet.index("Twenty one.")]
     named = re.findall(r"`([a-z]+)`", bullet)
     assert set(named) == set(cli.VERBS)
-    assert WORD_NUMBERS["twenty"] == len(cli.VERBS)
+    assert WORD_NUMBERS["twenty one"] == len(cli.VERBS)
 
 
 def test_the_cli_quotes_a_sentence_the_contract_holds():
@@ -177,10 +178,10 @@ def test_the_published_rule_counts_match_the_registry():
 
 def test_the_published_tool_names_match_the_server():
     readme = doc("docs/assistants.md")
-    published = re.search(r"Thirteen tools: (.+?)\.\s", flat(readme)).group(1)
+    published = re.search(r"Fourteen tools: (.+?)\.\s", flat(readme)).group(1)
     named = re.findall(r"`([a-z_]+)`", published)
     assert named == list(SERVED_TOOLS)
-    assert WORD_NUMBERS["thirteen"] == len(SERVED_TOOLS)
+    assert WORD_NUMBERS["fourteen"] == len(SERVED_TOOLS)
     for name in SERVED_TOOLS:
         assert callable(getattr(tools, name))
 

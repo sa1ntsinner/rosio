@@ -53,6 +53,7 @@ others.
 | `rosio/migrate/cmake.py` | CMake command invocations with exact argument spans, and plain `set()` lists |
 | `rosio/migrate/report.py` | the plan as lines for a person and as data for an agent or an editor |
 | `rosio/migrate/verify.py` | build copied sources in a target release container, parse package diagnostics and match their locations to the plan |
+| `rosio/verify.py` | colcon build and test of the packages a change touched, the failures as path:line and test names |
 
 ### Static layers, milestone M1
 
@@ -160,7 +161,7 @@ install fails on a machine that never wanted the server.
 | `rosio/agent/coverage.py` | the Claude Code Stop hook: the findings an edit added, a diff review against coding.md, or a nudge toward unopened source files |
 | `rosio/agent/push.py` | the Claude Code SessionStart and UserPromptSubmit hooks, the name index they read, and the Stop re extraction |
 | `rosio/serve/__init__.py` | the serve package surface |
-| `rosio/serve/tools.py` | the thirteen tools as plain functions, eleven over a loaded atlas, `migrate` over the sources and `check`, which extracts the served workspace again, no mcp involved, every answer capped and every refusal capped with it |
+| `rosio/serve/tools.py` | the fourteen tools as plain functions, eleven over a loaded atlas, `migrate` over the sources, `check`, which extracts the served workspace again, and `verify`, which builds and tests it, no mcp involved, every answer capped and every refusal capped with it |
 | `rosio/serve/server.py` | the mcp server, both transports, the key check, and the one place each optional range is written |
 | `rosio/serve/__main__.py` | `python -m rosio.serve`, the same options as `rosio serve` |
 
@@ -207,7 +208,7 @@ rosbag2 dir  -> collect/{bag,stamps}                (recorded) ----+     (layer,
               drift/* rules      render/*         query.py        serve/tools.py    history.py,
                     |                |                |                |            mergetool.py
                     v                v                v                v                v
-            findings in         ATLAS_REPORT.md,  rosio get,   the thirteen tools rebuild on a
+            findings in         ATLAS_REPORT.md,  rosio get,   the fourteen tools rebuild on a
             atlas.json          DRIFT.md,         param, diff,   an assistant       hook, merge
                                 atlas.html        unresolved     calls              two atlases
 ```

@@ -26,22 +26,25 @@ rosio serve                                        # stdio
 ROSIO_API_KEY="$KEY" rosio serve --http --host 0.0.0.0 # one server for a team, key kept out of ps
 ```
 
-Thirteen tools: `overview`, `param_chain`, `drift`, `explain`, `query`, `path`, `neighbours`,
-`graph`, `unresolved`, `stamps`, `transform`, `migrate`, `check`. Every response is capped and says when it truncated and how to narrow the question.
+Fourteen tools: `overview`, `param_chain`, `drift`, `explain`, `query`, `path`, `neighbours`,
+`graph`, `unresolved`, `stamps`, `transform`, `migrate`, `check`, `verify`. Every response is capped and says when it truncated and how to narrow the question.
 `explain` also takes a file and line, `config/rover.yaml:9`, and answers what that line feeds:
 each parameter value it sets and whether it wins or which line outbids it, and the findings
 that cite it, so an agent knows before editing whether the edit reaches a node. `check` extracts
 the workspace again after an edit and lists the findings that went and the ones that arrived,
 which is how a fix is confirmed. `rosio extract` prints the same list when it replaces an atlas.
+`verify` builds and tests the packages holding the files git reports changed, as `rosio verify`
+does, and names each compiler error by file and line and each failed test with its first
+message line.
 Flags keep the command line's names (`only` as in `--only`, `source` and `target` as in
 `rosio path`). Positional words get names of their own: `query` takes `question`, `param_chain`
 takes `node` and `name`, and `migrate` takes `start` for `--from` and accepts `from` too. An
 argument a tool does not take is refused with the names it does.
 The server starts without an atlas, and each tool then names the extract command that builds one.
-Over `--http`, `migrate` reads and `check` extracts only the served workspace: the directory `--workspace` names, else
+Over `--http`, `migrate` reads, `check` extracts and `verify` builds only the served workspace: the directory `--workspace` names, else
 the one above the `rosio-out` that holds the atlas, else the directory of the atlas itself.
 A worst case answer is under 4 KB. On very small models prefer the command
-line, where the skill file is 3.3 KB and carries seven commands, the waiver file and a worked example.
+line, where the skill file is 3.4 KB and carries seven commands, the waiver file and a worked example.
 
 For Claude Code, Codex and the portable skills directory, install also writes `review.md` beside
 the skill: where ROS 2 code usually goes wrong (copy and paste, units and angles, frames, clocks,

@@ -44,6 +44,15 @@ Atlas schema `1.36`, additive: a reader of a `1.35` file loads it.
   when a session hands no transcript. Codex runs project hooks only in a trusted project once
   `/hooks` approves them.
 
+### Building
+
+* `rosio verify` builds the packages holding the files git reports changed with colcon, tests
+  them, and prints per package what failed: compiler and CMake errors as `path:line`, failed
+  tests with their first message line. `--since REV` adds the files changed since a revision,
+  `--packages` names them, `--no-test` only builds. The MCP server has it as the `verify` tool,
+  the Stop hook names the packages a session changed and the command, and the skill asks an
+  agent to run it before saying a change works.
+
 ### Code
 
 * Two rules read one source file alone, with no launch file or live system to compare.
