@@ -53,6 +53,7 @@ USER_DOCS = (
     "docs/bundle.md",
     "docs/examples.md",
     "docs/ci.md",
+    "docs/editors.md",
 )
 """The pages the README sends a reader to."""
 

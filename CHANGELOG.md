@@ -25,6 +25,12 @@ Atlas schema `1.36`, additive: a reader of a `1.35` file loads it.
 
 * The hover says what a name was read from (config, code, the live system, a bag).
 
+### Other editors
+
+* `rosio-lsp` setups for Neovim, Helix, Vim and Emacs under `editors/`, and a page,
+  [docs/editors.md](docs/editors.md), with those and Sublime Text and Kate: where to download
+  the server from a release, the configuration to paste, and what the rover example shows.
+
 ### Assistants
 
 * `rosio install claude-code` registers a SessionStart hook, `rosio hook brief`, which states

@@ -89,7 +89,9 @@ The VS Code extension in `editors/vscode` puts findings on the line they cite, h
 every layer that states a topic, parameter or frame, and code lenses name the other end of each
 publisher and subscription. A finding whose fix is one exact replacement carries Apply fix, and
 `Ctrl+Alt+.` applies all of them, saves and extracts again. The editor side is `rosio-lsp`, a
-Rust language server any LSP editor can use; `editors/zed` wires it into Zed. More screenshots are in
+Rust language server any LSP editor can use; `editors/zed` wires it into Zed, and
+[docs/editors.md](https://github.com/sa1ntsinner/rosio/blob/main/docs/editors.md) has the setup
+for Neovim, Helix, Vim, Emacs, Sublime Text and Kate. More screenshots are in
 [docs/examples.md](https://github.com/sa1ntsinner/rosio/blob/main/docs/examples.md).
 
 ## With your assistant

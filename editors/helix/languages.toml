@@ -1,0 +1,32 @@
+# rosio-lsp for Helix. Append to ~/.config/helix/languages.toml, or to .helix/languages.toml
+# in the workspace. Helix replaces a language's server list rather than adding to it, so each
+# list below repeats the servers Helix 25.07 starts by default and puts rosio beside them.
+# Drop the ones you do not use.
+
+[language-server.rosio]
+command = "rosio-lsp"
+config = { atlasPath = "rosio-out/atlas.json", extractCommand = ["rosio", "extract", "."], extractOnSave = true }
+
+[[language]]
+name = "cpp"
+language-servers = ["clangd", "rosio"]
+
+[[language]]
+name = "c"
+language-servers = ["clangd", "rosio"]
+
+[[language]]
+name = "python"
+language-servers = ["ty", "ruff", "jedi", "pylsp", "rosio"]
+
+[[language]]
+name = "yaml"
+language-servers = ["yaml-language-server", "ansible-language-server", "rosio"]
+
+[[language]]
+name = "xml"
+language-servers = ["rosio"]
+
+[[language]]
+name = "cmake"
+language-servers = ["neocmakelsp", "cmake-language-server", "rosio"]
