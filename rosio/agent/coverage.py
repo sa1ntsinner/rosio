@@ -92,6 +92,7 @@ def edited(transcript: str | None, root: Path) -> list[str]:
             if (
                 parts
                 and parts[0] not in OWN
+                and not verify.SKIP.intersection(parts)
                 and Path(rel).suffix != ".md"
                 and Path(rel).name not in ("CLAUDE.md", ".mcp.json", "rosio.yaml")
                 and (seen is None or Path(rel).name in seen)
@@ -135,26 +136,22 @@ def _run() -> None:
             print(f"rosio stop check skipped: {' '.join(str(exc).splitlines())}", file=sys.stderr)
         parts = [measured] if measured else []
         if REVIEW not in text:
-            parts.append(
-                f"{REVIEW} {', '.join(changed[:10])}. Before you finish, read "
-                f"{skill}/coding.md and check the diff against it: every path that "
-                "hits this same defect is fixed, and another defect you found is named in the "
-                "report rather than fixed here; a small deterministic test, no sleeps or timing, "
-                "that runs the fixed line and fails without the change, every name it calls "
-                "checked with rg and its build lines copied from a neighbouring test (no test "
-                "only when it would need a public header or signature changed, or the bug is a "
-                "race it cannot reach); comments of one line that say why and none that restate "
-                "the code; nothing unrelated touched; and the package built and the test run "
-                "when a toolchain is here. Fix what falls short, then finish. In the report "
-                "write only what a command printed in this session, and not run for every step "
-                "you did not run: a false claim is worse than not run. Do not recite this list."
-            )
             built = verify.touched_packages(root, [root / path for path in changed])
-            if built:
-                parts.append(
-                    f"rosio: packages changed {', '.join(built)}. Run rosio verify to build and "
-                    "test them before saying the change works."
-                )
+            verified = any("verify" in f"{name} {args}" for name, args in calls(transcript))
+            check = (
+                f" and rosio verify builds and tests {', '.join(built)} (run it once, and a "
+                "test that fails the same way without your change is not yours to fix)"
+                if built and not verified
+                else ""
+            )
+            parts.append(
+                f"{REVIEW} {', '.join(changed[:10])}. Before you finish, two checks: rg shows "
+                f"no other path that hits this same defect{check}. Fix what falls short, "
+                "touch nothing unrelated, then finish. In the report write only what a command "
+                "printed in this session, and not run for a step you did not run. "
+                f"{skill}/coding.md holds the long checklist, for a change larger than one "
+                "function. Do not recite this."
+            )
         if parts:
             print(dumps_line({"decision": "block", "reason": "\n\n".join(parts)}))
         return
