@@ -88,7 +88,28 @@ def touched_packages(root: Path, files: Sequence[Path]) -> dict[str, str]:
     return dict(sorted(item for item in found if item))
 
 
+def _sourced() -> None:
+    """Take the environment of the one installed release when the caller sourced none, which
+    is how an assistant starts an MCP server."""
+    setups = sorted(Path("/opt/ros").glob("*/setup.bash"))
+    if len(setups) != 1:
+        return
+    try:
+        done = subprocess.run(
+            ["bash", "-c", 'source "$1" && env -0', "bash", str(setups[0])],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    if not done.returncode:
+        os.environ.update(row.split("=", 1) for row in done.stdout.split("\0") if "=" in row)
+
+
 def _ready() -> str:
+    if not os.environ.get("AMENT_PREFIX_PATH") and not os.environ.get("ROS_DISTRO"):
+        _sourced()
     colcon = shutil.which("colcon")
     if not os.environ.get("AMENT_PREFIX_PATH") and not os.environ.get("ROS_DISTRO"):
         raise UsageError("no ROS environment: source /opt/ros/<distro>/setup.bash first")
@@ -190,6 +211,11 @@ def verify(
             base = ["--test-result-base", f"build/{name}", "--verbose"]
             _, said = _run([colcon, "test-result", *base], root, timeout)
             tests = results[name]["tests"] = parse_tests(said)
+            # ponytail: the first pytest error of the whole run, per package output if it matters
+            why = re.search(r"^E +(\S.*)$", ran, re.M)
+            for failure in tests["failures"]:
+                if why and failure["line"] == "collection failure":
+                    failure["line"] = f"collection failure: {why.group(1)}"
             # a test step that died before writing results, but not one that found no tests
             died = steps.get(name, {}).get("build") == "build failed"
             if died and not tests["failed"] and "NO TESTS RAN" not in ran:
